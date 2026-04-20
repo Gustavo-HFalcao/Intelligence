@@ -14,7 +14,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from backend.integrations.supabase import sb_delete, sb_insert, sb_select, sb_update
 from backend.middleware.auth import (
@@ -37,7 +37,7 @@ class LoginRequest(BaseModel):
 
 
 class ResetRequestBody(BaseModel):
-    email: EmailStr
+    email: str
 
 
 class ResetPasswordBody(BaseModel):
