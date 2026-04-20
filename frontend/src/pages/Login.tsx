@@ -137,14 +137,9 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                <div className="flex justify-between items-center px-1">
-                  <label className="text-[9px] font-bold text-white/40 uppercase tracking-[0.18em]">
-                    Senha
-                  </label>
-                  <button type="button" className="text-[10px] text-emerald-500 opacity-70 hover:opacity-100 underline">
-                    Esqueci minha senha?
-                  </button>
-                </div>
+                <label className="text-[9px] font-bold text-white/40 uppercase tracking-[0.18em] ml-1">
+                  Senha
+                </label>
                 <Input
                   type="password"
                   required
@@ -154,6 +149,11 @@ export default function Login() {
                   placeholder="••••••••"
                   className="bg-[#06100e] border-white/5 h-12 font-mono text-sm focus:border-b-2 focus:border-copper transition-all"
                 />
+                <div className="flex justify-end px-1 pt-0.5">
+                  <button type="button" tabIndex={-1} className="text-[10px] text-emerald-500 opacity-70 hover:opacity-100 underline">
+                    Esqueci minha senha?
+                  </button>
+                </div>
               </div>
 
               {error && (
