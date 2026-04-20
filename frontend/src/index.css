@@ -1,0 +1,203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 150 20% 3%;
+    --foreground: 180 5% 90%;
+
+    --card: 150 20% 5%;
+    --card-foreground: 180 5% 90%;
+
+    --popover: 150 20% 4%;
+    --popover-foreground: 180 5% 90%;
+
+    --primary: 37 65% 48%;
+    --primary-foreground: 150 20% 5%;
+
+    --secondary: 173 58% 39%;
+    --secondary-foreground: 180 5% 95%;
+
+    --muted: 180 5% 20%;
+    --muted-foreground: 180 5% 60%;
+
+    --accent: 37 65% 48%;
+    --accent-foreground: 180 5% 95%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 180 5% 95%;
+
+    --border: 180 5% 15%;
+    --input: 180 5% 12%;
+    --ring: 37 65% 48%;
+
+    --radius: 3px;
+
+    /* Legacy aliases for easier porting */
+    --void: #030504;
+    --depth: #081210;
+    --surface: #0e1a17;
+    --elevated: #142420;
+    --copper: #C98B2A;
+    --copper-glow: rgba(201, 139, 42, 0.15);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+/* ── Light Mode ──────────────────────────────────────────────────────────── */
+:root.light-mode {
+  /* Warm off-white — not pure white */
+  --background: 40 12% 93%;
+  --foreground: 220 20% 15%;
+
+  --card: 40 10% 96%;
+  --card-foreground: 220 20% 15%;
+
+  --popover: 40 10% 96%;
+  --popover-foreground: 220 20% 15%;
+
+  --primary: 37 60% 42%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 173 50% 30%;
+  --secondary-foreground: 0 0% 100%;
+
+  --muted: 220 8% 86%;
+  --muted-foreground: 220 10% 48%;
+
+  --accent: 37 60% 42%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 0 76% 48%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 220 8% 78%;
+  --input: 40 10% 91%;
+  --ring: 37 60% 42%;
+
+  /* Legacy tokens — warm tones */
+  --void: #edeae4;
+  --depth: #f4f1eb;
+  --surface: #e8e4dd;
+  --elevated: #dedad2;
+  --copper: #a86e18;
+  --copper-glow: rgba(168, 110, 24, 0.12);
+  --border-subtle: rgba(0, 0, 0, 0.07);
+}
+
+:root.light-mode body {
+  color-scheme: light;
+}
+
+:root.light-mode ::-webkit-scrollbar-track { background: #e8e4dd; }
+:root.light-mode ::-webkit-scrollbar-thumb { background: rgba(168,110,24,0.25); }
+:root.light-mode ::-webkit-scrollbar-thumb:hover { background: #a86e18; }
+
+/* Light mode — sidebar & topbar surfaces */
+:root.light-mode .bg-\[\#081210\],
+:root.light-mode .bg-\[\#070d0b\],
+:root.light-mode .bg-\[\#0a0f0e\] {
+  background-color: #f4f1eb !important;
+}
+
+/* Light mode — text overrides */
+:root.light-mode .text-white { color: #1c1917 !important; }
+:root.light-mode .text-white\/60 { color: rgba(28,25,23,0.6) !important; }
+:root.light-mode .text-white\/40 { color: rgba(28,25,23,0.45) !important; }
+:root.light-mode .text-white\/20 { color: rgba(28,25,23,0.28) !important; }
+:root.light-mode .text-text-muted { color: #78716c !important; }
+
+/* Light mode — glass card surfaces */
+:root.light-mode [style*="rgba(255,255,255,0.04)"] {
+  background: rgba(0,0,0,0.025) !important;
+}
+
+/* Light mode — borders */
+:root.light-mode [style*="rgba(201,139,42,0.15)"] {
+  border-color: rgba(168,110,24,0.22) !important;
+}
+
+/* Light mode — glass card hover */
+:root.light-mode .glass-card {
+  background: rgba(244,241,235,0.9);
+  border-color: rgba(168,110,24,0.18);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+
+/* ── Deep Tectonic Typography ────────────────────────────────────────────── */
+.font-display { font-family: 'Rajdhani', sans-serif; }
+.font-mono    { font-family: 'JetBrains Mono', monospace; }
+
+/* ── Global Styles ───────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(201, 139, 42, 0.35);
+  color: #fff;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--void); }
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 139, 42, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: #C98B2A; }
+
+/* ── Glass Card ───────────────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(14, 26, 23, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+  transition: all 0.5s ease;
+}
+.glass-card:hover { border-color: rgba(201, 139, 42, 0.5); }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes sync-scan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-5px); opacity: 1; }
+}
+
+.sync-scan-line {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #C98B2A, transparent);
+  box-shadow: 0 0 15px #C98B2A;
+  z-index: 10000;
+  pointer-events: none;
+  animation: sync-scan 4s linear infinite;
+}
+
+.loader-progress-fill {
+  height: 100%;
+  background: #C98B2A;
+  box-shadow: 0 0 10px #C98B2A;
+  animation: progress-width 10s ease-in-out forwards;
+}
+
+@keyframes progress-width {
+  0% { width: 0%; }
+  20% { width: 15%; }
+  45% { width: 50%; }
+  75% { width: 85%; }
+  100% { width: 100%; }
+}

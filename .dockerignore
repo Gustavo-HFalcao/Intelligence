@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Reflex legacy (não entra no build)
+bomtempo/
+rxconfig.py
+assets/
+public/
+
+# Dev artifacts
+.git/
+*.log
+uvicorn.log
+scratch/
+docs/
+migrations/
+uploaded_files/
+tools/
+skills-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — .env vai via env_file no compose, não precisa ser copiado no contexto
+# (mas incluído no Dockerfile.backend pois é pequeno e prático; remova se preferir secrets)
