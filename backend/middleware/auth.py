@@ -12,6 +12,7 @@ Fornece:
 
 import hashlib
 import hmac
+import json
 import os
 from typing import Optional
 
@@ -19,12 +20,18 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from backend.integrations.supabase import sb_select
 
-# ── Variáveis de sessão ────────────────────────────────────────────────────────
-# Sessão simples via cookie httpOnly — armazenada em dicionário em memória.
-# Em produção com múltiplos workers, substituir por Redis (já configurado no Celery).
-_sessions: dict[str, dict] = {}
-
 SESSION_COOKIE = "bomtempo_session"
+_SESSION_TTL   = 60 * 60 * 24 * 7  # 7 dias
+
+# ── Sessão via Redis (funciona com múltiplos workers) ─────────────────────────
+def _get_redis():
+    import redis as redis_lib
+    from backend.core.config import Config
+    return redis_lib.from_url(Config.REDIS_URL, decode_responses=True)
+
+
+def _session_key(sid: str) -> str:
+    return f"session:{sid}"
 
 # ── Password hashing (PBKDF2-HMAC-SHA256) ─────────────────────────────────────
 # Portado integralmente de bomtempo/core/auth_utils.py — sem alteração de lógica.
@@ -143,18 +150,38 @@ def login_user(username: str, password: str) -> Optional[dict]:
 
 
 def create_session(user_data: dict) -> str:
-    """Cria sessão em memória, retorna session_id."""
+    """Cria sessão no Redis, retorna session_id."""
     session_id = os.urandom(32).hex()
-    _sessions[session_id] = user_data
+    try:
+        r = _get_redis()
+        r.setex(_session_key(session_id), _SESSION_TTL, json.dumps(user_data))
+    except Exception:
+        # fallback em memória se Redis indisponível
+        _fallback[session_id] = user_data
     return session_id
 
 
 def get_session(session_id: str) -> Optional[dict]:
-    return _sessions.get(session_id)
+    try:
+        r = _get_redis()
+        raw = r.get(_session_key(session_id))
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        return _fallback.get(session_id)
+    return _fallback.get(session_id)
 
 
 def destroy_session(session_id: str) -> None:
-    _sessions.pop(session_id, None)
+    try:
+        r = _get_redis()
+        r.delete(_session_key(session_id))
+    except Exception:
+        pass
+    _fallback.pop(session_id, None)
+
+
+_fallback: dict[str, dict] = {}
 
 
 # ── FastAPI Dependencies ───────────────────────────────────────────────────────
