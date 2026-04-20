@@ -28,9 +28,10 @@ services:
       - pdf_tmp:/root/.bomtempo_pdfs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/api/health"]
-      interval: 20s
+      interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # ── Celery Worker ──────────────────────────────────────────────────────────
   celery:
