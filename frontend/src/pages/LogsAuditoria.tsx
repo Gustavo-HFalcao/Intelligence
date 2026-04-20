@@ -183,7 +183,7 @@ export default function LogsAuditoria() {
                 <td className="px-4 py-3">
                   {l.success !== false
                     ? <CheckCircle size={13} style={{ color: TEAL }} />
-                    : <XCircle size={13} style={{ color: RED }} title={l.error_msg} />}
+                    : <XCircle size={13} style={{ color: RED }} aria-label={l.error_msg} />}
                 </td>
                 <td className="px-4 py-3">
                   <ChevronRight size={13} className="text-white/20 group-hover:text-copper transition-colors" />

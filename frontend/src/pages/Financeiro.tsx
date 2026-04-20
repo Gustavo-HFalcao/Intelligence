@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Edit2, X, Check, DollarSign, TrendingUp, 
   ArrowDownLeft, ArrowUpRight, PieChart, Wallet, 
   ShieldCheck, Calculator, AlertTriangle, FileText,
-  ChevronDown
+  ChevronDown, Activity
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

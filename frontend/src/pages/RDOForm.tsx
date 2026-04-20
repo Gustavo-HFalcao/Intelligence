@@ -794,8 +794,8 @@ export default function RDOForm() {
                           style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'none', border: 'none', color: 'inherit' }}
                         >
                           <div className="flex items-center gap-2 min-w-0">
-                            {isLate && <span style={{ color: RED, fontSize: 10, fontWeight: 700, shrink: 0 }}>ATRASADA</span>}
-                            {isToday && <span style={{ color: TEAL, fontSize: 10, fontWeight: 700, shrink: 0 }}>HOJE</span>}
+                            {isLate && <span style={{ color: RED, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>ATRASADA</span>}
+                            {isToday && <span style={{ color: TEAL, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>HOJE</span>}
                             <div className="min-w-0">
                               <div className="text-xs font-semibold text-text-primary truncate">{a.atividade}</div>
                               <div className="text-[10px] text-text-muted">{a.fase} · {a.responsavel || '—'} · {a.unidade || ''}</div>
@@ -944,7 +944,7 @@ export default function RDOForm() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <div className="text-sm text-text-primary font-semibold truncate">{a.descricao}</div>
-                {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, shrink: 0 }}>MARCO</span>}
+                {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>MARCO</span>}
               </div>
               <div className="text-[10px] text-text-muted">{a.status}{a.qtd_executada ? ` · ${a.qtd_executada} ${a.unidade || ''}` : ''}</div>
             </div>
