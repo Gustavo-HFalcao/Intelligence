@@ -317,6 +317,7 @@ async def upload_evidencia(
     rdo_id: str,
     file: UploadFile = File(...),
     legenda: str = Form(""),
+    tipo: str = Form("evidencia"),
     exif_lat: float = Form(0.0),
     exif_lng: float = Form(0.0),
     checkin_lat: float = Form(0.0),
@@ -361,7 +362,9 @@ async def upload_evidencia(
     path = f"{rdo_id}/{rdo_id}_{len(img_bytes)}.{ext}"
     url = sb_storage_upload("rdo-evidencias", path, watermarked, content_type) or ""
 
-    # Schema real: exif_lat, exif_lng, exif_endereco, content_type
+    valid_tipos = {"epi", "evidencia", "ferramentas"}
+    tipo_safe = tipo if tipo in valid_tipos else "evidencia"
+
     row = sb_insert("rdo_evidencias", {
         "rdo_id":        rdo_id,
         "foto_url":      url,
@@ -370,7 +373,7 @@ async def upload_evidencia(
         "exif_lng":      lng,
         "exif_endereco": address,
         "content_type":  content_type,
-        "tipo":          "evidencia",
+        "tipo":          tipo_safe,
     })
     return {"ok": True, "row": _fmt_evidencia(row) if isinstance(row, dict) else row, "url": url}
 

@@ -23,7 +23,25 @@ const BORDER = '1px solid rgba(201,139,42,0.15)'
 
 const CLIMA_OPTIONS  = ['Ensolarado','Nublado','Chuvoso','Parcialmente nublado','Tempestade','Ventoso']
 const TURNO_OPTIONS  = ['Diurno','Noturno','Integral']
-const STATUS_AT_OPT  = ['Concluída','Em andamento','Não iniciada','Impedida']
+
+const FOTO_CATS = [
+  { key: 'epi',         label: 'EPI / Equipe',              color: '#2A9D8F' },
+  { key: 'evidencia',   label: 'Evidência de Obra',          color: '#C98B2A' },
+  { key: 'ferramentas', label: 'Ferramentas / Organização',  color: '#3B82F6' },
+] as const
+type FotoCat = typeof FOTO_CATS[number]['key']
+
+function statusFromPct(pct: number): string {
+  if (pct === 0) return 'Não iniciada'
+  if (pct >= 100) return 'Concluída'
+  return 'Em andamento'
+}
+
+function statusColor(status: string): string {
+  if (status === 'Concluída') return GREEN
+  if (status === 'Em andamento') return COPPER
+  return 'rgba(255,255,255,0.3)'
+}
 
 // ── Sort atividades by fase hierarchy (1 > 1.1 > 1.2 > 2 ...) ────────────────
 function faseSortKey(fase: string): number[] {
@@ -105,7 +123,6 @@ export default function RDOForm() {
   const [checkinLoading, setCheckinLoading]   = useState(false)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [evidencias, setEvidencias]     = useState<any[]>([])
-  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [showAtividades, setShowAtividades] = useState(true)
   const [previstasHoje, setPrevistasHoje]   = useState<any[]>([])
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -147,14 +164,16 @@ export default function RDOForm() {
   })
 
   const [atividadesRDO, setAtividadesRDO] = useState<any[]>([])
+  const [selectedCronAt, setSelectedCronAt] = useState<any>(null)
+  const [uploadingCat, setUploadingCat] = useState<FotoCat | null>(null)
 
   const [newAt, setNewAt] = useState({
     atividade_id: '',
     descricao: '',
     pct: 0,
-    status: 'Em andamento',
     qtd_executada: '',
     unidade: '',
+    efetivo: '',
     is_marco: false,
     marco_concluido: false,
   })
@@ -349,13 +368,15 @@ export default function RDOForm() {
 
   async function addAtividade() {
     if (!newAt.descricao.trim()) return
+    const pct = newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : Number(newAt.pct)
     const payload = {
       descricao:      newAt.descricao,
-      pct:            newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : Number(newAt.pct),
-      status:         newAt.status,
+      pct,
+      status:         statusFromPct(pct),
       ordem:          atividadesRDO.length,
       qtd_executada:  newAt.qtd_executada || null,
       unidade:        newAt.unidade || null,
+      efetivo:        Number(newAt.efetivo) || 0,
       is_marco:       newAt.is_marco,
     }
 
@@ -377,7 +398,8 @@ export default function RDOForm() {
 
     const r = await api.post(`/rdo/${currentDraftId}/atividades`, payload)
     setAtividadesRDO(a => [...a, r.data.row || { ...payload, id: Date.now().toString() }])
-    setNewAt({ atividade_id: '', descricao: '', pct: 0, status: 'Em andamento', qtd_executada: '', unidade: '', is_marco: false, marco_concluido: false })
+    setSelectedCronAt(null)
+    setNewAt({ atividade_id: '', descricao: '', pct: 0, qtd_executada: '', unidade: '', efetivo: '', is_marco: false, marco_concluido: false })
   }
 
   async function removeAtividade(id: string) {
@@ -387,13 +409,14 @@ export default function RDOForm() {
 
   function preencherDoCronograma(at: any) {
     const isMarco = !!at.is_marco
+    setSelectedCronAt(at)
     setNewAt({
       atividade_id: at.id,
       descricao: at.atividade,
       pct: Number(at.conclusao_pct || 0),
-      status: 'Em andamento',
       qtd_executada: at.exec_qty || '',
       unidade: at.unidade || '',
+      efetivo: '',
       is_marco: isMarco,
       marco_concluido: false,
     })
@@ -401,13 +424,14 @@ export default function RDOForm() {
 
   // ── Upload foto ───────────────────────────────────────────────────────────
 
-  async function handlePhotoUpload(file: File) {
+  async function handlePhotoUpload(file: File, categoria: FotoCat) {
     if (!draftId) { await saveDraft(); return }
-    setUploadingPhoto(true)
+    setUploadingCat(categoria)
     try {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('legenda', '')
+      fd.append('tipo', categoria)
       fd.append('checkin_lat', String(form.checkin_lat || 0))
       fd.append('checkin_lng', String(form.checkin_lng || 0))
       fd.append('contrato', form.contrato)
@@ -419,7 +443,7 @@ export default function RDOForm() {
       const data = await r.json()
       if (data.row) setEvidencias(ev => [...ev, data.row])
     } finally {
-      setUploadingPhoto(false)
+      setUploadingCat(null)
     }
   }
 
@@ -900,6 +924,64 @@ export default function RDOForm() {
           </motion.div>
         )}
 
+        {/* Painel informativo da atividade selecionada do cronograma */}
+        {selectedCronAt && (() => {
+          const totalQty   = Number(selectedCronAt.total_qty || 0)
+          const execQty    = Number(selectedCronAt.exec_qty  || 0)
+          const today      = new Date().toISOString().slice(0, 10)
+          const inicio     = selectedCronAt.inicio_previsto?.slice(0, 10)
+          const termino    = selectedCronAt.termino_previsto?.slice(0, 10)
+          const isLate     = termino && termino < today
+          const pctAcum    = Number(selectedCronAt.conclusao_pct || 0)
+
+          // Calculate day position and expected daily rate
+          let diaInfo = ''
+          let esperadoHoje = 0
+          if (inicio && termino && totalQty > 0) {
+            const msDay    = 86_400_000
+            const totalDays = Math.max(1, Math.round((new Date(termino).getTime() - new Date(inicio).getTime()) / msDay) + 1)
+            const daysDone  = Math.max(0, Math.round((new Date(today).getTime() - new Date(inicio).getTime()) / msDay) + 1)
+            esperadoHoje    = Math.round(totalQty / totalDays)
+            diaInfo         = `Dia ${Math.min(daysDone, totalDays)} de ${totalDays}`
+          }
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{ background: isLate ? `${RED}08` : `${TEAL}08`, border: `1px solid ${isLate ? RED : TEAL}25`, borderRadius: 10 }}
+              className="p-3 mb-3 text-xs"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-black uppercase tracking-widest text-[10px]" style={{ color: isLate ? RED : TEAL }}>
+                  {isLate ? '⚠ Atividade Atrasada' : '📋 Info do Cronograma'}
+                </span>
+                <button onClick={() => { setSelectedCronAt(null); setNewAt(a => ({ ...a, atividade_id: '' })) }}
+                  style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}>✕</button>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                {totalQty > 0 && <>
+                  <span className="text-white/40">Progresso acumulado</span>
+                  <span style={{ color: COPPER }} className="font-bold">{execQty} / {totalQty} {selectedCronAt.unidade || ''} ({pctAcum}%)</span>
+                  <span className="text-white/40">Esperado hoje</span>
+                  <span className="text-white/70 font-bold">{esperadoHoje} {selectedCronAt.unidade || ''} {diaInfo && `· ${diaInfo}`}</span>
+                </>}
+                {!totalQty && <>
+                  <span className="text-white/40">Conclusão acumulada</span>
+                  <span style={{ color: COPPER }} className="font-bold">{pctAcum}%</span>
+                </>}
+                {termino && <>
+                  <span className="text-white/40">Prazo</span>
+                  <span className={isLate ? 'text-red-400 font-bold' : 'text-white/70'}>
+                    {new Date(termino + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    {isLate && ` (atrasou ${Math.round((new Date(today).getTime() - new Date(termino).getTime()) / 86_400_000)}d)`}
+                  </span>
+                </>}
+              </div>
+            </motion.div>
+          )
+        })()}
+
         {/* Form adicionar atividade */}
         <div style={{ background: 'rgba(13,17,23,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }} className="p-3 mb-3">
           <div className="grid grid-cols-2 gap-2 mb-2">
@@ -925,33 +1007,30 @@ export default function RDOForm() {
                 <label htmlFor="marco-concluido" className="text-sm cursor-pointer" style={{ color: COPPER }}>
                   Marco concluído neste RDO
                 </label>
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(226,200,122,0.4)', border: `1px solid ${COPPER}30`, borderRadius: 4, padding: '2px 6px' }}>
-                  MARCO
-                </span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(226,200,122,0.4)', border: `1px solid ${COPPER}30`, borderRadius: 4, padding: '2px 6px' }}>MARCO</span>
               </div>
             ) : (
-              <>
-                <select
-                  value={newAt.status}
-                  onChange={e => setNewAt(a => ({ ...a, status: e.target.value }))}
-                  style={inputStyle}
-                >
-                  {STATUS_AT_OPT.map(s => <option key={s}>{s}</option>)}
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  placeholder="% Concluída hoje"
-                  value={newAt.pct}
-                  onChange={e => setNewAt(a => ({ ...a, pct: Number(e.target.value) }))}
-                  style={inputStyle}
-                />
-              </>
+              <div className="col-span-2">
+                {/* % slider + status automático */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range" min={0} max={100} step={5}
+                    value={newAt.pct}
+                    onChange={e => setNewAt(a => ({ ...a, pct: Number(e.target.value) }))}
+                    style={{ flex: 1, accentColor: COPPER }}
+                  />
+                  <div style={{ minWidth: 90, textAlign: 'right' }}>
+                    <span style={{ color: statusColor(statusFromPct(newAt.pct)), fontWeight: 700, fontSize: 12 }}>
+                      {newAt.pct}% · {statusFromPct(newAt.pct)}
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
 
             <input
-              placeholder="Qtd. executada"
+              type="number" min={0}
+              placeholder="Qtd. executada hoje"
               value={newAt.qtd_executada}
               onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
               style={inputStyle}
@@ -962,11 +1041,20 @@ export default function RDOForm() {
               onChange={e => setNewAt(a => ({ ...a, unidade: e.target.value }))}
               style={inputStyle}
             />
+            <div className="col-span-2">
+              <input
+                type="number" min={0}
+                placeholder="Pessoas alocadas nesta atividade"
+                value={newAt.efetivo}
+                onChange={e => setNewAt(a => ({ ...a, efetivo: e.target.value }))}
+                style={inputStyle}
+              />
+            </div>
           </div>
 
           {newAt.atividade_id && (
             <div className="text-[10px] mb-2 flex items-center gap-2" style={{ color: COPPER }}>
-              ✓ Vinculada ao cronograma: ID {newAt.atividade_id.slice(0, 8)}...
+              ✓ Vinculada ao cronograma: {newAt.descricao.slice(0, 30)}
               {newAt.is_marco && <span style={{ background: `${COPPER}20`, border: `1px solid ${COPPER}40`, borderRadius: 3, padding: '1px 5px', fontSize: 9, fontWeight: 700 }}>MARCO</span>}
             </div>
           )}
@@ -982,60 +1070,87 @@ export default function RDOForm() {
 
         {/* Lista de atividades adicionadas */}
         {atividadesRDO.length === 0 && (
-          <div className="text-center py-4 text-text-muted text-xs">
-            Nenhuma atividade adicionada ainda
-          </div>
+          <div className="text-center py-4 text-text-muted text-xs">Nenhuma atividade adicionada ainda</div>
         )}
-        {atividadesRDO.map((a, i) => (
-          <div
-            key={a.id || i}
-            className="flex items-center gap-3 mb-2 rounded-lg p-3"
-            style={{ background: 'rgba(13,17,23,0.4)', border: '1px solid rgba(255,255,255,0.04)' }}
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="text-sm text-text-primary font-semibold truncate">{a.descricao}</div>
-                {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>MARCO</span>}
-              </div>
-              <div className="text-[10px] text-text-muted">{a.status}{a.qtd_executada ? ` · ${a.qtd_executada} ${a.unidade || ''}` : ''}</div>
-            </div>
-            <div className="shrink-0 text-center">
-              {a.is_marco ? (
-                <span style={{ fontSize: 11, color: a.pct >= 100 ? GREEN : COPPER }}>{a.pct >= 100 ? '✓ Concluído' : 'Pendente'}</span>
-              ) : (
-                <div style={{ color: a.status === 'Concluída' ? GREEN : COPPER, fontWeight: 700, fontSize: 14 }}>{a.pct}%</div>
-              )}
-            </div>
-            <button
-              onClick={() => removeAtividade(a.id)}
-              style={{ color: RED, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+        {atividadesRDO.map((a, i) => {
+          const status = a.status || statusFromPct(a.pct || 0)
+          return (
+            <div
+              key={a.id || i}
+              className="flex items-center gap-3 mb-2 rounded-lg p-3"
+              style={{ background: 'rgba(13,17,23,0.4)', border: '1px solid rgba(255,255,255,0.04)' }}
             >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        ))}
+              {/* Status dot */}
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(status), flexShrink: 0 }} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-text-primary font-semibold truncate">{a.descricao}</div>
+                  {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>MARCO</span>}
+                </div>
+                <div className="text-[10px] text-text-muted flex items-center gap-2">
+                  <span style={{ color: statusColor(status) }}>{status}</span>
+                  {a.qtd_executada ? <span>· {a.qtd_executada} {a.unidade || ''}</span> : null}
+                  {a.efetivo ? <span>· <Users size={9} className="inline" /> {a.efetivo} pessoas</span> : null}
+                </div>
+              </div>
+              <div className="shrink-0 text-center">
+                {a.is_marco ? (
+                  <span style={{ fontSize: 11, color: a.pct >= 100 ? GREEN : COPPER }}>{a.pct >= 100 ? '✓ Concluído' : 'Pendente'}</span>
+                ) : (
+                  <div style={{ color: statusColor(status), fontWeight: 700, fontSize: 14 }}>{a.pct}%</div>
+                )}
+              </div>
+              <button
+                onClick={() => removeAtividade(a.id)}
+                style={{ color: RED, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          )
+        })}
       </Section>
 
       {/* EVIDÊNCIAS FOTOGRÁFICAS */}
       <Section title="Evidências Fotográficas" icon={Camera} accent={TEAL}>
-        <div className="mb-4">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: COPPER, color: '#0d1117', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 700 }}>
-            {uploadingPhoto ? <RefreshCw size={14} className="animate-spin" /> : <Camera size={14} />}
-            {uploadingPhoto ? 'Processando watermark...' : 'Adicionar Foto'}
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              style={{ display: 'none' }}
-              onChange={async e => {
-                const files = Array.from(e.target.files || [])
-                for (const file of files) await handlePhotoUpload(file)
-                e.target.value = ''
-              }}
-            />
-          </label>
-          <span className="text-[10px] text-text-muted ml-3">Watermark GPS + hora aplicada automaticamente</span>
+
+        {/* 3-category upload buttons */}
+        <div className="flex flex-wrap gap-2 mb-5">
+          {FOTO_CATS.map(cat => {
+            const uploading = uploadingCat === cat.key
+            const count = evidencias.filter(e => e.tipo === cat.key).length
+            return (
+              <label
+                key={cat.key}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  background: uploading ? cat.color : `${cat.color}15`,
+                  border: `1px solid ${cat.color}50`,
+                  color: uploading ? '#0d1117' : cat.color,
+                  borderRadius: 8, padding: '8px 14px', fontSize: 12,
+                  cursor: 'pointer', fontWeight: 700, transition: 'all .15s',
+                }}
+              >
+                {uploading ? <RefreshCw size={13} className="animate-spin" /> : <Camera size={13} />}
+                {uploading ? 'Processando...' : cat.label}
+                {count > 0 && !uploading && (
+                  <span style={{ background: cat.color, color: '#0d1117', borderRadius: 99, fontSize: 10, fontWeight: 900, minWidth: 18, textAlign: 'center', padding: '0 5px' }}>
+                    {count}
+                  </span>
+                )}
+                <input
+                  type="file" accept="image/*" capture="environment" multiple
+                  style={{ display: 'none' }}
+                  onChange={async e => {
+                    const files = Array.from(e.target.files || [])
+                    for (const file of files) await handlePhotoUpload(file, cat.key)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+            )
+          })}
+          <span className="text-[10px] text-text-muted self-center ml-1">Watermark GPS + hora aplicado automaticamente</span>
         </div>
 
         {evidencias.length === 0 && (
@@ -1045,41 +1160,85 @@ export default function RDOForm() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {evidencias.map((ev: any, idx: number) => (
-            <div key={ev.id} style={{ background: 'rgba(13,17,23,0.6)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }} className="overflow-hidden relative">
-              <div className="relative cursor-pointer" onClick={() => openLightbox(idx)}>
-                <img
-                  src={ev.foto_url}
-                  alt={ev.legenda || 'Evidência'}
-                  className="w-full object-cover hover:opacity-90 transition-opacity"
-                  style={{ height: 140 }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.35)' }}>
-                  <ExternalLink size={20} className="text-white" />
-                </div>
+        {/* Photos grouped by category */}
+        {FOTO_CATS.map(cat => {
+          const catEvs = evidencias.filter(e => e.tipo === cat.key)
+          if (catEvs.length === 0) return null
+          return (
+            <div key={cat.key} className="mb-5">
+              <div className="flex items-center gap-2 mb-2">
+                <div style={{ width: 3, height: 16, background: cat.color, borderRadius: 2 }} />
+                <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: cat.color }}>{cat.label}</span>
+                <span className="text-[9px] text-white/20">({catEvs.length})</span>
               </div>
-              <div className="p-2">
-                <input
-                  value={ev.legenda || ''}
-                  onChange={e => updateLegenda(ev.id, e.target.value)}
-                  placeholder="Legenda da foto..."
-                  style={{ ...inputStyle, fontSize: 11, padding: '4px 8px' }}
-                />
-                {ev.address && (
-                  <div className="text-[9px] text-text-muted mt-1 truncate">📍 {ev.address}</div>
-                )}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {catEvs.map((ev: any) => {
+                  const globalIdx = evidencias.findIndex(e => e.id === ev.id)
+                  return (
+                    <div key={ev.id} style={{ background: 'rgba(13,17,23,0.6)', border: `1px solid ${cat.color}20`, borderRadius: 10 }} className="overflow-hidden relative">
+                      <div className="relative cursor-pointer" onClick={() => openLightbox(globalIdx)}>
+                        <img
+                          src={ev.foto_url}
+                          alt={ev.legenda || cat.label}
+                          className="w-full object-cover hover:opacity-90 transition-opacity"
+                          style={{ height: 130 }}
+                        />
+                        {/* category badge on photo */}
+                        <span style={{ position: 'absolute', top: 6, left: 6, background: `${cat.color}dd`, color: '#0d1117', fontSize: 9, fontWeight: 900, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.08em' }}>
+                          {cat.label.split(' ')[0].toUpperCase()}
+                        </span>
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                          <ExternalLink size={18} className="text-white" />
+                        </div>
+                      </div>
+                      <div className="p-2">
+                        <input
+                          value={ev.legenda || ''}
+                          onChange={e => updateLegenda(ev.id, e.target.value)}
+                          placeholder="Legenda..."
+                          style={{ ...inputStyle, fontSize: 11, padding: '4px 8px' }}
+                        />
+                        {ev.address && (
+                          <div className="text-[9px] text-text-muted mt-1 truncate">📍 {ev.address}</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => deleteEvidencia(ev.id)}
+                        className="absolute top-2 right-2"
+                        style={{ background: `${RED}cc`, border: 'none', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', color: '#fff' }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
-              <button
-                onClick={() => deleteEvidencia(ev.id)}
-                className="absolute top-2 right-2"
-                style={{ background: `${RED}cc`, border: 'none', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', color: '#fff' }}
-              >
-                <Trash2 size={11} />
-              </button>
             </div>
-          ))}
-        </div>
+          )
+        })}
+
+        {/* Uncategorized fallback */}
+        {evidencias.filter(e => !FOTO_CATS.some(c => c.key === e.tipo)).length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {evidencias.filter(e => !FOTO_CATS.some(c => c.key === e.tipo)).map((ev: any) => {
+              const globalIdx = evidencias.findIndex(e => e.id === ev.id)
+              return (
+                <div key={ev.id} style={{ background: 'rgba(13,17,23,0.6)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }} className="overflow-hidden relative">
+                  <div className="relative cursor-pointer" onClick={() => openLightbox(globalIdx)}>
+                    <img src={ev.foto_url} alt={ev.legenda || 'Evidência'} className="w-full object-cover" style={{ height: 130 }} />
+                  </div>
+                  <div className="p-2">
+                    <input value={ev.legenda || ''} onChange={e => updateLegenda(ev.id, e.target.value)} placeholder="Legenda..." style={{ ...inputStyle, fontSize: 11, padding: '4px 8px' }} />
+                  </div>
+                  <button onClick={() => deleteEvidencia(ev.id)} className="absolute top-2 right-2"
+                    style={{ background: `${RED}cc`, border: 'none', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', color: '#fff' }}>
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </Section>
 
       {/* ASSINATURA */}
