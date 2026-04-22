@@ -146,31 +146,38 @@ def extract_exif_full(img_bytes: bytes) -> Tuple[float, float, Optional[datetime
 
 
 def apply_watermark(img_bytes: bytes, meta: Dict[str, Any], content_type: str = "image/jpeg") -> bytes:
-    """Append geolocation audit panel below photo."""
+    """Overlay geolocation audit info directly on the photo (no canvas extension).
+
+    Bottom-left: semi-transparent dark strip with timestamp, GPS, address, contrato.
+    Bottom-right: map thumbnail inset (~28% image width), composited with RGBA.
+    """
     try:
         from PIL import Image, ImageDraw, ImageFont
 
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
         W, H = img.size
 
-        panel_h = max(100, int(H * 0.22))
-        map_w   = int(W * 0.35)
+        # ── dimensions ─────────────────────────────────────────────────────
+        strip_h  = max(80, int(H * 0.20))   # overlay strip height
+        map_w    = int(W * 0.28)
+        map_h    = strip_h
+        pad      = 10
+        line_gap = 14
 
-        canvas = Image.new("RGB", (W, H + panel_h), (15, 20, 30))
-        canvas.paste(img, (0, 0))
+        # ── semi-transparent dark overlay (full width) ─────────────────────
+        overlay = Image.new("RGBA", (W, strip_h), (10, 14, 20, 195))
+        img.paste(overlay, (0, H - strip_h), overlay)
 
-        # copper stripe
-        stripe_h = 4
-        stripe = Image.new("RGB", (W, stripe_h), (201, 139, 42))
-        canvas.paste(stripe, (0, H))
+        # ── thin copper top-border of the strip ───────────────────────────
+        copper_bar = Image.new("RGBA", (W, 3), (201, 139, 42, 220))
+        img.paste(copper_bar, (0, H - strip_h), copper_bar)
 
-        draw = ImageDraw.Draw(canvas)
+        draw = ImageDraw.Draw(img)
 
-        # text area
         try:
-            font = ImageFont.load_default()
+            font_sm = ImageFont.load_default()
         except Exception:
-            font = None
+            font_sm = None
 
         rede_time  = meta.get("rede_time",  "—")
         local_time = meta.get("local_time", "—")
@@ -179,33 +186,46 @@ def apply_watermark(img_bytes: bytes, meta: Dict[str, Any], content_type: str = 
         address    = meta.get("address", "")
         contrato   = meta.get("contrato", "")
 
+        gps_str = f"GPS {lat:.6f}, {lng:.6f}" if (lat or lng) else "GPS: não disponível"
+
         lines = [
-            f"Horário rede: {rede_time}",
-            f"Horário local: {local_time}",
-            f"GPS: {lat:.6f}, {lng:.6f}" if (lat or lng) else "GPS: não disponível",
-            address[:60] if address else "",
+            f"⏱ Rede: {rede_time}   Local: {local_time}",
+            gps_str,
+            (address[:72] + "…") if len(address) > 72 else address,
             f"Contrato: {contrato}" if contrato else "",
         ]
-        y = H + stripe_h + 6
-        text_w = W - map_w - 8
+
+        text_area_w = W - map_w - pad * 3
+        y = H - strip_h + 8
+
         for line in lines:
             if not line:
                 continue
-            draw.text((6, y), line, fill=(220, 200, 160), font=font)
-            y += 14
+            # subtle shadow
+            draw.text((pad + 1, y + 1), line, fill=(0, 0, 0, 160), font=font_sm)
+            draw.text((pad, y), line, fill=(220, 205, 160, 255), font=font_sm)
+            y += line_gap
 
-        # map thumbnail
+        # ── map thumbnail (bottom-right inset) ────────────────────────────
         map_bytes = meta.get("map_bytes")
         if map_bytes:
             try:
-                map_img = Image.open(io.BytesIO(map_bytes)).resize((map_w, panel_h - stripe_h))
-                canvas.paste(map_img, (W - map_w, H + stripe_h))
+                map_img = Image.open(io.BytesIO(map_bytes)).convert("RGBA").resize((map_w, map_h))
+
+                # thin white border around map
+                border = Image.new("RGBA", (map_w + 2, map_h + 2), (255, 255, 255, 180))
+                border.paste(map_img, (1, 1))
+
+                mx = W - map_w - 2 - pad
+                my = H - map_h - 1
+                img.paste(border, (mx, my), border)
             except Exception:
                 pass
 
+        out = img.convert("RGB")
         buf = io.BytesIO()
         fmt = "JPEG" if "jpeg" in content_type.lower() or "jpg" in content_type.lower() else "PNG"
-        canvas.save(buf, format=fmt, quality=88)
+        out.save(buf, format=fmt, quality=90)
         return buf.getvalue()
     except Exception as e:
         logger.warning(f"Watermark falhou: {e}")

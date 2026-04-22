@@ -37,7 +37,8 @@ export default function Projetos() {
   const { data, isLoading } = useQuery({
     queryKey: ['contratos-list'],
     queryFn: () => api('/api/hub/contratos'),
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   })
 
   // Mutations

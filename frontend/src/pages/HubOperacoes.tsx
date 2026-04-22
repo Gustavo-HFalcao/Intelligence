@@ -387,6 +387,8 @@ function DashboardTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-dashboard', contrato],
     queryFn:  () => api.get(`/hub/dashboard?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   })
   if (isLoading) return <Skeleton />
   const d = data ?? {}
@@ -965,6 +967,8 @@ function CronogramaTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-cronograma', contrato],
     queryFn:  () => api.get(`/hub/cronograma?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   })
 
   const allRows: any[] = data?.atividades || []

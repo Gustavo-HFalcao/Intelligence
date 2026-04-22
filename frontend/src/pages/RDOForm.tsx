@@ -273,6 +273,38 @@ export default function RDOForm() {
   async function captureGPS(tipo: 'checkin' | 'checkout') {
     const setLoading = tipo === 'checkin' ? setCheckinLoading : setCheckoutLoading
     setLoading(true)
+
+    // Geolocation requires HTTPS in modern browsers.
+    // On HTTP (e.g. dev VM without TLS), we fall back to IP-based location.
+    const isSecure = location.protocol === 'https:' || location.hostname === 'localhost'
+
+    if (!isSecure || !navigator.geolocation) {
+      // IP geolocation fallback via public API
+      try {
+        const r = await fetch('https://ipapi.co/json/')
+        const d = await r.json()
+        if (d.latitude && d.longitude) {
+          const lat = parseFloat(d.latitude)
+          const lng = parseFloat(d.longitude)
+          const addr = [d.city, d.region, d.country_name].filter(Boolean).join(', ')
+          const ts = new Date().toISOString()
+          setForm(f => ({
+            ...f,
+            [`${tipo}_lat`]: lat,
+            [`${tipo}_lng`]: lng,
+            [`${tipo}_endereco`]: `[IP] ${addr}`,
+            [`${tipo}_timestamp`]: ts,
+          }))
+        } else {
+          alert('Não foi possível obter localização. Acesse via HTTPS para GPS preciso.')
+        }
+      } catch {
+        alert('GPS indisponível em HTTP. Use HTTPS para localização precisa.')
+      }
+      setLoading(false)
+      return
+    }
+
     navigator.geolocation.getCurrentPosition(
       async pos => {
         const { latitude: lat, longitude: lng } = pos.coords
@@ -286,10 +318,29 @@ export default function RDOForm() {
             [`${tipo}_endereco`]: r.data.address,
             [`${tipo}_timestamp`]: ts,
           }))
-        } catch {}
+        } catch {
+          // geocode failed but we still have coordinates
+          const ts = new Date().toISOString()
+          setForm(f => ({
+            ...f,
+            [`${tipo}_lat`]: lat,
+            [`${tipo}_lng`]: lng,
+            [`${tipo}_endereco`]: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            [`${tipo}_timestamp`]: ts,
+          }))
+        }
         setLoading(false)
       },
-      () => setLoading(false),
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          alert('Permissão de GPS negada. Permita o acesso à localização no navegador.')
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          alert('Localização indisponível. Verifique se o GPS está ativo.')
+        } else {
+          alert('Timeout ao obter GPS. Tente novamente.')
+        }
+        setLoading(false)
+      },
       { enableHighAccuracy: true, timeout: 15000 }
     )
   }

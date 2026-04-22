@@ -1238,12 +1238,21 @@ async def create_contrato(
     if not body.get("contrato"):
         return {"ok": False, "error": "Código do contrato é obrigatório"}
 
+    # Normaliza aliases de datas (frontend pode enviar inicio/termino ou data_inicio/data_termino)
+    if body.get("inicio") and not body.get("data_inicio"):
+        body["data_inicio"] = body.pop("inicio")
+    if body.get("termino") and not body.get("data_termino"):
+        body["data_termino"] = body.pop("termino")
+    # Alias potencia
+    if body.get("potencia_kwp_contratada") and not body.get("potencia_kwp"):
+        body["potencia_kwp"] = body.get("potencia_kwp_contratada")
+
     # Geocoding automático se lat/long forem 0
     if not body.get("latitude") and not body.get("longitude") and body.get("localizacao"):
         lat, lon = await _get_coords(body["localizacao"])
         body["latitude"] = lat
         body["longitude"] = lon
-    
+
     row = sb_insert("contratos", body)
     DataLoader.invalidate_cache(client_id or "")
     return {"ok": True, "row": row}

@@ -29,7 +29,9 @@ export default function ChatIA() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   
-  const [sessionId] = useState(() => crypto.randomUUID())
+  const [sessionId] = useState(() => {
+    try { return crypto.randomUUID() } catch { return Math.random().toString(36).slice(2) }
+  })
   const bottomRef   = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
