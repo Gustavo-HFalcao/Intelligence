@@ -1,4 +1,5 @@
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTenant } from '@/context/TenantContext'
 import { useTheme } from '@/context/ThemeContext'
@@ -56,6 +57,7 @@ export default function TopBar({ sidebarExpanded, hubTab, onHubTabChange }: TopB
   const { user, logout } = useAuth()
   const { hasRole } = useTenant()
   const { theme, toggleTheme } = useTheme()
+  const queryClient = useQueryClient()
 
   const isHub = location.pathname === '/hub' || location.pathname.startsWith('/hub/')
   const hubContrato = searchParams.get('contrato')
@@ -163,7 +165,12 @@ export default function TopBar({ sidebarExpanded, hubTab, onHubTabChange }: TopB
           </div>
           <Separator orientation="vertical" className="h-4 bg-white/10 ml-1" />
           <button 
-            onClick={(e) => { e.stopPropagation(); logout(); }} 
+            onClick={async (e) => {
+              e.stopPropagation()
+              queryClient.clear()   // wipe all cached tenant data before user changes
+              await logout()
+              navigate('/login')
+            }} 
             className="text-muted-foreground hover:text-destructive transition-colors ml-1"
           >
             <LogOut size={14} />

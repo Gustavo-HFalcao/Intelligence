@@ -56,83 +56,151 @@
 }
 
 /* ── Light Mode ──────────────────────────────────────────────────────────── */
+/*
+  Palette rationale:
+  - BG: warm parchment #EDE8DF — not pure white, has character
+  - Surface: #F5F1E9 — slightly lighter for cards, elevated
+  - Sidebar/topbar: #2C2417 — keep dark, high contrast brand presence
+  - Copper: richer #B87820 — more saturated than before
+  - Text: #1A1410 dark warm brown for primary, #6B5E4E for muted
+  - Borders: warm amber-tinted to match palette
+*/
 :root.light-mode {
-  /* Warm off-white — not pure white */
-  --background: 40 12% 93%;
-  --foreground: 220 20% 15%;
+  --background: 36 18% 88%;      /* #EDE8DF — warm parchment */
+  --foreground: 24 30% 10%;      /* #1A1410 — dark warm brown */
 
-  --card: 40 10% 96%;
-  --card-foreground: 220 20% 15%;
+  --card: 38 22% 94%;            /* #F5F1E9 — warm cream card */
+  --card-foreground: 24 30% 10%;
 
-  --popover: 40 10% 96%;
-  --popover-foreground: 220 20% 15%;
+  --popover: 38 22% 96%;
+  --popover-foreground: 24 30% 10%;
 
-  --primary: 37 60% 42%;
+  --primary: 37 73% 42%;         /* #B87820 — richer copper */
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 173 50% 30%;
+  --secondary: 173 55% 32%;      /* teal — same hue, slightly richer */
   --secondary-foreground: 0 0% 100%;
 
-  --muted: 220 8% 86%;
-  --muted-foreground: 220 10% 48%;
+  --muted: 36 14% 82%;           /* #D6D0C6 — warm gray-beige */
+  --muted-foreground: 28 20% 42%;/* #6B5E4E */
 
-  --accent: 37 60% 42%;
+  --accent: 37 73% 42%;
   --accent-foreground: 0 0% 100%;
 
-  --destructive: 0 76% 48%;
+  --destructive: 0 76% 46%;
   --destructive-foreground: 0 0% 100%;
 
-  --border: 220 8% 78%;
-  --input: 40 10% 91%;
-  --ring: 37 60% 42%;
+  --border: 34 20% 72%;          /* warm amber-gray border */
+  --input: 38 18% 90%;
+  --ring: 37 73% 42%;
 
-  /* Legacy tokens — warm tones */
-  --void: #edeae4;
-  --depth: #f4f1eb;
-  --surface: #e8e4dd;
-  --elevated: #dedad2;
-  --copper: #a86e18;
-  --copper-glow: rgba(168, 110, 24, 0.12);
-  --border-subtle: rgba(0, 0, 0, 0.07);
+  /* Legacy tokens */
+  --void:          #EDE8DF;       /* parchment — main bg */
+  --depth:         #F5F1E9;       /* cream — elevated surface */
+  --surface:       #E6E0D4;       /* warm taupe — sidebar-level surface */
+  --elevated:      #DAD3C5;       /* slightly darker card bg */
+  --copper:        #B87820;       /* richer copper */
+  --copper-glow:   rgba(184,120,32,0.15);
+  --border-subtle: rgba(90,65,30,0.12);
 }
 
 :root.light-mode body {
   color-scheme: light;
+  background-color: #EDE8DF;
 }
 
-:root.light-mode ::-webkit-scrollbar-track { background: #e8e4dd; }
-:root.light-mode ::-webkit-scrollbar-thumb { background: rgba(168,110,24,0.25); }
-:root.light-mode ::-webkit-scrollbar-thumb:hover { background: #a86e18; }
+:root.light-mode ::-webkit-scrollbar-track { background: #DAD3C5; }
+:root.light-mode ::-webkit-scrollbar-thumb { background: rgba(184,120,32,0.3); border-radius: 3px; }
+:root.light-mode ::-webkit-scrollbar-thumb:hover { background: #B87820; }
 
-/* Light mode — sidebar & topbar surfaces */
+/* ── Sidebar & Topbar stay dark in light mode — brand identity ── */
 :root.light-mode .bg-\[\#081210\],
 :root.light-mode .bg-\[\#070d0b\],
-:root.light-mode .bg-\[\#0a0f0e\] {
-  background-color: #f4f1eb !important;
+:root.light-mode .bg-\[\#0a0f0e\],
+:root.light-mode .bg-\[\#030504\] {
+  background-color: #2C2417 !important;
 }
 
-/* Light mode — text overrides */
-:root.light-mode .text-white { color: #1c1917 !important; }
-:root.light-mode .text-white\/60 { color: rgba(28,25,23,0.6) !important; }
-:root.light-mode .text-white\/40 { color: rgba(28,25,23,0.45) !important; }
-:root.light-mode .text-white\/20 { color: rgba(28,25,23,0.28) !important; }
-:root.light-mode .text-text-muted { color: #78716c !important; }
-
-/* Light mode — glass card surfaces */
-:root.light-mode [style*="rgba(255,255,255,0.04)"] {
-  background: rgba(0,0,0,0.025) !important;
+/* Sidebar text stays light */
+:root.light-mode .bg-\[\#081210\] .text-white,
+:root.light-mode .bg-\[\#070d0b\] .text-white,
+:root.light-mode .bg-\[\#0a0f0e\] .text-white {
+  color: rgba(245,241,233,0.9) !important;
 }
 
-/* Light mode — borders */
-:root.light-mode [style*="rgba(201,139,42,0.15)"] {
-  border-color: rgba(168,110,24,0.22) !important;
+/* ── Text overrides for content area ── */
+:root.light-mode .text-white         { color: #1A1410 !important; }
+:root.light-mode .text-white\/80     { color: rgba(26,20,16,0.8) !important; }
+:root.light-mode .text-white\/60     { color: rgba(26,20,16,0.6) !important; }
+:root.light-mode .text-white\/40     { color: rgba(26,20,16,0.45) !important; }
+:root.light-mode .text-white\/30     { color: rgba(26,20,16,0.35) !important; }
+:root.light-mode .text-white\/20     { color: rgba(26,20,16,0.25) !important; }
+:root.light-mode .text-text-primary  { color: #1A1410 !important; }
+:root.light-mode .text-text-muted    { color: #6B5E4E !important; }
+
+/* ── Glass panels become warm cream cards with real shadow ── */
+:root.light-mode .glass-panel {
+  background: rgba(245,241,233,0.95) !important;
+  border-color: rgba(184,120,32,0.2) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.08) !important;
+  backdrop-filter: none !important;
 }
 
-/* Light mode — glass card hover */
 :root.light-mode .glass-card {
-  background: rgba(244,241,235,0.9);
-  border-color: rgba(168,110,24,0.18);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  background: rgba(245,241,233,0.95);
+  border-color: rgba(184,120,32,0.2);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07), 0 0 0 1px rgba(184,120,32,0.1);
+}
+:root.light-mode .glass-card:hover {
+  border-color: rgba(184,120,32,0.45);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1), 0 0 0 1px rgba(184,120,32,0.3);
+}
+
+/* ── Inline dark surfaces (GLASS = rgba(255,255,255,0.04)) → cream ── */
+:root.light-mode [style*="rgba(255,255,255,0.04)"] {
+  background: rgba(230,224,212,0.5) !important;
+}
+:root.light-mode [style*="rgba(13,17,23"] {
+  background: #F5F1E9 !important;
+}
+:root.light-mode [style*="rgba(14,26,23"] {
+  background: #F0EBE1 !important;
+}
+
+/* ── Copper border overrides ── */
+:root.light-mode [style*="rgba(201,139,42,0.15)"] {
+  border-color: rgba(184,120,32,0.28) !important;
+}
+:root.light-mode [style*="rgba(201,139,42,0.25)"] {
+  border-color: rgba(184,120,32,0.35) !important;
+}
+
+/* ── Input fields ── */
+:root.light-mode input,
+:root.light-mode select,
+:root.light-mode textarea {
+  color-scheme: light;
+}
+
+/* ── Dashboard banner gradient ── */
+:root.light-mode .dashboard-header-banner {
+  background: linear-gradient(135deg, rgba(184,120,32,0.08) 0%, rgba(237,232,223,0.95) 100%) !important;
+  border-left-color: #B87820 !important;
+}
+
+/* ── Project cards ── */
+:root.light-mode .project-card-glow:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 0 16px rgba(184,120,32,0.12);
+}
+
+/* ── Status badge contrast fix ── */
+:root.light-mode .status-badge {
+  border-color: rgba(26,20,16,0.1) !important;
+}
+
+/* ── Topbar bg in light mode — keep at dark ── */
+:root.light-mode .bg-background\/80 {
+  background-color: rgba(44,36,23,0.92) !important;
 }
 
 /* ── Deep Tectonic Typography ────────────────────────────────────────────── */

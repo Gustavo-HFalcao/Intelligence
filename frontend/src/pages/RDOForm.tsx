@@ -269,7 +269,12 @@ export default function RDOForm() {
   // ── Save draft ───────────────────────────────────────────────────────────
 
   const saveDraft = useCallback(async () => {
-    if (!form.contrato) return
+    if (!form.contrato) {
+      // Show visible error instead of silent return
+      setValidationErrors(['Selecione um contrato antes de salvar o rascunho.'])
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
     setIsSaving(true)
     try {
       const body = { ...form, draft_id: draftId || undefined }
@@ -277,6 +282,9 @@ export default function RDOForm() {
       const newId = r.data.draft_id
       if (newId && !draftId) setDraftId(newId)
       setSavedAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+      setValidationErrors([])
+    } catch (e: any) {
+      setValidationErrors([`Erro ao salvar rascunho: ${e?.response?.data?.detail || e.message}`])
     } finally {
       setIsSaving(false)
     }
