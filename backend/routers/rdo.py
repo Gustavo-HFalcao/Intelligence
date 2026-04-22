@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from backend.integrations.supabase import sb_delete, sb_insert, sb_select, sb_update, sb_upsert
 from backend.middleware.auth import get_current_user
 from backend.middleware.tenant import get_current_tenant
+from backend.core.audit import audit_log, AuditCategory
 from backend.services.rdo_service import (
     apply_watermark,
     extract_exif_full,
@@ -425,6 +426,7 @@ async def submit_rdo(
     if contrato:
         atividades_rdo = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
         today_str = str(_date.today())
+        _affected_parents: set = set()  # track parents that need % rollup
 
         for at in atividades_rdo:
             atividade_nome = _norm(at.get("atividade"))
@@ -449,6 +451,8 @@ async def submit_rdo(
             hub = hub_rows[0]
             hub_id = hub["id"]
             pct_atual = int(hub.get("conclusao_pct") or 0)
+            if hub.get("parent_id"):
+                _affected_parents.add((hub["parent_id"], contrato))
 
             # Se unidade é % e quantidade > pct atual → atualiza progresso
             if unidade_at == "%" and quantidade > pct_atual:
@@ -501,8 +505,63 @@ async def submit_rdo(
                     "client_id":          client_id,
                 })
 
-        # ── Auto-gerar insights após submit ──────────────────────────────────
-        _trigger_insights(contrato, rdo_id, client_id)
+        # ── Rollup % para macros afetadas ────────────────────────────────────
+        try:
+            from backend.routers.hub import _recalc_parent_dates, _cronograma_cache_key
+            from backend.core.redis_cache import cache_invalidate
+            for parent_id, cont in _affected_parents:
+                _recalc_parent_dates(parent_id, cont, client_id or "")
+            # Invalida cache do cronograma — dados mudaram com o RDO
+            cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
+        except Exception:
+            pass
+
+        # ── Insights assíncronos — fire-and-forget via Celery ────────────────
+        try:
+            from backend.workers.tasks.insight_tasks import generate_insights
+            generate_insights.delay(
+                contrato=contrato,
+                rdo_id=rdo_id,
+                client_id=client_id or "",
+            )
+        except Exception:
+            # Fallback síncrono se Celery não disponível
+            _trigger_insights(contrato, rdo_id, client_id)
+
+        # ── Email para subscribers ────────────────────────────────────────────
+        try:
+            subs = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=50) or []
+            if subs:
+                emails  = [s["email"] for s in subs if s.get("email")]
+                rdo_row = master_rows[0] if master_rows else {}
+                data_rdo = str(rdo_row.get("data", today_str))[:10]
+                from backend.integrations.email import send_rdo_submitted
+                from backend.core.config import Config
+                send_rdo_submitted(emails, contrato, data_rdo, view_token, Config.APP_URL)
+        except Exception:
+            pass  # Email opcional — não bloqueia submit
+
+        # ── Alertas reativos — check event hooks ─────────────────────────────
+        try:
+            from backend.workers.tasks.alert_tasks import check_alert_event
+            check_alert_event.delay(
+                event_type="rdo_submitted",
+                contrato=contrato,
+                client_id=client_id or "",
+                metadata={"rdo_id": rdo_id},
+            )
+        except Exception:
+            pass  # Celery optional — alerts won't fire but RDO submit succeeds
+
+    audit_log(
+        category=AuditCategory.RDO_CREATE,
+        action=f"RDO submetido: {rdo_id} — contrato {contrato}",
+        username=user.get("login", ""),
+        entity_type="rdo_master",
+        entity_id=rdo_id,
+        client_id=str(client_id or ""),
+        metadata={"contrato": contrato, "view_token": view_token},
+    )
 
     return {"ok": True, "view_token": view_token}
 
@@ -618,6 +677,34 @@ def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
 
     except Exception:
         pass  # Insights nunca devem bloquear o submit
+
+
+# ── PDF Generation ────────────────────────────────────────────────────────────
+
+@router.post("/{rdo_id}/generate-pdf")
+async def generate_rdo_pdf(
+    rdo_id: str,
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Enfileira geração de PDF do RDO via Celery (WeasyPrint)."""
+    try:
+        from backend.workers.celery_app import celery_app
+        celery_app.send_task(
+            "backend.workers.tasks.pdf_tasks.generate_rdo_pdf",
+            kwargs={"rdo_id": rdo_id, "client_id": client_id or ""},
+        )
+        return {"ok": True, "status": "queued", "rdo_id": rdo_id}
+    except Exception as e:
+        # Fallback: run inline if Celery unavailable
+        logger.warning(f"Celery unavailable for PDF: {e} — running inline")
+        loop = asyncio.get_event_loop()
+        from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _gen
+        result = await loop.run_in_executor(
+            None,
+            lambda: _gen.run(rdo_id=rdo_id, client_id=client_id or ""),
+        )
+        return result
 
 
 # ── Histórico ─────────────────────────────────────────────────────────────────

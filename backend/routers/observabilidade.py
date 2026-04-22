@@ -175,6 +175,72 @@ async def system_health(_user=Depends(get_current_user)) -> Dict[str, Any]:
     return {"status": overall, "checks": checks}
 
 
+# ── System Logs (audit trail) ─────────────────────────────────────────────────
+
+_LOG_PAGE = 50
+
+def _fmt_syslog(r: Dict) -> Dict:
+    return {
+        "id":              str(r.get("id", "")),
+        "created_at":      _utc_to_brt(str(r.get("created_at", ""))),
+        "username":        str(r.get("username", "—")),
+        "action_category": str(r.get("action_category", "—")),
+        "action":          str(r.get("action", "")),
+        "status":          str(r.get("status", "success")),
+        "entity_type":     str(r.get("entity_type", "")),
+        "entity_id":       str(r.get("entity_id", "")),
+        "ip_address":      str(r.get("ip_address", "")),
+        "client_id":       str(r.get("client_id", "")),
+        "metadata":        r.get("metadata") or {},
+    }
+
+
+@router.get("/system-logs")
+async def list_system_logs(
+    page:     int           = Query(1, ge=1),
+    category: Optional[str] = Query(None),
+    status:   Optional[str] = Query(None),
+    username: Optional[str] = Query(None),
+    search:   Optional[str] = Query(None),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Audit trail — requires master or admin role."""
+    role = user.get("role_name", "")
+    is_master = user.get("is_master", False)
+
+    filters: Dict[str, Any] = {}
+    if not is_master and client_id:
+        filters["client_id"] = client_id
+    if category:
+        filters["action_category"] = category
+    if status:
+        filters["status"] = status
+    if username:
+        filters["username"] = username
+
+    rows = sb_select(
+        "system_logs",
+        filters=filters,
+        order="created_at.desc",
+        limit=_LOG_PAGE * page + 1,
+    ) or []
+    start = (page - 1) * _LOG_PAGE
+    rows  = rows[start:]
+
+    if search:
+        q = search.lower()
+        rows = [r for r in rows if q in str(r.get("action", "")).lower()
+                or q in str(r.get("username", "")).lower()]
+
+    has_next = len(rows) > _LOG_PAGE
+    return {
+        "logs":     [_fmt_syslog(r) for r in rows[:_LOG_PAGE]],
+        "has_next": has_next,
+        "page":     page,
+    }
+
+
 # ── Audit log (write) ─────────────────────────────────────────────────────────
 
 @router.post("/audit")

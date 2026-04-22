@@ -20,6 +20,7 @@ from backend.integrations.supabase import sb_select
 from backend.middleware.auth import get_current_user
 from backend.middleware.tenant import get_current_tenant
 from backend.core.logging import get_logger
+from backend.core.audit import audit_log, AuditCategory
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 logger = get_logger(__name__)
@@ -109,6 +110,14 @@ async def chat(
     # Prepend system prompt
     full_messages = [{"role":"system","content":SYSTEM_PROMPT}] + messages
 
+    audit_log(
+        category=AuditCategory.AI_CHAT,
+        action=f"Chat: {user_message[:120]}",
+        username=user_login,
+        client_id=client_id or "",
+        metadata={"model": model, "history_len": len(history)},
+    )
+
     return StreamingResponse(
         _stream_generator(full_messages, model, user_login, client_id or ""),
         media_type="text/event-stream",
@@ -150,6 +159,13 @@ async def chat_agentic(
                 "user_login":    user_login,
                 "system_prompt": SYSTEM_PROMPT,
             },
+        )
+        audit_log(
+            category=AuditCategory.AI_CHAT,
+            action=f"Agentic chat queued: {user_message[:120]}",
+            username=user_login,
+            client_id=client_id or "",
+            metadata={"session_id": session_id, "history_len": len(history)},
         )
         return {"status":"queued", "session_id":session_id}
     except Exception as e:

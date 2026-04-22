@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -60,8 +60,23 @@ function PieTip({ active, payload }: any) {
 }
 
 export default function RDODashboard() {
-  const navigate = useNavigate()
-  const [contrato, setContrato] = useState('')
+  const navigate    = useNavigate()
+  const queryClient = useQueryClient()
+  const [contrato, setContrato]       = useState('')
+  const [generatingPdf, setGenerating] = useState<string | null>(null)
+
+  async function handleGeneratePdf(e: React.MouseEvent, rdoId: string) {
+    e.stopPropagation()
+    setGenerating(rdoId)
+    try {
+      const r = await fetch(`/api/rdo/${rdoId}/generate-pdf`, { method: 'POST', credentials: 'include' })
+      if (r.ok) {
+        setTimeout(() => queryClient.invalidateQueries({ queryKey: ['rdo-dashboard'] }), 5000)
+      }
+    } finally {
+      setGenerating(null)
+    }
+  }
 
   const { data: contratos } = useQuery({
     queryKey: ['hub-contratos'],
@@ -274,12 +289,20 @@ export default function RDODashboard() {
                       </td>
                       <td className="px-4 py-3 font-mono text-white/60">{r.num_atividades ?? 0}</td>
                       <td className="px-4 py-3">
-                        {r.pdf_url && (
+                        {r.pdf_url ? (
                           <a href={r.pdf_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                             style={{ color: COPPER, fontSize: 10, fontWeight: 700, textDecoration: 'none' }}>
                             PDF ↗
                           </a>
-                        )}
+                        ) : r.status === 'Submetido' ? (
+                          <button
+                            onClick={e => handleGeneratePdf(e, r.id)}
+                            disabled={generatingPdf === r.id}
+                            style={{ background: 'none', border: 'none', color: generatingPdf === r.id ? '#555' : COPPER, fontSize: 10, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                          >
+                            {generatingPdf === r.id ? '...' : 'Gerar PDF'}
+                          </button>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-white/20 group-hover:text-copper transition-colors">
                         <ChevronRight size={13} />

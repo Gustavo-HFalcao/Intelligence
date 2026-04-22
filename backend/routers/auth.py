@@ -25,6 +25,7 @@ from backend.middleware.auth import (
     hash_password,
     login_user,
 )
+from backend.core.audit import audit_log, audit_error, AuditCategory
 
 router = APIRouter()
 
@@ -51,9 +52,25 @@ class ResetPasswordBody(BaseModel):
 async def login(body: LoginRequest, response: Response):
     user = login_user(body.email, body.password)
     if not user:
+        audit_log(
+            category=AuditCategory.LOGIN,
+            action=f"Tentativa de login falhou: {body.email[:50]}",
+            username=body.email[:50],
+            status="error",
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciais inválidas")
 
     session_id = create_session(user)
+
+    audit_log(
+        category=AuditCategory.LOGIN,
+        action=f"Login bem-sucedido: {user.get('login', user.get('email', ''))}",
+        username=user.get("login", user.get("email", "")),
+        entity_type="login",
+        entity_id=str(user.get("user_id", "")),
+        client_id=str(user.get("client_id") or ""),
+        metadata={"role": user.get("role_name"), "client": user.get("client_name")},
+    )
 
     response.set_cookie(
         key=SESSION_COOKIE,
@@ -82,7 +99,14 @@ async def login(body: LoginRequest, response: Response):
 async def logout(
     response: Response,
     session_id: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    user: dict = Depends(get_current_user),
 ):
+    audit_log(
+        category=AuditCategory.LOGOUT,
+        action=f"Logout: {user.get('login', user.get('email', ''))}",
+        username=user.get("login", user.get("email", "")),
+        client_id=str(user.get("client_id") or ""),
+    )
     if session_id:
         destroy_session(session_id)
     response.delete_cookie(SESSION_COOKIE)

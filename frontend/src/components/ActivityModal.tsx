@@ -229,8 +229,8 @@ export default function ActivityModal({ isOpen, onClose, contrato, editingActivi
                     <div className="grid grid-cols-3 gap-1 bg-black/40 p-1 rounded-xl border border-white/5">
                       {[
                         { v: 'sem_dependencia', l: 'Sem dep.' },
-                        { v: 'depende_termino', l: 'Término→Início' },
-                        { v: 'depende_progresso', l: 'Por progresso' },
+                        { v: 'depende_termino', l: 'FS — Fim→Início' },
+                        { v: 'depende_inicio',  l: 'SS — Início→Início' },
                       ].map(({ v, l }) => (
                         <button
                           key={v} type="button"

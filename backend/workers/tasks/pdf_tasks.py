@@ -147,3 +147,118 @@ def generate_pdf(self, report_id: str, client_id: str = "", params: Dict = None)
             sb_update("relatorios", filters={"id": report_id}, data={"status": "Erro"})
         except Exception:
             pass
+
+
+def _brl(v: float) -> str:
+    return f"R$ {v:_.2f}".replace(".", "DECPT").replace("_", ".").replace("DECPT", ",")
+
+
+def _build_rdo_html(rdo: Dict, atividades: list, evidencias: list) -> str:
+    import html as _html
+    contrato = _html.escape(str(rdo.get("contrato", "")))
+    data_rdo = _html.escape(str(rdo.get("data_rdo", "")[:10] if rdo.get("data_rdo") else ""))
+    clima    = _html.escape(str(rdo.get("clima") or rdo.get("condicao_climatica") or "—"))
+    turno    = _html.escape(str(rdo.get("turno") or "—"))
+    equipe   = str(rdo.get("equipe_alocada") or 0)
+    obs      = _html.escape(str(rdo.get("observacoes") or "")).replace("\n", "<br>")
+    status   = _html.escape(str(rdo.get("status") or ""))
+    now      = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    at_rows = ""
+    for at in atividades:
+        nome = _html.escape(str(at.get("nome_atividade") or at.get("descricao") or "—"))
+        pct  = at.get("pct_executado") or 0
+        efet = at.get("efetivo") or "—"
+        st   = _html.escape(str(at.get("status_atividade") or ""))
+        at_rows += f"<tr><td>{nome}</td><td style='text-align:center'>{pct}%</td><td style='text-align:center'>{efet}</td><td>{st}</td></tr>"
+
+    ev_rows = ""
+    for ev in evidencias[:20]:
+        url = ev.get("url_foto") or ev.get("url") or ""
+        tip = _html.escape(str(ev.get("tipo") or ""))
+        cap = _html.escape(str(ev.get("caption") or ""))
+        if url:
+            ev_rows += f'<div style="display:inline-block;margin:6px;vertical-align:top;text-align:center"><img src="{url}" style="max-width:180px;max-height:140px;border-radius:4px;border:1px solid #ddd"><br><span style="font-size:9px;color:#888">{tip} {cap}</span></div>'
+
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<style>
+body {{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a;margin:32px;font-size:12px}}
+h1 {{color:#C98B2A;font-size:18px;border-bottom:2px solid #C98B2A;padding-bottom:6px}}
+h2 {{color:#555;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-top:20px;margin-bottom:6px}}
+.meta-grid {{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}}
+.meta-box {{background:#f7f4ee;border-radius:4px;padding:8px 12px}}
+.meta-lbl {{font-size:9px;font-weight:700;color:#999;text-transform:uppercase}}
+.meta-val {{font-size:14px;font-weight:700;color:#333;margin-top:2px}}
+table {{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}}
+th {{background:#C98B2A;color:white;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase}}
+td {{padding:5px 8px;border-bottom:1px solid #eee}}
+tr:nth-child(even){{background:#fafafa}}
+.obs {{background:#f7f4ee;border-left:3px solid #C98B2A;padding:10px 14px;border-radius:0 4px 4px 0;margin-top:8px;line-height:1.6}}
+.footer {{margin-top:32px;font-size:9px;color:#bbb;text-align:center;border-top:1px solid #eee;padding-top:10px}}
+</style></head><body>
+<h1>Relatório Diário de Obra</h1>
+<p style="color:#888;font-size:11px">Contrato <strong>{contrato}</strong> &mdash; Data: <strong>{data_rdo}</strong> &mdash; Status: <strong>{status}</strong></p>
+<div class="meta-grid">
+  <div class="meta-box"><div class="meta-lbl">Clima</div><div class="meta-val">{clima}</div></div>
+  <div class="meta-box"><div class="meta-lbl">Turno</div><div class="meta-val">{turno}</div></div>
+  <div class="meta-box"><div class="meta-lbl">Equipe Alocada</div><div class="meta-val">{equipe} pessoas</div></div>
+</div>
+<h2>Atividades Executadas</h2>
+<table>
+  <tr><th>Atividade</th><th style="text-align:center;width:70px">% Exec.</th><th style="text-align:center;width:70px">Efetivo</th><th style="width:110px">Status</th></tr>
+  {at_rows or '<tr><td colspan="4" style="color:#aaa;text-align:center">Nenhuma atividade registrada</td></tr>'}
+</table>
+{'<h2>Observações</h2><div class="obs">' + obs + '</div>' if obs else ''}
+{'<h2>Evidências Fotográficas</h2><div>' + ev_rows + '</div>' if ev_rows else ''}
+<div class="footer">Bomtempo Intelligence &middot; Gerado em {now} &middot; RDO: {_html.escape(str(rdo.get("id",""))[:36])}</div>
+</body></html>"""
+
+
+@celery_app.task(
+    name="backend.workers.tasks.pdf_tasks.generate_rdo_pdf",
+    bind=True,
+    max_retries=1,
+    queue="pdf",
+)
+def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
+    """Gera PDF de um RDO e atualiza rdo_master.pdf_url."""
+    from backend.integrations.supabase import sb_select, sb_update, sb_storage_upload
+
+    try:
+        rows = sb_select("rdo_master", filters={"id": rdo_id}, limit=1) or []
+        if not rows:
+            return {"ok": False, "error": "RDO não encontrado"}
+        rdo = rows[0]
+
+        atividades = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
+        evidencias = sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or []
+
+        html_str = _build_rdo_html(rdo, atividades, evidencias)
+
+        pdf_bytes = None
+        try:
+            from weasyprint import HTML
+            pdf_bytes = HTML(string=html_str).write_pdf()
+        except Exception as e:
+            logger.warning(f"WeasyPrint error: {e}")
+            return {"ok": False, "error": f"WeasyPrint: {e}"}
+
+        contrato = str(rdo.get("contrato") or "rdo")
+        data_str = str(rdo.get("data_rdo") or "")[:10].replace("-", "")
+        filename = f"RDO-{contrato}-{data_str}-{rdo_id[:8]}.pdf"
+        path     = f"rdo-pdfs/{filename}"
+
+        pdf_url = ""
+        try:
+            pdf_url = sb_storage_upload("rdo-pdfs", path, pdf_bytes, "application/pdf") or ""
+        except Exception as e:
+            logger.warning(f"PDF upload failed: {e}")
+
+        if pdf_url:
+            sb_update("rdo_master", {"id": rdo_id}, {"pdf_url": pdf_url})
+
+        return {"ok": bool(pdf_url), "pdf_url": pdf_url}
+
+    except Exception as e:
+        logger.error(f"generate_rdo_pdf error: {e}")
+        return {"ok": False, "error": str(e)}

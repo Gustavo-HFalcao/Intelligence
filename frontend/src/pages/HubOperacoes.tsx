@@ -658,9 +658,9 @@ function AtivRow({
   onToggle: () => void
 }) {
   const hasChildren = allRows.some(a => a.parent_id === row.id)
-  const depName = row.dependencia_id
-    ? allRows.find(a => a.id === row.dependencia_id)?.atividade?.slice(0, 20)
-    : null
+  const depRef  = row.dependencia_id ? allRows.find(a => a.id === row.dependencia_id) : null
+  const depName = depRef?.atividade?.slice(0, 22) ?? null
+  const depTipoLabel = row.dep_tipo === 'depende_inicio' ? 'SS' : row.dep_tipo === 'depende_termino' ? 'FS' : null
 
   const pct = Number(row.conclusao_pct || 0)
   const status = row.status || 'pendente'
@@ -708,7 +708,11 @@ function AtivRow({
           </div>
           {depName && (
             <div style={{ fontSize: 9, color: '#888' }} className="flex items-center gap-1">
-              <MinusCircle size={8} /> Depende de: {depName}
+              <MinusCircle size={8} />
+              <span>Depende de: <span style={{ color: '#aaa', fontWeight: 700 }}>{depName}</span></span>
+              {depTipoLabel && (
+                <span style={{ fontSize: 8, fontWeight: 800, color: COPPER, background: `${COPPER}18`, borderRadius: 3, padding: '0 4px', letterSpacing: '0.05em' }}>{depTipoLabel}</span>
+              )}
             </div>
           )}
         </div>
@@ -1156,13 +1160,16 @@ function CronogramaTab({ contrato }: { contrato: string }) {
           </div>
           <div className="p-2">
             <GanttChart data={ganttRows.map((r: any) => ({
-              label: r.label,
-              start_iso: r.start_iso,
-              end_iso: r.end_iso,
-              pct: r.pct,
-              critico: r.critico,
-              nivel: (r.nivel || 'macro') as 'macro' | 'micro' | 'sub',
-              color: r.color,
+              label:        r.label,
+              start_iso:    r.start_iso,
+              end_iso:      r.end_iso,
+              forecast_end: r.forecast_end ?? undefined,
+              pct:          r.pct,
+              critico:      r.critico,
+              nivel:        (r.nivel || 'macro') as 'macro' | 'micro' | 'sub',
+              color:        r.color,
+              responsavel:  r.responsavel,
+              fase:         r.fase,
             }))} />
           </div>
         </div>

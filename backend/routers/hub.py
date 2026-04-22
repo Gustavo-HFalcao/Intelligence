@@ -129,24 +129,36 @@ def _count_working_days(start_iso: str, end_iso: str, working_days: set = None) 
 
 
 def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
-    """Atualiza datas do pai com base nos filhos (min/max). 1:1 Parity."""
+    """Atualiza datas e % do pai com base nos filhos (min/max, média ponderada)."""
     children = sb_select("hub_atividades", filters={"parent_id": parent_id, "contrato": contrato}, client_id=client_id)
     if not children:
         return
-    
+
     starts = [r["inicio_previsto"] for r in children if r.get("inicio_previsto")]
-    ends = [r["termino_previsto"] for r in children if r.get("termino_previsto")]
-    
+    ends   = [r["termino_previsto"] for r in children if r.get("termino_previsto")]
+
+    update_data: Dict[str, Any] = {}
+
     if starts and ends:
-        sb_update("hub_atividades", filters={"id": parent_id}, data={
-            "inicio_previsto": min(starts),
-            "termino_previsto": max(ends),
-        }, client_id=client_id)
-        
-        # Cascading update
-        parent_rows = sb_select("hub_atividades", filters={"id": parent_id}, limit=1, client_id=client_id)
-        if parent_rows and parent_rows[0].get("parent_id"):
-            _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id)
+        update_data["inicio_previsto"]  = min(starts)
+        update_data["termino_previsto"] = max(ends)
+
+    # Rollup % — weighted average by peso_pct, fallback to simple average
+    pesos = [float(c.get("peso_pct") or 0) for c in children]
+    pcts  = [float(c.get("conclusao_pct") or 0) for c in children]
+    if sum(pesos) > 0:
+        pct_macro = round(sum(p * w for p, w in zip(pcts, pesos)) / sum(pesos), 1)
+    else:
+        pct_macro = round(sum(pcts) / len(pcts), 1) if pcts else 0.0
+    update_data["conclusao_pct"] = int(min(100, pct_macro))
+
+    if update_data:
+        sb_update("hub_atividades", filters={"id": parent_id}, data=update_data, client_id=client_id)
+
+    # Cascade up
+    parent_rows = sb_select("hub_atividades", filters={"id": parent_id}, limit=1, client_id=client_id)
+    if parent_rows and parent_rows[0].get("parent_id"):
+        _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id)
 
 
 def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str, Any]:
@@ -610,6 +622,13 @@ async def get_visao_geral(
 
 # ── Aba: Cronograma ───────────────────────────────────────────────────────────
 
+_CRONOGRAMA_TTL = 30  # segundos — invalida no submit do RDO
+
+
+def _cronograma_cache_key(contrato: str) -> str:
+    return f"cronograma:{contrato}"
+
+
 @router.get("/cronograma")
 async def get_cronograma(
     contrato: str = Query(...),
@@ -617,6 +636,13 @@ async def get_cronograma(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     """Atividades hierárquicas (macro → micro → sub) com datas e progresso."""
+    from backend.core.redis_cache import cache_get, cache_set
+
+    cache_key = _cronograma_cache_key(contrato)
+    cached = cache_get(client_id or "global", cache_key)
+    if cached is not None:
+        return cached
+
     filters: Dict[str, Any] = {"contrato": contrato}
     if client_id:
         filters["client_id"] = client_id
@@ -650,24 +676,44 @@ async def get_cronograma(
         f["status"] = st
         atividades.append(f)
 
-    # Gantt rows — inclui todas as atividades com datas válidas
+    # Gantt rows — sort by fase code then start date, always macro before children
+    def _fase_sort_key(r: Dict) -> tuple:
+        fase = str(r.get("fase") or "").strip()
+        nivel = r.get("nivel", "macro")
+        # Numeric sort for "1", "1.1", "2.3" style codes
+        parts = []
+        for seg in fase.split("."):
+            try: parts.append(int(seg))
+            except: parts.append(0)
+        nivel_ord = {"macro": 0, "micro": 1, "sub": 2}.get(str(nivel), 1)
+        ini = str(r.get("inicio_previsto") or "")[:10]
+        return (parts or [0], nivel_ord, ini)
+
+    sorted_atividades = sorted(atividades, key=_fase_sort_key)
+
     gantt = []
-    for r in atividades[:100]:
+    for r in sorted_atividades[:120]:
         ini = str(r.get("inicio_previsto") or "")[:10]
         ter = str(r.get("termino_previsto") or "")[:10]
-        if ini and ter and len(ini) == 10 and len(ter) == 10:
-            gantt.append({
-                "label":       r.get("atividade", "")[:30],
-                "start_iso":   ini,
-                "end_iso":     ter,
-                "pct":         str(int(float(r.get("conclusao_pct") or 0))),
-                "critico":     r.get("critico", "Nao"),
-                "responsavel": r.get("responsavel", ""),
-                "nivel":       r.get("nivel", "macro"),
-                "color":       "#EF4444" if str(r.get("critico", "")).lower() == "sim" else r.get("fase_color", "#C98B2A"),
-            })
+        if not (ini and ter and len(ini) == 10 and len(ter) == 10):
+            continue
+        eac = str(r.get("_data_fim_prevista") or "")[:10]
+        gantt.append({
+            "label":          r.get("atividade", "")[:35],
+            "start_iso":      ini,
+            "end_iso":        ter,
+            "forecast_end":   eac if eac and eac != ter else None,
+            "pct":            str(int(float(r.get("conclusao_pct") or 0))),
+            "critico":        r.get("critico", "Nao"),
+            "responsavel":    r.get("responsavel", ""),
+            "nivel":          r.get("nivel", "macro"),
+            "fase":           r.get("fase", ""),
+            "color":          "#EF4444" if str(r.get("critico", "")).lower() == "sim" else r.get("fase_color", "#C98B2A"),
+        })
 
-    return {"atividades": atividades, "gantt": gantt, "total": len(atividades)}
+    result = {"atividades": sorted_atividades, "gantt": gantt, "total": len(atividades)}
+    cache_set(client_id or "global", cache_key, result, ttl=_CRONOGRAMA_TTL)
+    return result
 
 
 @router.patch("/cronograma/{atividade_id}")
@@ -708,8 +754,14 @@ async def update_atividade(
                 pass
 
     # Recalc parent bounds
+    contrato_upd = updated_dict.get("contrato", body.get("contrato", ""))
     if updated_dict and updated_dict.get("parent_id"):
-        _recalc_parent_dates(updated_dict["parent_id"], updated_dict.get("contrato", ""), client_id or "")
+        _recalc_parent_dates(updated_dict["parent_id"], contrato_upd, client_id or "")
+
+    # Invalidate cronograma cache for this contract
+    if contrato_upd:
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(contrato_upd))
 
     return {"ok": True, "row": updated_dict}
 
@@ -724,6 +776,9 @@ async def create_atividade(
     row = sb_insert("hub_atividades", body, client_id=client_id)
     if row and row.get("parent_id"):
         _recalc_parent_dates(row["parent_id"], row.get("contrato", ""), client_id or "")
+    if row and row.get("contrato"):
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(row["contrato"]))
     return {"ok": True, "row": row}
 
 
@@ -733,6 +788,10 @@ async def delete_atividade(
     user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
+    # Grab contrato before deletion for cache invalidation
+    target = sb_select("hub_atividades", filters={"id": atividade_id}, limit=1, client_id=client_id) or []
+    contrato_del = target[0].get("contrato", "") if target else ""
+
     # Cascade: remove filhos antes de remover o pai
     children = sb_select("hub_atividades", filters={"parent_id": atividade_id}, client_id=client_id) or []
     for child in children:
@@ -741,6 +800,11 @@ async def delete_atividade(
             sb_delete("hub_atividades", filters={"id": gc["id"]})
         sb_delete("hub_atividades", filters={"id": child["id"]})
     sb_delete("hub_atividades", filters={"id": atividade_id})
+
+    if contrato_del:
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(contrato_del))
+
     return {"ok": True}
 
 
@@ -770,7 +834,7 @@ async def recalcular_datas(
             continue
 
         if dep_tipo == "depende_termino" and dep.get("termino_previsto") and row.get("inicio_previsto"):
-            # inicio deve ser >= termino da dependência
+            # início deve ser >= término da dependência (FS — Finish-to-Start)
             dep_ter = dep["termino_previsto"][:10]
             row_ini = row["inicio_previsto"][:10]
             if row_ini < dep_ter:
@@ -782,6 +846,24 @@ async def recalcular_datas(
                     "termino_previsto": new_ter,
                 }, client_id=client_id)
                 updated += 1
+
+        elif dep_tipo == "depende_inicio" and dep.get("inicio_previsto") and row.get("inicio_previsto"):
+            # início deve ser >= início da dependência (SS — Start-to-Start)
+            dep_ini = dep["inicio_previsto"][:10]
+            row_ini = row["inicio_previsto"][:10]
+            if row_ini < dep_ini:
+                dias = int(row.get("dias_planejados") or 0)
+                new_ini = dep_ini
+                new_ter = _add_working_days(new_ini, dias) if dias > 0 else new_ini
+                sb_update("hub_atividades", filters={"id": row["id"]}, data={
+                    "inicio_previsto": new_ini,
+                    "termino_previsto": new_ter,
+                }, client_id=client_id)
+                updated += 1
+
+    if updated > 0:
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
 
     return {"ok": True, "recalculadas": updated, "total": len(rows)}
 
