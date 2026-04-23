@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>COMPROVANTE DE REEMBOLSO - {{PROTOCOLO}}</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Plus+Jakarta+Sans:wght@400;500;600&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#1a1a1a",
+              "secondary": "#4b5563",
+              "accent": "#c98b2a",
+              "surface": "#ffffff",
+              "surface-variant": "#f9fafb",
+              "border": "#e5e7eb"
+            },
+            fontFamily: {
+              "headline": ["Rajdhani", "sans-serif"],
+              "body": ["Plus Jakarta Sans", "sans-serif"],
+              "mono": ["JetBrains Mono", "monospace"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        @media print {
+            body { background-color: white !important; }
+            .print-container { 
+                box-shadow: none !important; 
+                margin: 0 !important; 
+                padding: 0 !important;
+                width: 100% !important;
+            }
+            .no-print { display: none !important; }
+        }
+        body { 
+            background-color: #f3f4f6;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        .page-canvas {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 2rem auto;
+            background: white;
+            padding: 20mm;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: 'Rajdhani';
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #1a1a1a;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 0.5rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body class="font-body text-primary">
+<!-- Print Control (Floating) -->
+<div class="fixed top-8 right-8 no-print z-50">
+<button class="bg-accent hover:bg-[#b07925] text-white px-6 py-3 rounded-full flex items-center gap-2 shadow-lg transition-transform active:scale-95 font-headline font-bold uppercase tracking-widest" onclick="window.print()">
+<span class="material-symbols-outlined">print</span>
+            Gerar PDF / Imprimir
+        </button>
+</div>
+<!-- Main Document Canvas -->
+<main class="page-canvas print-container">
+<!-- 1. Cabeçalho -->
+<header class="flex justify-between items-start mb-10 border-b-4 border-accent pb-6">
+<div class="flex flex-col">
+<div class="font-headline text-2xl font-bold tracking-tighter text-accent mb-1">FIELD_OPS_V1</div>
+<div class="font-mono text-[10px] text-secondary uppercase tracking-[0.2em]">Industrial Intel Systems</div>
+</div>
+<div class="text-right">
+<h1 class="font-headline text-3xl font-bold text-primary leading-none mb-2">COMPROVANTE DE DESPESA</h1>
+<p class="font-headline text-lg font-medium text-secondary tracking-widest uppercase">REEMBOLSO</p>
+<div class="inline-block bg-accent/10 border border-accent/20 px-3 py-1 mt-2">
+<span class="font-mono text-xs font-bold text-accent">PROTOCOLO #{{PROTOCOLO}}</span>
+</div>
+</div>
+</header>
+<!-- 2. Dados do Colaborador -->
+<section class="mb-10">
+<h2 class="section-title">
+<span class="material-symbols-outlined text-accent">person</span>
+                Dados do Colaborador
+            </h2>
+<div class="grid grid-cols-3 gap-6 bg-surface-variant p-6 rounded-lg border border-border">
+<div>
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">Nome Completo</label>
+<p class="font-semibold text-sm">{{NOME}}</p>
+</div>
+<div>
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">Setor / Departamento</label>
+<p class="font-semibold text-sm">{{SETOR}}</p>
+</div>
+<div>
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">Projeto Relacionado</label>
+<p class="font-semibold text-sm">{{PROJETO}}</p>
+</div>
+</div>
+</section>
+<!-- 3. Detalhes do Abastecimento -->
+<section class="mb-10">
+<h2 class="section-title">
+<span class="material-symbols-outlined text-accent">local_gas_station</span>
+                Detalhes do Abastecimento
+            </h2>
+<div class="overflow-hidden border border-border rounded-lg">
+<table class="w-full text-left">
+<thead>
+<tr class="bg-surface-variant border-b border-border">
+<th class="px-6 py-3 font-mono text-[10px] uppercase text-secondary">Combustível</th>
+<th class="px-6 py-3 font-mono text-[10px] uppercase text-secondary">Litros</th>
+<th class="px-6 py-3 font-mono text-[10px] uppercase text-secondary">Preço/Litro</th>
+<th class="px-6 py-3 font-mono text-[10px] uppercase text-secondary text-right">Valor Total</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border">
+<tr>
+<td class="px-6 py-4 text-sm font-medium">{{COMBUSTIVEL}}</td>
+<td class="px-6 py-4 text-sm font-mono">{{LITROS}} L</td>
+<td class="px-6 py-4 text-sm font-mono">R$ {{PRECO_LITRO}}</td>
+<td class="px-6 py-4 text-lg font-bold text-right text-accent font-mono">R$ {{VALOR_TOTAL}}</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- 4. Localização e Rota -->
+<section class="mb-10">
+<h2 class="section-title">
+<span class="material-symbols-outlined text-accent">route</span>
+                Localização e Rota
+            </h2>
+<div class="grid grid-cols-2 gap-8">
+<div class="space-y-4">
+<div class="flex gap-4 p-4 border border-border rounded-lg">
+<span class="material-symbols-outlined text-secondary">location_on</span>
+<div>
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">Localização do Evento</label>
+<p class="text-sm font-semibold">{{CIDADE}}, {{ESTADO}}</p>
+<p class="text-[11px] text-secondary mt-1 font-mono">GPS: {{COORDENADAS_ENDERECO}}</p>
+</div>
+</div>
+<div class="p-4 border border-border rounded-lg">
+<label class="font-mono text-[9px] uppercase text-secondary block mb-2">Finalidade da Viagem</label>
+<p class="text-sm italic text-secondary">{{FINALIDADE}}</p>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="p-4 bg-surface-variant border border-border rounded-lg flex flex-col justify-center">
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">KM Inicial</label>
+<p class="text-xl font-mono font-bold">{{KM_INICIAL}}</p>
+</div>
+<div class="p-4 bg-surface-variant border border-border rounded-lg flex flex-col justify-center">
+<label class="font-mono text-[9px] uppercase text-secondary block mb-1">KM Final</label>
+<p class="text-xl font-mono font-bold">{{KM_FINAL}}</p>
+</div>
+<div class="col-span-2 p-4 bg-accent/5 border border-accent/20 rounded-lg flex items-center justify-between">
+<label class="font-mono text-[10px] uppercase font-bold text-accent">Distância Percorrida</label>
+<p class="text-2xl font-mono font-bold text-accent">{{KM_PERCORRIDO}} KM</p>
+</div>
+</div>
+</div>
+</section>
+<!-- 5. Comprovante Fiscal -->
+<section class="mb-12">
+<h2 class="section-title">
+<span class="material-symbols-outlined text-accent">receipt_long</span>
+                Comprovante Fiscal (Scan)
+            </h2>
+<div class="relative bg-surface-variant border-2 border-dashed border-border rounded-xl p-8 flex items-center justify-center min-h-[300px]">
+<img alt="Scan da NF" class="max-w-full max-h-[400px] object-contain shadow-2xl rounded-sm" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB1cT5UtoElMutXqU9yLV7WEPMA7XtpQO6fJSp40lteUnTDbe0-EPgpqruwWIIE6-M9wdHpyeQav-04aShFjfXoOdDnVbH_ld5tcu1LuUz8IgOhRzvBxi8fgz6-qIMFjwAdFjU4Orxg8YHgLaou-ObkmVNqCE2U0di56Dd7RHG6Zk1SM77BEcOIkUMj_ZcU0WrpaMGbjbzwiS3IZVr1VIFYtM_vvGta5XjZUaOCjVvXSV3KCKziFMXg7gRWfydDzbZp6hG7I6atDMI"/>
+<!-- 6. Validação IA (Overlaid) -->
+<div class="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm border border-emerald-500/30 p-3 rounded-lg flex items-center gap-3 shadow-xl">
+<div class="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white">
+<span class="material-symbols-outlined">verified</span>
+</div>
+<div>
+<p class="font-headline font-bold text-[10px] text-emerald-700 uppercase tracking-wider">Documento Validado por IA</p>
+<p class="font-mono text-[8px] text-emerald-600/70">DATA: {{DATA_PROCESSAMENTO}}</p>
+<p class="font-mono text-[7px] text-secondary">HASH_MD5: 0x8922F...B92</p>
+</div>
+</div>
+</div>
+</section>
+<!-- 7. Assinaturas -->
+<section class="mt-20">
+<div class="grid grid-cols-2 gap-20">
+<div class="text-center">
+<div class="h-20 border-b border-primary/20 mb-4 flex items-end justify-center">
+<span class="font-headline text-[10px] text-secondary/40 italic uppercase tracking-widest">Assinado Digitalmente</span>
+</div>
+<p class="font-headline font-bold text-xs uppercase tracking-[0.2em] mb-1">Solicitante</p>
+<p class="font-mono text-[9px] text-secondary uppercase">{{NOME}}</p>
+</div>
+<div class="text-center">
+<div class="h-20 border-b border-primary/20 mb-4 flex items-end justify-center">
+<!-- Placeholder para carimbo/visto -->
+</div>
+<p class="font-headline font-bold text-xs uppercase tracking-[0.2em] mb-1">Aprovador Financeiro</p>
+<p class="font-mono text-[9px] text-secondary uppercase">Gestão de Operações de Campo</p>
+</div>
+</div>
+</section>
+<!-- Footer Audit -->
+<footer class="mt-16 pt-8 border-t border-border flex justify-between items-center text-[8px] font-mono text-secondary uppercase tracking-tighter">
+<div>Autenticidade garantida via sistema FIELD_OPS_V1</div>
+<div>Página 01 / 01</div>
+<div>Timestamp de Emissão: 2024-05-24 14:22:01 UTC</div>
+</footer>
+</main>
+</body></html>

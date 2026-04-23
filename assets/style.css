@@ -1,0 +1,2327 @@
+/* ============================================================
+   DEEP TECTONIC THEME — BOMTEMPO ENGENHARIA Dashboard
+   Migrated from React+TS reference to Reflex
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── CSS Variables ──────────────────────────────────────────── */
+:root {
+    --bg-void: #030504;
+    --bg-depth: #081210;
+    --bg-surface: #0e1a17;
+    --bg-glass: rgba(14, 26, 23, 0.7);
+
+    --copper-500: #C98B2A;
+    --copper-400: #E0A63B;
+    --copper-glow: rgba(201, 139, 42, 0.15);
+
+    --patina-500: #2A9D8F;
+    --patina-glow: rgba(42, 157, 143, 0.15);
+
+    --text-main: #E0E0E0;
+    --text-muted: #889999;
+
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-highlight: rgba(201, 139, 42, 0.3);
+
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Light Mode: handled entirely by /light_theme.css ───────── */
+/* Do not add light mode rules here — light_theme.css is loaded after
+   this file and owns all [data-is-root-theme].light overrides. */
+[data-is-root-theme].light .page-bg-text {
+    color: #0e1a17 !important;
+}
+
+/* ── Global ─────────────────────────────────────────────────── */
+body {
+    font-family: 'Outfit', sans-serif !important;
+    background-color: var(--bg-void) !important;
+    /* background-image uses CSS var so light theme can override via :root vars */
+    background-image:
+        var(--bg-gradient, radial-gradient(circle at 50% 0%, #1a2e29 0%, transparent 40%)),
+        var(--bg-noise, url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E"));
+    color: var(--text-main);
+    overflow-x: hidden;
+    /* Smart Scaling: Adjusts base density for different screens */
+    font-size: 16px;
+}
+
+/* Laptop/Desktop Scaling (Zoom Out effect) */
+@media (max-width: 1600px) {
+    html {
+        font-size: 14px;
+        /* ~87.5% zoom */
+    }
+}
+
+@media (max-width: 1366px) {
+    html {
+        font-size: 13px;
+        /* ~81.25% zoom */
+    }
+}
+
+/* Mobile Scaling */
+@media (max-width: 768px) {
+    html {
+        font-size: 14px;
+    }
+}
+
+/* Small Mobile Auto-Zoom */
+@media (max-width: 380px) {
+    html {
+        font-size: 12px;
+        /* ~75% zoom for small phones like iPhone SE */
+    }
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: 'Rajdhani', sans-serif !important;
+}
+
+/* ── Glassmorphism ──────────────────────────────────────────── */
+.glass-panel {
+    background: var(--bg-glass) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle) !important;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+.glass-panel-hover:hover {
+    border-color: var(--border-highlight) !important;
+    box-shadow: 0 0 20px var(--copper-glow);
+}
+
+.glass-highlight {
+    border-color: var(--border-highlight) !important;
+    box-shadow: 0 0 20px var(--copper-glow);
+}
+
+/* ── Animations ─────────────────────────────────────────────── */
+
+/* Banner de reconexão: fica invisível por 2.5s.
+   Navegações SPA normais hidratam em <500ms — o elemento é removido
+   pelo React antes do delay expirar, então o user nunca vê.
+   Só aparece se ~is_hydrated persistir (WebSocket realmente caiu). */
+@keyframes reconnect-banner-appear {
+    to { opacity: 1; }
+}
+
+@keyframes enter {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* animate-enter: canonical definition below in ENTERPRISE section — this is deprecated */
+
+.delay-100 {
+    animation-delay: 100ms;
+}
+
+.delay-200 {
+    animation-delay: 200ms;
+}
+
+.delay-300 {
+    animation-delay: 300ms;
+}
+
+.delay-400 {
+    animation-delay: 400ms;
+}
+
+.delay-500 {
+    animation-delay: 500ms;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 5px var(--copper-glow);
+    }
+
+    50% {
+        box-shadow: 0 0 15px var(--copper-glow);
+    }
+}
+
+/* ── Font Utility Classes ───────────────────────────────────── */
+.font-tech {
+    font-family: 'Rajdhani', sans-serif !important;
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+.font-body {
+    font-family: 'Outfit', sans-serif !important;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-void);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--copper-500);
+    border-radius: 0px;
+}
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--copper-500) var(--bg-void);
+}
+
+/* ── KPI Card ───────────────────────────────────────────────── */
+.kpi-card {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.5s ease;
+}
+
+.kpi-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(201, 139, 42, 0) 0%, rgba(201, 139, 42, 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    border-radius: 16px;
+}
+
+.kpi-card:hover {
+    border-color: rgba(201, 139, 42, 0.5) !important;
+}
+
+.kpi-card:hover::after {
+    opacity: 1;
+}
+
+.kpi-card .kpi-icon {
+    transition: transform 0.3s ease;
+}
+
+.kpi-card:hover .kpi-icon {
+    transform: scale(1.1);
+}
+
+/* ── Corner Decoration ──────────────────────────────────────── */
+.corner-decoration {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 8px;
+    opacity: 0.3;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+.sidebar-container {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+    border-radius: 16px;
+    transition: all 0.5s var(--ease-out-expo);
+}
+
+.sidebar-item {
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-item-active {
+    background: rgba(201, 139, 42, 0.1) !important;
+    border: 1px solid rgba(201, 139, 42, 0.3) !important;
+}
+
+.sidebar-item-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--copper-500);
+    box-shadow: 0 0 10px var(--copper-500);
+}
+
+/* ── Header Banner ──────────────────────────────────────────── */
+.header-banner {
+    position: relative;
+    overflow: hidden;
+}
+
+.header-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(201, 139, 42, 0.1) 0%, transparent 50%);
+    pointer-events: none;
+}
+
+/* ── Progress Bars ──────────────────────────────────────────── */
+.progress-bar-container {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 9999px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 1s ease-out;
+}
+
+.progress-bar-ghost {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.12);
+    border-right: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+/* ── Table Styles ───────────────────────────────────────────── */
+.data-table {
+    width: 100%;
+    text-align: left;
+}
+
+.data-table th {
+    padding: 16px;
+    font-size: 10px;
+    font-weight: 900;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.data-table td {
+    padding: 16px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.data-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* ── Status Badges ──────────────────────────────────────────── */
+.badge-positive {
+    background: rgba(42, 157, 143, 0.1);
+    border: 1px solid rgba(42, 157, 143, 0.2);
+    color: #2A9D8F;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.badge-negative {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #EF4444;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+/* ── Gauge ──────────────────────────────────────────────────── */
+.gauge-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.gauge-center-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -20%);
+    text-align: center;
+}
+
+/* ── Chat ───────────────────────────────────────────────────── */
+.chat-container {
+    background: rgba(6, 13, 11, 0.88);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(201, 139, 42, 0.15);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 0 80px rgba(201, 139, 42, 0.06), 0 32px 64px rgba(0, 0, 0, 0.6);
+}
+
+.chat-header {
+    background: linear-gradient(90deg, rgba(201, 139, 42, 0.08) 0%, transparent 60%);
+    border-bottom: 1px solid rgba(201, 139, 42, 0.12);
+}
+
+.chat-input-area {
+    background: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid rgba(201, 139, 42, 0.1);
+}
+
+/* ── Recharts Overrides ─────────────────────────────────────── */
+.recharts-default-tooltip {
+    background-color: #081210 !important;
+    border: 1px solid rgba(201, 139, 42, 0.3) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: blur(12px);
+}
+
+.recharts-tooltip-label {
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+}
+
+.recharts-tooltip-item {
+    color: var(--text-main) !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+}
+
+.recharts-legend-item-text {
+    color: var(--text-muted) !important;
+    font-size: 12px !important;
+}
+
+/* ── Select Styling ─────────────────────────────────────────── */
+.filter-select {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    color: white;
+    padding: 8px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+}
+
+.filter-select:focus {
+    border-color: var(--copper-500);
+}
+
+.filter-select option {
+    background: var(--bg-void);
+}
+
+/* ── Radix overrides for dark theme ─────────────────────────── */
+.rt-SelectContent {
+    background-color: #0f1e1a !important;
+    border: 1px solid rgba(201, 139, 42, 0.25) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55) !important;
+    color: #e0e0e0 !important;
+}
+
+/* Todos os itens do select têm texto claro */
+.rt-SelectItem {
+    color: #e0e0e0 !important;
+}
+
+/* Item highlighted (hover / navegação teclado) */
+.rt-SelectItem[data-highlighted] {
+    background-color: rgba(201, 139, 42, 0.25) !important;
+    color: #ffffff !important;
+    outline: none !important;
+}
+
+/* Item selecionado atualmente */
+.rt-SelectItem[data-state="checked"] {
+    color: var(--copper-400) !important;
+}
+
+.rt-SelectItem:hover {
+    background-color: rgba(201, 139, 42, 0.15) !important;
+    color: #ffffff !important;
+}
+
+/* Texto do indicador de check */
+.rt-SelectItemIndicator {
+    color: var(--copper-500) !important;
+}
+
+/* Trigger (botão que abre o select) */
+.rt-SelectTrigger {
+    color: #e0e0e0 !important;
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Placeholder do select — Radix baixa a opacidade por padrão, forçar legível */
+.rt-SelectTrigger[data-placeholder]>span,
+.rt-SelectTrigger[data-placeholder] .rt-SelectTriggerInner,
+.rt-SelectTrigger[data-placeholder] {
+    color: rgba(255, 255, 255, 0.55) !important;
+    opacity: 1 !important;
+}
+
+/* ── Placeholder contrast fix (Radix UI overrides) ──────────── */
+/* Radix dark theme sets placeholder too dark — force visible grey */
+.rt-TextFieldInput::placeholder,
+input::placeholder,
+textarea::placeholder {
+    color: rgba(255, 255, 255, 0.45) !important;
+    opacity: 1 !important;
+}
+
+/* ── Bounce animation for chat loading ──────────────────────── */
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-4px);
+    }
+}
+
+.bounce-1 {
+    animation: bounce 0.6s infinite 0ms;
+}
+
+.bounce-2 {
+    animation: bounce 0.6s infinite 150ms;
+}
+
+.bounce-3 {
+    animation: bounce 0.6s infinite 300ms;
+}
+
+/* ── Project Card ──────────────────────────────────────────── */
+.project-card {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s ease;
+    cursor: pointer;
+}
+
+.project-card:hover {
+    border-color: var(--copper-500) !important;
+    box-shadow: 0 0 24px var(--copper-glow);
+}
+
+.project-card .arrow-icon {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.project-card:hover .arrow-icon {
+    opacity: 1;
+}
+
+.project-card:active {
+    transform: scale(0.97);
+    opacity: 0.8;
+    border-color: var(--copper-500) !important;
+    box-shadow: 0 0 16px var(--copper-glow);
+    transition: transform 0.08s ease, opacity 0.08s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENTERPRISE UX UPGRADE — MICROINTERACTIONS & SYSTEM
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Button Microinteractions ────────────────────────────── */
+button,
+.rt-Button,
+.rt-IconButton {
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.15s ease !important;
+}
+
+button:active,
+.rt-Button:active,
+.rt-IconButton:active {
+    transform: scale(0.97) !important;
+}
+
+/* ── Input Focus Ring (Global) ───────────────────────────── */
+/*
+   Radix TextField tem wrapper (.rt-TextFieldRoot) + inner input (.rt-TextFieldInput).
+   Ambos recebem estilos de foco independentes → dois anéis desalinhados.
+   Solução: ring APENAS no wrapper via :focus-within, suprimir no inner input.
+*/
+
+/* 1. Wrapper recebe o ring copper unificado */
+.rt-TextFieldRoot:focus-within {
+    box-shadow: 0 0 0 2px rgba(201, 139, 42, 0.28) !important;
+    border-color: var(--copper-500) !important;
+    outline: none !important;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease !important;
+}
+
+/* 2. Inner input: sem ring próprio — o wrapper já cuida */
+.rt-TextFieldRoot .rt-TextFieldInput:focus,
+.rt-TextFieldRoot input:focus {
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+/* 3. Inputs standalone (fora de TextField) mantêm o ring direto */
+input:not(.rt-TextFieldInput):focus,
+textarea:focus {
+    border-color: var(--copper-500) !important;
+    box-shadow: 0 0 0 2px rgba(201, 139, 42, 0.25) !important;
+    outline: none !important;
+}
+
+/* 4. GDG (Glide Data Grid) — remove outline nativo do browser no editor de célula */
+.dvn-scroller textarea:focus,
+.dvn-scroller input:focus,
+[class*="gdg"] textarea:focus,
+[class*="gdg"] input:focus {
+    outline: none !important;
+    box-shadow: inset 0 0 0 1px rgba(201, 139, 42, 0.5) !important;
+}
+
+input,
+textarea {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+/* ── Card Hover Lift Utility ─────────────────────────────── */
+.card-lift {
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+        box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.card-lift:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* ── Three-Dot Chat Typing Indicator ────────────────────── */
+.typing-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--copper-500);
+    border-radius: 50%;
+    display: inline-block;
+    animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    30% {
+        transform: translateY(-6px);
+        opacity: 1;
+    }
+}
+
+/* ── Streaming Cursor (AI response) ─────────────────────── */
+.streaming-cursor::after {
+    content: '▍';
+    color: var(--copper-500);
+    animation: cursorBlink 0.8s step-end infinite;
+    margin-left: 2px;
+}
+
+@keyframes cursorBlink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+}
+
+/* ── Empty State ─────────────────────────────────────────── */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    gap: 12px;
+}
+
+.empty-state-icon {
+    opacity: 0.3;
+    margin-bottom: 8px;
+}
+
+.empty-state-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text-main);
+    text-align: center;
+}
+
+.empty-state-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    max-width: 280px;
+    line-height: 1.6;
+}
+
+/* ── Floating Action Buttons (FAB) ───────────────────────── */
+.fab-chat {
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 50% !important;
+    cursor: pointer;
+    animation: fabGlow 3s ease-in-out infinite;
+    box-shadow: 0 4px 20px rgba(201, 139, 42, 0.45) !important;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.fab-chat:hover {
+    transform: scale(1.1) translateY(-2px) !important;
+    box-shadow: 0 8px 32px rgba(201, 139, 42, 0.7) !important;
+    animation: none !important;
+}
+
+@keyframes fabGlow {
+
+    0%,
+    100% {
+        box-shadow: 0 4px 20px rgba(201, 139, 42, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 4px 32px rgba(201, 139, 42, 0.75), 0 0 0 6px rgba(201, 139, 42, 0.08);
+    }
+}
+
+.fab-ai {
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    animation: fabAiGlow 3s ease-in-out infinite;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.fab-ai:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 32px rgba(201, 139, 42, 0.5), 0 0 0 1px rgba(201, 139, 42, 0.4) !important;
+    background: linear-gradient(135deg, #C98B2A, #E0A63B) !important;
+    color: #0A1F1A !important;
+    animation: none !important;
+}
+
+@keyframes fabAiGlow {
+
+    0%,
+    100% {
+        box-shadow: 0 4px 20px rgba(201, 139, 42, 0.2), 0 0 0 1px rgba(201, 139, 42, 0.2);
+    }
+
+    50% {
+        box-shadow: 0 4px 28px rgba(201, 139, 42, 0.4), 0 0 0 1px rgba(201, 139, 42, 0.4);
+    }
+}
+
+/* ── No Scrollbar Utility ─────────────────────────────────── */
+.no-scrollbar {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none !important;
+}
+
+/* ── Analysis Markdown Styles ────────────────────────────── */
+.analysis-markdown h1,
+.analysis-markdown h2,
+.analysis-markdown h3,
+.analysis-markdown h4 {
+    font-family: 'Rajdhani', sans-serif !important;
+    color: var(--copper-500) !important;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-weight: 700;
+}
+
+.analysis-markdown p {
+    margin-bottom: 12px;
+    line-height: 1.7;
+}
+
+.analysis-markdown ul,
+.analysis-markdown ol {
+    padding-left: 20px;
+    margin-bottom: 12px;
+}
+
+.analysis-markdown li {
+    margin-bottom: 6px;
+    line-height: 1.6;
+}
+
+.analysis-markdown strong {
+    color: white;
+    font-weight: 700;
+}
+
+.analysis-markdown code {
+    font-family: 'JetBrains Mono', monospace !important;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--copper-400);
+}
+
+.analysis-markdown blockquote {
+    border-left: 3px solid var(--copper-500);
+    padding-left: 16px;
+    margin: 12px 0;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ── Mobile Improvements ─────────────────────────────────── */
+@media (max-width: 768px) {
+    .kpi-card {
+        padding: 16px !important;
+    }
+
+    .glass-panel {
+        padding: 24px !important;
+        border-radius: 16px !important;
+    }
+
+    .data-table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        width: 100%;
+    }
+
+    .data-table {
+        min-width: 600px;
+    }
+
+    input,
+    textarea,
+    .rt-SelectTrigger {
+        min-height: 48px;
+        font-size: 16px !important;
+        /* prevents iOS auto-zoom */
+    }
+
+    .chat-input-area {
+        padding: 12px !important;
+    }
+
+    .chat-container {
+        border-radius: 0 !important;
+    }
+}
+
+/* ── KPI Card Enhanced Hover ─────────────────────────────── */
+.kpi-card {
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+        box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+        border-color 0.2s ease !important;
+}
+
+.kpi-card:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 1px rgba(201, 139, 42, 0.3) !important;
+    border-color: rgba(201, 139, 42, 0.5) !important;
+}
+
+/* ── Suggestion Chips ────────────────────────────────────── */
+.suggestion-chip {
+    transition: all 0.15s ease !important;
+    cursor: pointer;
+    user-select: none;
+}
+
+.suggestion-chip:hover {
+    background: rgba(201, 139, 42, 0.18) !important;
+    border-color: var(--copper-500) !important;
+    color: white !important;
+    transform: translateY(-1px);
+}
+
+.suggestion-chip:active {
+    transform: scale(0.96) !important;
+}
+
+/* ── Reembolso AI Status Cards ─────────────────────────── */
+.ai-validated {
+    border-color: rgba(42, 157, 143, 0.5) !important;
+    box-shadow: 0 0 20px rgba(42, 157, 143, 0.12) !important;
+}
+
+.ai-divergence {
+    border-color: rgba(245, 158, 11, 0.5) !important;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.12) !important;
+}
+
+.ai-failed {
+    border-color: rgba(239, 68, 68, 0.5) !important;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.12) !important;
+}
+
+/* ── RDO Stepper Enhanced ────────────────────────────────── */
+.stepper-dot-active {
+    box-shadow: 0 0 12px rgba(201, 139, 42, 0.5) !important;
+    animation: stepperPulse 2s ease-in-out infinite;
+}
+
+@keyframes stepperPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(201, 139, 42, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 18px rgba(201, 139, 42, 0.7);
+    }
+}
+
+/* ── Select Focus ────────────────────────────────────────── */
+.rt-SelectTrigger:focus,
+.rt-SelectTrigger[data-state="open"] {
+    box-shadow: 0 0 0 2px rgba(201, 139, 42, 0.3) !important;
+    border-color: var(--copper-500) !important;
+}
+
+/* ── Page Transition Enhanced ────────────────────────────── */
+/* canonical animate-enter is in the ENTERPRISE section below */
+
+/* ── AI Dialog Scanner ────────────────────────────────────── */
+@keyframes aiScanLine {
+    0% {
+        top: 0;
+        opacity: 1;
+    }
+
+    80% {
+        opacity: 0.5;
+    }
+
+    100% {
+        top: 100%;
+        opacity: 0;
+    }
+}
+
+.ai-scan-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            var(--copper-500) 20%,
+            var(--copper-400) 50%,
+            var(--copper-500) 80%,
+            transparent 100%);
+    box-shadow: 0 0 12px var(--copper-500), 0 0 28px rgba(201, 139, 42, 0.4);
+    animation: aiScanLine 2.8s linear infinite;
+}
+
+/* ── AI Loading Concentric Rings ──────────────────────────── */
+@keyframes aiRingPulse {
+
+    0%,
+    100% {
+        opacity: 0.25;
+    }
+
+    50% {
+        opacity: 0.65;
+        box-shadow: 0 0 20px rgba(201, 139, 42, 0.15);
+    }
+}
+
+.ai-ring-1 {
+    animation: aiRingPulse 2.5s ease-in-out infinite 0.0s;
+}
+
+.ai-ring-2 {
+    animation: aiRingPulse 2.5s ease-in-out infinite 0.5s;
+}
+
+.ai-ring-3 {
+    animation: aiRingPulse 2.5s ease-in-out infinite 1.0s;
+}
+
+/* ── Editor Loading Overlay Ring ────────────────────────── */
+@keyframes editorRingPulse {
+    0% {
+        transform: scale(1);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: scale(1.25);
+        opacity: 0.15;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 0.5;
+    }
+}
+
+.editor-loading-ring {
+    animation: editorRingPulse 1.6s ease-in-out infinite;
+}
+
+/* ── Chat Bubble Polish ───────────────────────────────────── */
+.chat-bubble-user {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.chat-bubble-user:hover {
+    box-shadow: 0 6px 24px rgba(201, 139, 42, 0.18) !important;
+    transform: translateY(-1px);
+}
+
+.chat-bubble-ai {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.chat-bubble-ai:hover {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+    transform: translateY(-1px);
+}
+
+/* ── Glass Reveal Animation ──────────────────────────────── */
+/* Used by login card (login.py class_name="glass-reveal")   */
+@keyframes glassReveal {
+    from {
+        opacity: 0;
+        transform: translateY(28px) scale(0.96);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.glass-reveal {
+    animation: glassReveal 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ── Button :focus-visible — Copper Ring ─────────────────── */
+/* Replaces the default browser blue outline on focused buttons
+   (tab navigation, click → focus). Keeps accessibility intact. */
+.rt-Button:focus-visible,
+.rt-IconButton:focus-visible,
+button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(201, 139, 42, 0.4) !important;
+    border-radius: inherit;
+}
+
+/* ── Toolbar Button Group Hover ──────────────────────────── */
+/* The pill-shaped groups ([Nova Linha][Deletar] etc.) get a
+   subtle glow when the cursor is inside the group area.      */
+.toolbar-group {
+    transition: border-color 0.15s ease, background 0.15s ease !important;
+}
+
+.toolbar-group:hover {
+    border-color: rgba(201, 139, 42, 0.2) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* ── Radix Alert Dialog Dark Theme ───────────────────────── */
+/* By default, Radix alert dialog has a light backdrop.
+   Force everything to the deep tectonic palette.            */
+.rt-AlertDialogContent,
+.rt-DialogContent {
+    background-color: #0e1a17 !important;
+    border: 1px solid rgba(201, 139, 42, 0.2) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(201, 139, 42, 0.1) !important;
+    color: #e0e0e0 !important;
+}
+
+/* Overlay backdrop */
+.rt-AlertDialogOverlay,
+.rt-DialogOverlay {
+    background-color: rgba(3, 5, 4, 0.75) !important;
+    backdrop-filter: blur(4px) !important;
+}
+
+/* ── Radix Tooltip Dark Theme — Enhanced ─────────────────── */
+/* State of the art: entrance animation, glow border, backdrop blur */
+
+@keyframes tooltipEnter {
+    from {
+        opacity: 0;
+        transform: translateY(-5px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes tooltipGlowPulse {
+    0%, 100% { box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(201, 139, 42, 0.10); }
+    50%       { box-shadow: 0 10px 36px rgba(0, 0, 0, 0.70), 0 0 0 1px rgba(201, 139, 42, 0.22), 0 0 14px rgba(201, 139, 42, 0.08); }
+}
+
+.rt-TooltipContent {
+    background-color: rgba(18, 32, 28, 0.97) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(201, 139, 42, 0.38) !important;
+    color: #f0ebe0 !important;
+    font-size: 11px !important;
+    font-family: 'Outfit', sans-serif !important;
+    font-weight: 500 !important;
+    line-height: 1.45 !important;
+    padding: 6px 12px !important;
+    border-radius: 6px !important;
+    letter-spacing: 0.015em !important;
+    /* Entrance animation */
+    animation: tooltipEnter 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+               tooltipGlowPulse 3.5s ease-in-out infinite 0.5s !important;
+    /* border-top copper accent */
+    border-top: 1px solid rgba(201, 139, 42, 0.55) !important;
+}
+
+/* Force text color on the inner Radix text node */
+.rt-TooltipContent .rt-TooltipText,
+.rt-TooltipText {
+    color: #f0ebe0 !important;
+}
+
+.rt-TooltipArrow {
+    fill: rgba(18, 32, 28, 0.97) !important;
+}
+
+/* Tooltip for bottom side — flip animation direction */
+.rt-TooltipContent[data-side="bottom"] {
+    animation: tooltipEnterDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+               tooltipGlowPulse 3.5s ease-in-out infinite 0.5s !important;
+}
+
+@keyframes tooltipEnterDown {
+    from {
+        opacity: 0;
+        transform: translateY(5px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── Radix Dropdown Menu Dark Theme ──────────────────────── */
+.rt-DropdownMenuContent,
+.rt-ContextMenuContent {
+    background-color: #0f1e1a !important;
+    border: 1px solid rgba(201, 139, 42, 0.25) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(201, 139, 42, 0.06) !important;
+}
+
+.rt-DropdownMenuItem,
+.rt-ContextMenuItem {
+    color: #e0e0e0 !important;
+}
+
+.rt-DropdownMenuItem[data-highlighted],
+.rt-ContextMenuItem[data-highlighted] {
+    background-color: rgba(201, 139, 42, 0.15) !important;
+    color: white !important;
+    outline: none !important;
+}
+
+/* ── Data Grid Empty State Fade ──────────────────────────── */
+/* Subtle fade-in for when the editor content area becomes visible */
+@keyframes gridFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.grid-enter {
+    animation: gridFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ── Command Bar (Editor Toolbar) ────────────────────────── */
+/* The "TABELA / PROJETO / CONTRATO" inline label text in the
+   command bar should pulse slightly on hover to feel interactive */
+.rt-SelectRoot:hover+span,
+.rt-SelectTrigger:hover {
+    border-color: rgba(201, 139, 42, 0.35) !important;
+}
+
+/* Tighten the amber surface select to fit the compact toolbar */
+.rt-SelectTrigger[data-size="2"] {
+    height: 32px !important;
+    min-height: 32px !important;
+}
+
+/* Remove any residual browser default outline on the canvas element */
+canvas:focus {
+    outline: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SKELETON LOADING SYSTEM
+   Copper-themed skeleton screens replacing generic spinners.
+   All keyframe animations centralised here.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Shimmer wave ────────────────────────────────────────── */
+@keyframes skeletonShimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(150%); }
+}
+
+.skel-shimmer {
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+.skel-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(201, 139, 42, 0.07) 50%,
+        transparent 100%
+    );
+    animation: skeletonShimmer 1.8s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* ── Skeleton placeholder block ──────────────────────────── */
+.skel-block {
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── RDO Radar Sync Loader ───────────────────────────────── */
+@keyframes radarSpin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes syncScanDown {
+    0%   { top: 0;    opacity: 1;   }
+    80%  {            opacity: 0.4; }
+    100% { top: 100%; opacity: 0;   }
+}
+
+@keyframes radarRingPulse {
+    0%, 100% { opacity: 0.18; }
+    50%       { opacity: 0.60; }
+}
+
+@keyframes syncCenterGlow {
+    0%, 100% { box-shadow: 0 0 12px rgba(201, 139, 42, 0.25); }
+    50%       { box-shadow: 0 0 28px rgba(201, 139, 42, 0.55), 0 0 0 4px rgba(201, 139, 42, 0.07); }
+}
+
+@keyframes stepReveal {
+    from { opacity: 0; transform: translateX(-10px); }
+    to   { opacity: 1; transform: translateX(0);     }
+}
+
+@keyframes stepIconSpin {
+    to { transform: rotate(360deg); }
+}
+
+/* Radar sweep conic rotation */
+.radar-sweep-anim {
+    animation: radarSpin 2.8s linear infinite;
+}
+
+/* Scan line (position: absolute relative to loader box) */
+.sync-scan-line {
+    position: absolute !important;
+    left: 0; right: 0; top: 0;
+    height: 2px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--copper-500) 20%,
+        var(--copper-400) 50%,
+        var(--copper-500) 80%,
+        transparent 100%
+    );
+    box-shadow: 0 0 12px var(--copper-500), 0 0 28px rgba(201, 139, 42, 0.3);
+    animation: syncScanDown 3.5s linear infinite;
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* Radar concentric rings */
+.radar-ring-1 { animation: radarRingPulse 2.5s ease-in-out infinite 0.0s; }
+.radar-ring-2 { animation: radarRingPulse 2.5s ease-in-out infinite 0.5s; }
+.radar-ring-3 { animation: radarRingPulse 2.5s ease-in-out infinite 1.0s; }
+.radar-ring-4 { animation: radarRingPulse 2.5s ease-in-out infinite 1.5s; }
+
+/* Radar centre glow */
+.radar-center-glow {
+    animation: syncCenterGlow 2s ease-in-out infinite;
+}
+
+/* Step items — sequential CSS reveal (no JS/Python state needed) */
+.sync-step-item {
+    animation: stepReveal 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    opacity: 0;
+}
+
+.sync-step-1 { animation-delay: 0.4s; }
+.sync-step-2 { animation-delay: 1.0s; }
+.sync-step-3 { animation-delay: 1.6s; }
+.sync-step-4 { animation-delay: 2.2s; }
+.sync-step-5 { animation-delay: 2.8s; }
+
+/* Spinning icon inside step */
+.step-icon-spin {
+    display: inline-block;
+    animation: stepIconSpin 1.2s linear infinite;
+    line-height: 1;
+}
+
+/* ── Chart Bar Skeleton Animation ────────────────────────── */
+@keyframes barSkelPulse {
+    0%, 100% { opacity: 0.45; }
+    50%       { opacity: 0.90; }
+}
+
+.skel-bar-1 { animation: barSkelPulse 1.8s ease-in-out infinite 0.00s; }
+.skel-bar-2 { animation: barSkelPulse 1.8s ease-in-out infinite 0.12s; }
+.skel-bar-3 { animation: barSkelPulse 1.8s ease-in-out infinite 0.24s; }
+.skel-bar-4 { animation: barSkelPulse 1.8s ease-in-out infinite 0.36s; }
+.skel-bar-5 { animation: barSkelPulse 1.8s ease-in-out infinite 0.48s; }
+.skel-bar-6 { animation: barSkelPulse 1.8s ease-in-out infinite 0.60s; }
+.skel-bar-7 { animation: barSkelPulse 1.8s ease-in-out infinite 0.72s; }
+.skel-bar-8 { animation: barSkelPulse 1.8s ease-in-out infinite 0.84s; }
+
+/* ── Donut SVG arc animation ─────────────────────────────── */
+@keyframes donutArcPulse {
+    0%, 100% { opacity: 0.35; }
+    50%       { opacity: 0.85; }
+}
+
+.donut-arc-1 { animation: donutArcPulse 2.0s ease-in-out infinite 0.0s; }
+.donut-arc-2 { animation: donutArcPulse 2.0s ease-in-out infinite 0.5s; }
+
+/* ── Unsaved Changes Pulse (Salvar no Banco button) ──────────── */
+@keyframes unsavedPulse {
+    0%, 100% {
+        box-shadow: 0 0 14px rgba(201, 139, 42, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 28px rgba(201, 139, 42, 0.75), 0 0 0 3px rgba(201, 139, 42, 0.08);
+    }
+}
+
+.save-unsaved {
+    animation: unsavedPulse 2.2s ease-in-out infinite !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MOBILE-FIRST RESPONSIVE SYSTEM
+   Breakpoints: sm=640px, md=768px, lg=1024px
+   RULE: max values in clamp() ALWAYS match current desktop values.
+   Desktop layout is never modified — all overrides are ≤640px only.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Login brand panel — scale to fill available height ─────────────────── */
+/* The outer panel has overflow:hidden. The inner vstack here just fills
+   the full panel height and scales its contents proportionally via CSS zoom,
+   so ALL elements are always visible — they just get smaller, never hidden. */
+.login-brand-inner {
+    height: 100%;
+    /* CSS zoom scales ALL children proportionally — simplest reliable approach.
+       Combined with justify-content:space-between (set via Reflex justify="between"),
+       all 7 elements distribute evenly, no empty gap at any viewport height. */
+    zoom: clamp(0.55, calc(100vh / 900px), 1);
+}
+
+/* ── Sidebar logo images — prevent flicker on page navigation ──────────── */
+/* rx.cond unmounts/remounts <img> when state rehydrates after navigation.
+   A short fade-in hides the blank frame while the decoded image is restored. */
+.sidebar-logo-img img,
+.sidebar-logo-img {
+    animation: logo-fade-in 0.18s ease forwards;
+}
+@keyframes logo-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ── Logo banner sizing ─────────────────────────────────────────── */
+.sidebar-logo-img img {
+    max-height: 52px;
+    width: 100%;
+    object-fit: contain;
+    object-position: center;
+}
+
+
+/* ── Sidebar is position:fixed — spacer reserves its width in flex flow ── */
+/* No extra CSS needed; spacer box in sidebar() handles layout push.        */
+
+
+/* ── Safe Area Insets (notch / home-indicator support) ────── */
+body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+
+/* ── iOS auto-zoom prevention: inputs ≥ 16px ─────────────── */
+/* iOS Safari auto-zooms the page when focusing an input with
+   font-size < 16px.  By enforcing 16px globally we prevent
+   this behaviour WITHOUT locking maximum-scale in the viewport
+   meta tag, so pinch-to-zoom still works normally.            */
+input,
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+input[type="tel"],
+input[type="search"],
+textarea,
+select,
+.rt-TextFieldInput,
+.rt-TextFieldRoot input,
+.rt-reset[type="text"],
+.rt-reset[type="password"] {
+    font-size: 16px !important;
+    -webkit-text-size-adjust: 100%;
+}
+
+/* ── Radix Popover — dark theme + above mobile drawer ─────── */
+/* Sidebar popover (user menu) must render above the mobile drawer (z-index: 9999) */
+.rt-PopoverContent {
+    background-color: #0f1e1a !important;
+    border: 1px solid rgba(201, 139, 42, 0.3) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(201, 139, 42, 0.08) !important;
+    color: #e0e0e0 !important;
+    z-index: 10001 !important;
+}
+
+/* ── Dialogs always above sidebar drawer (z-index: 9999) ─── */
+/* Applies globally (not just mobile) to prevent drawer overlap */
+.rt-DialogContent,
+.rt-AlertDialogContent {
+    z-index: 10100 !important;
+}
+.rt-DialogOverlay,
+.rt-AlertDialogOverlay {
+    z-index: 10099 !important;
+}
+
+/* ── Radix popper (Select, Tooltip, Popover dropdowns) MUST be above dialogs ─── */
+/* Dialog content = 10100; popper must be > 10100 to render on top */
+[data-radix-popper-content-wrapper] {
+    z-index: 10200 !important;
+}
+
+/* ── Mobile baseline (≤640px) ────────────────────────────── */
+@media (max-width: 640px) {
+
+    /* ── Layout: reduce main content padding ── */
+    /* Reflex MAIN_CONTENT_STYLE uses inline padding; !important overrides */
+    /* Target the main content flex child (sibling of sidebar, which is hidden) */
+    body > div > div > div:last-child,
+    #app > div > div > div:last-child {
+        padding: 12px 12px 80px 12px !important;
+    }
+
+    /* ── Glass Panel / Hero Header: reduce from 48px ── */
+    .glass-panel {
+        padding: clamp(16px, 4vw, 24px) !important;
+        border-radius: 16px !important;
+    }
+
+    /* ── Glass Panel background decorative icon: hide on mobile ── */
+    /* Prevents the huge 200px icon from creating horizontal overflow */
+    .glass-panel > div[style*="position: absolute"][style*="right: 0"] {
+        display: none !important;
+    }
+
+    /* ── KPI Cards: reduce padding ── */
+    .kpi-card {
+        padding: 14px !important;
+    }
+
+    /* ── KPI value font: 2.5rem → clamp on mobile ── */
+    /* Desktop value 2.5rem is preserved as max */
+    .kpi-card .rt-Text[style*="2.5rem"],
+    .kpi-card [style*="font-size: 2.5rem"] {
+        font-size: clamp(1.6rem, 5.5vw, 2.5rem) !important;
+    }
+
+    /* ── Touch targets: minimum 44×44px for all interactive elements ── */
+    .rt-Button,
+    .rt-IconButton,
+    button:not([role="checkbox"]) {
+        min-height: 44px !important;
+    }
+
+    /* ── Filter bars: allow wrapping ── */
+    .rt-Flex[style*="width: 100%"],
+    .rt-HStack {
+        flex-wrap: wrap !important;
+    }
+
+    /* ── Filter bar native selects: readable font on iOS ── */
+    .filter-select,
+    select {
+        font-size: 16px !important; /* prevents iOS auto-zoom */
+    }
+
+    /* ── Charts: prevent overflow ── */
+    .recharts-wrapper {
+        overflow: hidden !important;
+    }
+
+    /* ── Data table: horizontal scroll container ── */
+    .data-table-wrapper {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .data-table {
+        min-width: 480px;
+    }
+
+    /* ── Stepper (RDO wizard): smaller circles on mobile ── */
+    /* Desktop: 32px circles, mobile: 26px */
+    [style*="width: 32px"][style*="height: 32px"][style*="border-radius: 50%"] {
+        width: 26px !important;
+        height: 26px !important;
+        font-size: 9px !important;
+    }
+
+    /* ── FAB button: respect safe-area on mobile ── */
+    .fab-ai {
+        bottom: calc(20px + env(safe-area-inset-bottom)) !important;
+        right: calc(16px + env(safe-area-inset-right)) !important;
+    }
+
+    /* ── Sidebar popover content: ensure visible above drawer ── */
+    .rt-PopoverContent {
+        z-index: 10200 !important;
+    }
+
+    /* ── Page header titles: reduce decorative hero size ── */
+    /* "VISÃO GERAL", "FINANCEIRO" etc. at 3rem/2.25rem */
+    [style*="font-size: 3rem"] {
+        font-size: clamp(1.75rem, 6vw, 3rem) !important;
+    }
+    [style*="font-size: 2.25rem"] {
+        font-size: clamp(1.5rem, 5vw, 2.25rem) !important;
+    }
+    [style*="font-size: 1.875rem"],
+    [style*="font-size: 1.8rem"] {
+        font-size: clamp(1.25rem, 4.5vw, 1.875rem) !important;
+    }
+
+    /* ── Section titles: clamp ── */
+    [style*="font-size: 1.6rem"] {
+        font-size: clamp(1.1rem, 4vw, 1.6rem) !important;
+    }
+    [style*="font-size: 1.25rem"] {
+        font-size: clamp(1rem, 3.5vw, 1.25rem) !important;
+    }
+
+    /* ── Prevent any element from causing horizontal overflow ── */
+    /* Applied to direct page content; does NOT hide overflow-x on body */
+    main,
+    [id="__next"],
+    [data-nextjs-scroll-focus-boundary] {
+        overflow-x: hidden !important;
+    }
+
+    /* ── RDO form: prevent iOS input zoom (font-size ≥16px handles it,
+       but select/textarea need explicit enforcement)                   */
+    select, textarea {
+        font-size: 16px !important;
+    }
+
+    /* ── Radix Select trigger on mobile: full-height touch target ── */
+    [data-radix-select-trigger] {
+        min-height: 44px;
+    }
+}
+
+/* ── Top Page Transition Loading Bar ────────────────────── */
+/* Slim copper progress stripe that runs across the viewport top during
+   global navigation loading (GlobalState.show_progress_bar = True).
+
+   Always in DOM — class toggling avoids mid-animation DOM removal snap.
+   .top-bar-active  → play fill animation
+   .top-bar-idle    → fade+shrink out smoothly in 0.35s              */
+
+@keyframes topBarProgress {
+    0%   { transform: scaleX(0);    opacity: 1; }
+    75%  { transform: scaleX(0.88); opacity: 1; }
+    95%  { transform: scaleX(0.97); opacity: 1; }
+    100% { transform: scaleX(1);    opacity: 1; }
+}
+
+.top-loading-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    transform-origin: left center;
+    background: linear-gradient(
+        90deg,
+        var(--copper-500) 0%,
+        var(--copper-400) 40%,
+        var(--patina-500) 100%
+    );
+    box-shadow: 0 0 10px var(--copper-500), 0 0 22px rgba(201, 139, 42, 0.4);
+    z-index: 10200;
+    pointer-events: none;
+    border-radius: 0 2px 2px 0;
+    /* default hidden — no animation class yet */
+    transform: scaleX(0);
+    opacity: 0;
+}
+
+.top-bar-active {
+    animation: topBarProgress 2.5s cubic-bezier(0.1, 0.5, 0.5, 1) forwards;
+    opacity: 1;
+}
+
+.top-bar-idle {
+    /* navigation finished — slide right and fade out gracefully */
+    transform: scaleX(1);
+    opacity: 0;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENTERPRISE REDESIGN ADDITIONS
+   Sharp radii, auth progress bar, loader steps, sidebar sections
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Auth button progress bar ────────────────────────────── */
+@keyframes authProgress {
+    0%   { width: 0%; }
+    70%  { width: 80%; }
+    100% { width: 94%; }
+}
+
+.auth-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--copper-500), var(--copper-400));
+    animation: authProgress 12s cubic-bezier(0.05, 0.5, 0.6, 1) forwards;
+    box-shadow: 0 0 8px rgba(201, 139, 42, 0.5);
+}
+
+/* ── Enterprise post-login loader progress bar ───────────── */
+@keyframes loaderProgress {
+    0%   { width: 0%; }
+    80%  { width: 88%; }
+    100% { width: 96%; }
+}
+
+.loader-progress-fill {
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        var(--copper-500) 0%,
+        var(--copper-400) 50%,
+        var(--patina-500) 100%
+    );
+    animation: loaderProgress 4.5s cubic-bezier(0.1, 0.5, 0.8, 1) forwards;
+    box-shadow: 0 0 10px rgba(201, 139, 42, 0.5);
+}
+
+/* ── Sidebar section label ───────────────────────────────── */
+.sidebar-section-label {
+    user-select: none;
+    pointer-events: none;
+}
+
+/* ── KPI card sharp radius update ────────────────────────── */
+.kpi-card {
+    border-radius: 6px !important;
+}
+
+.kpi-card::after {
+    border-radius: 6px !important;
+}
+
+/* ── Project card sharp radius update ────────────────────── */
+.project-card {
+    border-radius: 6px !important;
+}
+
+/* ── Mobile: suppress custom scrollbar (saves 6px of viewport width) ── */
+@media (max-width: 640px) {
+    ::-webkit-scrollbar {
+        width: 0 !important;
+        height: 0 !important;
+    }
+
+    * {
+        scrollbar-width: none !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENTERPRISE DESIGN SYSTEM ENFORCEMENT
+   Overrides Radix radius="none" gaps + global token consistency
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Force 3px border-radius on ALL Radix buttons & controls ── */
+.rt-Button,
+.rt-IconButton,
+.rt-SelectTrigger,
+.rt-TextFieldRoot,
+.rt-TextFieldInput,
+.rt-Badge,
+.rt-TabsTrigger,
+button.rt-reset {
+    border-radius: 3px !important;
+}
+
+/* ── Force 6px on panels, cards, popovers, dialogs ─────────── */
+.rt-Card,
+.rt-PopoverContent,
+.rt-DropdownMenuContent,
+.rt-ContextMenuContent,
+.rt-HoverCardContent {
+    border-radius: 6px !important;
+}
+
+/* ── Sidebar nav items — enforce Rajdhani via class ─────────── */
+.font-tech,
+.sidebar-nav-text {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+}
+
+/* ── Ensure all sidebar text uses Rajdhani ──────────────────── */
+/* Target the sidebar container + all text descendants */
+[data-radix-scroll-area-viewport] .rt-Text,
+.no-scrollbar .rt-Text {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+}
+
+/* ── Inline spinner for page-level loading (world class) ─────── */
+/* Replace plain rx.spinner with a themed copper variant          */
+.rt-Spinner {
+    color: var(--copper-500) !important;
+}
+
+/* ── Page fade-in (used by animate-enter) ───────────────────── */
+@keyframes pageFadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.995);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── Canonical animate-enter + page-fade-in ─────────────────
+   Single source of truth. fill-mode: both ensures the element
+   stays at opacity:0 before animation and opacity:1 after.    */
+.page-fade-in,
+.animate-enter {
+    animation: pageFadeUp 0.42s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+/* ── KPI Popup Table Row Hover ──────────────────────────────── */
+/* Makes rows feel interactive and data-dense like Stripe/Linear */
+.rt-DialogContent table tr:hover td {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+
+/* ── Header banner enterprise style ──────────────────────────── */
+/* The glass-panel within the index page gets a subtle gradient top-to-bottom */
+.glass-panel.animate-enter {
+    border-top: 1px solid rgba(201, 139, 42, 0.15) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ENTERPRISE KPI POPUP TABLE
+   ══════════════════════════════════════════════════════════════ */
+
+.enterprise-kpi-table tbody tr {
+    transition: background 0.12s ease;
+}
+.enterprise-kpi-table tbody tr:hover {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+/* Alternating row tint for readability */
+.enterprise-kpi-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+}
+/* Remove last-row bottom border */
+.enterprise-kpi-table tbody tr:last-child td {
+    border-bottom: none !important;
+}
+/* Remove last-col right border */
+.enterprise-kpi-table th:last-child,
+.enterprise-kpi-table td:last-child {
+    border-right: none !important;
+}
+/* Copper top accent line on the whole table */
+.enterprise-kpi-table {
+    border-top: 2px solid rgba(201, 139, 42, 0.4) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   USUARIO TABLE ROWS — ensure contrast on dark bg
+   ══════════════════════════════════════════════════════════════ */
+
+/* Radix Table with variant=surface needs stronger row dividers on our theme */
+.rt-TableRow {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    transition: background 0.12s ease;
+}
+.rt-TableRow:hover {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+/* Column headers on dark backgrounds */
+.rt-TableColumnHeaderCell {
+    color: rgba(136, 153, 153, 0.8) !important;
+    font-size: 10px !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE OVERRIDES
+   ══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+    /* Main content: remove left/right overflow that causes x-scroll */
+    .reflex-main-content {
+        overflow-x: hidden !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    /* KPI grid becomes single column on small screens */
+    .kpi-card {
+        min-width: 100% !important;
+        flex: 0 0 100% !important;
+    }
+
+    /* Obra cards: full width on mobile */
+    .project-card {
+        min-width: 100% !important;
+    }
+
+    /* Charts: readable height on small screens */
+    .recharts-responsive-container {
+        min-height: 200px;
+    }
+
+    /* Sidebar: hide completely (handled by Reflex display: none at breakpoint) */
+    /* Dialog: full width on mobile */
+    .rt-DialogContent {
+        max-width: 95vw !important;
+        padding: 20px 16px !important;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TABS — ensure copper underline active state is visible
+   ══════════════════════════════════════════════════════════════ */
+
+/* Active tab indicator: copper underline */
+.rt-TabsTrigger[data-state="active"] {
+    color: #C98B2A !important;
+    border-bottom: 2px solid #C98B2A !important;
+}
+.rt-TabsTrigger {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.06em !important;
+    color: rgba(136, 153, 153, 0.7) !important;
+    transition: color 0.2s ease !important;
+}
+.rt-TabsTrigger:hover {
+    color: #E0E0E0 !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GLOBAL INPUT & SELECT REFINEMENTS
+   ══════════════════════════════════════════════════════════════ */
+
+/* Input focus ring matches copper, not Radix blue */
+.rt-TextFieldInput:focus-within,
+.rt-TextFieldInput:focus {
+    outline-color: rgba(201, 139, 42, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(201, 139, 42, 0.18) !important;
+}
+
+/* Select trigger border consistent with theme */
+.rt-SelectTrigger {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+}
+.rt-SelectTrigger:hover {
+    border-color: rgba(201, 139, 42, 0.3) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCROLLBAR — thin copper-tinted
+   ══════════════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(201, 139, 42, 0.25);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 139, 42, 0.45);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GLASS DIALOG / MODAL — enforce sharp radius
+   ══════════════════════════════════════════════════════════════ */
+
+.rt-DialogContent,
+.rt-AlertDialogContent {
+    border-radius: 6px !important;
+    border: 1px solid rgba(201, 139, 42, 0.2) !important;
+    background: #142420 !important;
+    box-shadow: 0 32px 72px -12px rgba(0, 0, 0, 0.75) !important;
+}
+
+/* ── Chart Panel Entry Animation ────────────────────────────── */
+/* Staggered CSS fade-up for chart boxes: prevents stutter by relying
+   on CSS transforms (GPU) instead of Recharts JS animation             */
+@keyframes chartEnter {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.993);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.chart-enter {
+    animation: chartEnter 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Stagger delays for children within a chart grid/flex */
+.chart-enter:nth-child(1) { animation-delay: 0ms; }
+.chart-enter:nth-child(2) { animation-delay: 80ms; }
+.chart-enter:nth-child(3) { animation-delay: 160ms; }
+.chart-enter:nth-child(4) { animation-delay: 240ms; }
+.chart-enter:nth-child(5) { animation-delay: 320ms; }
+
+/* Recharts: suppress layout-induced paint flashes.
+   Recharts SVG elements should never overflow their container */
+.recharts-wrapper,
+.recharts-surface {
+    overflow: visible;
+    /* will-change: transform would create a new stacking context, trapping
+       tooltip z-index inside the chart layer. Use contents instead to get
+       GPU compositing benefits without the stacking context side-effect. */
+    will-change: contents;
+}
+
+/* Recharts responsive container: prevent height collapse during re-render */
+.recharts-responsive-container {
+    min-height: 40px;
+}
+
+/* ── Tooltip: escape every stacking context ───────────────────
+   position: fixed is relative to the viewport, not to any ancestor
+   with transform/will-change/overflow — this is why the tooltip was
+   appearing behind adjacent charts. Recharts already computes pixel
+   coordinates from the chart rect, so the visual position stays correct. */
+.recharts-tooltip-wrapper {
+    position: fixed !important;
+    z-index: 9999 !important;
+    pointer-events: none;
+    animation: tooltip-fade-slide 0.14s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Pinned tooltip (class added by JS click handler) */
+.recharts-tooltip-wrapper.tooltip-pinned {
+    pointer-events: auto !important;
+    animation: none !important;
+}
+
+@keyframes tooltip-fade-slide {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── Skeleton shimmer class alias ──────────────────────────── */
+.skeleton-shimmer {
+    position: relative !important;
+    overflow: hidden !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+.skeleton-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(201,139,42,0.07), transparent);
+    animation: skeletonShimmer 1.8s ease-in-out infinite;
+    pointer-events: none;
+}
+
+/* ── Page-centered generic spinner (replaces rx.center+rx.spinner) */
+.page-loading-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 40vh;
+    gap: 12px;
+    flex-direction: column;
+}
+
+/* ── Radix tabs — sharp, copper active indicator ───────────── */
+.rt-TabsList {
+    border-radius: 6px !important;
+    border: 1px solid var(--border-subtle) !important;
+    background: rgba(255,255,255,0.02) !important;
+    padding: 4px !important;
+}
+
+.rt-TabsTrigger[data-state="active"] {
+    background: rgba(201, 139, 42, 0.12) !important;
+    color: var(--copper-500) !important;
+    border-radius: 3px !important;
+}
+
+.rt-TabsTrigger {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.06em !important;
+    border-radius: 3px !important;
+}
+
+/* ── Avatar — square (enterprise style) ────────────────────── */
+.rt-AvatarRoot {
+    border-radius: 3px !important;
+}
+
+/* ── Callout — sharp corners ────────────────────────────────── */
+.rt-CalloutRoot {
+    border-radius: 3px !important;
+}
+
+/* ── Checkbox — sharp ───────────────────────────────────────── */
+.rt-CheckboxRoot,
+.rt-CheckboxIndicator {
+    border-radius: 2px !important;
+}
+
+/* ── Mobile Dialog Size Fix ──────────────────────────────── */
+@media (max-width: 768px) {
+    .rt-DialogContent,
+    .rt-AlertDialogContent {
+        width: calc(100vw - 32px) !important;
+        max-width: calc(100vw - 32px) !important;
+        max-height: calc(100dvh - 48px) !important;
+        overflow-y: auto !important;
+    }
+
+    /* Prevent body scroll bleed on mobile */
+    body {
+        overflow-x: hidden !important;
+    }
+
+    /* Mobile page content should not overflow horizontally */
+    #app,
+    #__next,
+    .reflex-app {
+        overflow-x: hidden !important;
+    }
+}
+
+/* ── Hub de Operações — font scaling ──────────────────────── */
+/* Reflex renders rx.text(font_size="11px") as <p style="font-size:11px">.
+   CSS attribute selectors work on the serialized style string. */
+
+.hub-content p[style*="font-size:11px"],
+.hub-content span[style*="font-size:11px"],
+.hub-content div[style*="font-size:11px"] {
+    font-size: 13px !important;
+}
+
+.hub-content p[style*="font-size: 11px"],
+.hub-content span[style*="font-size: 11px"],
+.hub-content div[style*="font-size: 11px"] {
+    font-size: 13px !important;
+}
+
+.hub-content p[style*="font-size:12px"],
+.hub-content span[style*="font-size:12px"],
+.hub-content div[style*="font-size:12px"] {
+    font-size: 14px !important;
+}
+
+.hub-content p[style*="font-size: 12px"],
+.hub-content span[style*="font-size: 12px"],
+.hub-content div[style*="font-size: 12px"] {
+    font-size: 14px !important;
+}
+
+.hub-content p[style*="font-size:13px"],
+.hub-content span[style*="font-size:13px"],
+.hub-content div[style*="font-size:13px"] {
+    font-size: 15px !important;
+}
+
+.hub-content p[style*="font-size: 13px"],
+.hub-content span[style*="font-size: 13px"],
+.hub-content div[style*="font-size: 13px"] {
+    font-size: 15px !important;
+}
+
+/* Labels (9-10px) get a small nudge to stay legible */
+.hub-content p[style*="font-size:10px"],
+.hub-content span[style*="font-size:10px"],
+.hub-content p[style*="font-size: 10px"],
+.hub-content span[style*="font-size: 10px"] {
+    font-size: 12px !important;
+}
+
+.hub-content p[style*="font-size:9px"],
+.hub-content span[style*="font-size:9px"],
+.hub-content p[style*="font-size: 9px"],
+.hub-content span[style*="font-size: 9px"] {
+    font-size: 11px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UX POLISH — Input hover, dialog entrance, transitions
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Input hover state (before focus) ───────────────────── */
+input:not(.rt-TextFieldInput):not([type="date"]):not([type="number"]):hover,
+textarea:hover {
+    border-color: rgba(201, 139, 42, 0.25) !important;
+}
+
+/* ── Number & date inputs hover ─────────────────────────── */
+input[type="number"]:hover,
+input[type="date"]:hover {
+    border-color: rgba(201, 139, 42, 0.25) !important;
+}
+
+/* ── Dialog entrance animation ───────────────────────────── */
+@keyframes dialogSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.rt-DialogContent {
+    animation: dialogSlideIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+/* ── Dialog scroll — smooth + visible scrollbar inside dialog ─ */
+.rt-DialogContent {
+    overflow-y: auto !important;
+    scroll-behavior: smooth !important;
+}
+
+/* ── Select trigger — smoother hover transition ──────────── */
+.rt-SelectTrigger {
+    transition: border-color 0.12s ease, box-shadow 0.12s ease !important;
+}
+
+/* ── Pill / box buttons — micro press feedback ───────────── */
+[data-pill-btn]:active,
+.dep-pill:active {
+    transform: scale(0.97) !important;
+}
+
+/* ── Icon buttons — faster hover response ────────────────── */
+.rt-IconButton {
+    transition: background-color 0.1s ease, color 0.1s ease !important;
+}
+
+/* ── Checkbox — smooth check animation ───────────────────── */
+.rt-CheckboxRoot {
+    transition: background-color 0.12s ease, border-color 0.12s ease !important;
+}
+
+/* ── Activity row expand — smooth height transition ─────── */
+.cron-activity-list > * {
+    animation: fadeSlideDown 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Spinner — copper tint ───────────────────────────────── */
+.rt-Spinner {
+    color: var(--copper-500) !important;
+}
+
+/* ── Select content — entrance animation ─────────────────── */
+.rt-SelectContent {
+    animation: dialogSlideIn 0.14s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+/* ── Form section labels — pointer cursor on interactive boxes ── */
+.rt-DialogContent [style*="cursor: pointer"],
+.rt-DialogContent [style*="cursor:pointer"] {
+    user-select: none !important;
+}
+
+/* ── Disable text selection on pill buttons ──────────────── */
+.rt-DialogContent .rt-Box[style*="cursor"] {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
+
+/* ── Progress bars — smoother width transition ───────────── */
+[style*="transition: width"] {
+    will-change: width !important;
+}
+

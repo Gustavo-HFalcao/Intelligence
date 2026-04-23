@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Dark background — BG_DEPTH of Deep Tectonic theme -->
+  <rect width="64" height="64" rx="10" fill="#0a1f1a"/>
+  <!-- Subtle copper border -->
+  <rect x="1.5" y="1.5" width="61" height="61" rx="8.5" fill="none" stroke="#c98b2a" stroke-width="1.5" opacity="0.5"/>
+  <!-- Copper "B" monogram — readable at all sizes -->
+  <text
+    x="32" y="47"
+    font-family="Arial Black, Arial, Helvetica, sans-serif"
+    font-size="42"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#c98b2a"
+  >B</text>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64">
+  <!-- Fundo sólido — Dark Tectonic BG_DEPTH -->
+  <rect width="64" height="64" rx="10" fill="#0a1f1a"/>
+  <!-- Borda copper sutil -->
+  <rect x="1.5" y="1.5" width="61" height="61" rx="8.5" fill="none" stroke="#c98b2a" stroke-width="1.5" opacity="0.7"/>
+  <!-- icon.png (branco/transparente) centralizado no fundo escuro.
+       Branco sobre #0a1f1a = contraste perfeito, mantém a marca original. -->
+  <image xlink:href="/icon.png" href="/icon.png"
+         x="8" y="8" width="48" height="48"
+         preserveAspectRatio="xMidYMid meet"/>
+</svg>

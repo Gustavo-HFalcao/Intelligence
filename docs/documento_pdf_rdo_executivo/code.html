@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "copper": "#C98B2A",
+              "patina": "#2A9D8F",
+              "ink": "#081210",
+              "paper": "#FAFAFA"
+            },
+            fontFamily: {
+              "headline": ["Rajdhani", "sans-serif"],
+              "body": ["Plus Jakarta Sans", "sans-serif"],
+              "label": ["JetBrains Mono", "monospace"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        @media print {
+            body { background: white; }
+            .print-area { 
+                box-shadow: none !important;
+                border: none !important;
+                margin: 0 !important;
+                width: 100% !important;
+            }
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .copper-accent { border-left: 4px solid #C98B2A; }
+    </style>
+</head>
+<body class="bg-zinc-100 font-body text-ink antialiased">
+<main class="min-h-screen py-10 flex justify-center items-start">
+<!-- PDF Document Canvas -->
+<article class="print-area w-[210mm] min-h-[297mm] bg-paper shadow-2xl p-12 relative flex flex-col border border-zinc-200">
+<!-- 1. Cabeçalho Executivo -->
+<header class="flex justify-between items-start border-b-2 border-copper pb-8 mb-10">
+<div class="flex items-center gap-4">
+<div class="w-14 h-14 bg-ink flex items-center justify-center rounded-sm">
+<span class="material-symbols-outlined text-copper text-4xl">precision_manufacturing</span>
+</div>
+<div>
+<h1 class="font-headline text-3xl font-bold tracking-tight text-ink">RELATÓRIO DIÁRIO DE OBRA</h1>
+<p class="font-label text-[10px] text-ink/60 tracking-widest uppercase">Sistema de Gestão de Ativos de Campo</p>
+</div>
+</div>
+<div class="text-right">
+<div class="inline-block px-3 py-1 bg-patina/10 border border-patina text-patina font-label text-[10px] font-bold mb-3 rounded-sm">
+                    STATUS: OPERACIONAL
+                </div>
+<div class="space-y-1">
+<p class="font-label text-[10px] text-ink/40 uppercase">Código do Documento</p>
+<p class="font-label text-sm font-bold text-ink">RDO-2024-X99</p>
+</div>
+</div>
+</header>
+<!-- 2. Informações Gerais -->
+<section class="grid grid-cols-4 gap-6 mb-10">
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Projeto</span>
+<span class="font-body font-semibold text-sm">{{PROJETO}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Contrato</span>
+<span class="font-body font-semibold text-sm">{{CONTRATO}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Localização</span>
+<span class="font-body font-semibold text-sm">{{LOCALIZACAO}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Responsável</span>
+<span class="font-body font-semibold text-sm">{{RESPONSAVEL}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Data</span>
+<span class="font-label font-bold text-sm">{{DATA}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Clima</span>
+<span class="font-body font-semibold text-sm">{{CLIMA}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Turno</span>
+<span class="font-body font-semibold text-sm">{{TURNO}}</span>
+</div>
+<div class="flex flex-col border-b border-zinc-200 pb-2">
+<span class="font-headline text-[10px] uppercase text-copper font-bold tracking-widest">Site ID</span>
+<span class="font-label font-bold text-sm">4092-TX-SOUTH</span>
+</div>
+</section>
+<!-- 3. Resumo da Atividade -->
+<section class="mb-10">
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-4 copper-accent pl-3 uppercase tracking-wide">
+                Resumo da Atividade
+            </h2>
+<div class="bg-zinc-50 p-6 rounded-sm border border-zinc-200">
+<p class="font-body leading-relaxed text-zinc-700 text-sm italic">
+                    {{ORIENTACAO_ESCOPO}}
+                </p>
+</div>
+</section>
+<!-- 4. Serviços Executados -->
+<section class="mb-10">
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-4 copper-accent pl-3 uppercase tracking-wide">
+                Serviços Executados
+            </h2>
+<div class="overflow-hidden border border-zinc-200 rounded-sm">
+<table class="w-full text-left border-collapse">
+<thead class="bg-ink text-white">
+<tr>
+<th class="p-4 font-headline text-[10px] uppercase tracking-widest border-r border-white/10">Descrição do Serviço</th>
+<th class="p-4 font-headline text-[10px] uppercase tracking-widest border-r border-white/10">Disciplina</th>
+<th class="p-4 font-headline text-[10px] uppercase tracking-widest border-r border-white/10 text-center">Status</th>
+<th class="p-4 font-headline text-[10px] uppercase tracking-widest w-1/4">Progresso (%)</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-zinc-200 text-xs">
+<tr>
+<td class="p-4 font-body font-medium">Terraplanagem Setor Norte</td>
+<td class="p-4 font-label text-zinc-500">INFRAESTRUTURA</td>
+<td class="p-4 text-center">
+<span class="px-2 py-0.5 bg-patina/10 text-patina font-bold text-[9px] uppercase rounded-full">CONCLUÍDO</span>
+</td>
+<td class="p-4">
+<div class="flex items-center gap-3">
+<div class="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+<div class="h-full bg-patina" style="width: 100%"></div>
+</div>
+<span class="font-label font-bold">100%</span>
+</div>
+</td>
+</tr>
+<tr class="bg-zinc-50/50">
+<td class="p-4 font-body font-medium">Escavação Profunda P-04</td>
+<td class="p-4 font-label text-zinc-500">MECÂNICA</td>
+<td class="p-4 text-center">
+<span class="px-2 py-0.5 bg-copper/10 text-copper font-bold text-[9px] uppercase rounded-full">EM PROGRESSO</span>
+</td>
+<td class="p-4">
+<div class="flex items-center gap-3">
+<div class="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+<div class="h-full bg-copper" style="width: 68%"></div>
+</div>
+<span class="font-label font-bold">68%</span>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- 5. Evidências de Campo -->
+<section class="mb-10">
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-6 copper-accent pl-3 uppercase tracking-wide">
+                Evidências de Campo
+            </h2>
+<div class="grid grid-cols-2 gap-8">
+<div class="space-y-3">
+<div class="aspect-video bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200">
+<img alt="Site Overview" class="w-full h-full object-cover grayscale-[0.3] hover:grayscale-0 transition-all" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBVWNJfCzYxffLCPgaXBv-J5-JnFBTzEZPAo4rm189Y0KAPanBNJiO8AlJbxZJ4yTc4-vToI-sPujInhBGWOsCM6V0PMSQ3tqeGBztz6DRhO3z6oAATldqJ-4FKYhb-gt-bjfpSj6PxYWk9PiuKmKg5nYpsp3F2hYVA34GnwLaYR_kDDH8wTt0oSC10lhVB7Q1ZxaprWYT_a-Tc0CzDyI4b_loU20uPCg2xmO3SePuVZRUPG_MFra5vIqs16DdVT7XyGBX9e7dGz0I"/>
+</div>
+<div class="flex flex-col gap-1 border-l-2 border-copper pl-2">
+<span class="font-label text-[9px] text-zinc-400 uppercase tracking-widest">IMG_0041.RAW</span>
+<span class="font-body text-xs font-semibold">{{FOTO_LEGENDA}}</span>
+</div>
+</div>
+<div class="space-y-3">
+<div class="aspect-video bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200">
+<img alt="Equipment Detail" class="w-full h-full object-cover grayscale-[0.3] hover:grayscale-0 transition-all" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAG3InkBsQUrVD30LJA-SRzEghTl7umgUafYpKMKOv1nE3fLSNHfSituawvVewGolv--WJ0LOjnrsfFuKtloe6-MDXigy2ZDsXinoTYWKN8Dx2q-IyyvdsWqWrJGzZKjyIUK9EiRDAJl3AbZ9yeL0gxm2j9rHbZd4IsGaf2a7oxkUJ7cV-UUDsZvBGxEvf50p19zwKs57yo6Cuyo-Po1hCgpg1xNJnPU3DOlglTfsgX0i6OdYJISPIn7yxKnVvRKSCFTwMSUGd4cp4"/>
+</div>
+<div class="flex flex-col gap-1 border-l-2 border-copper pl-2">
+<span class="font-label text-[9px] text-zinc-400 uppercase tracking-widest">IMG_0042.RAW</span>
+<span class="font-body text-xs font-semibold">{{FOTO_LEGENDA}}</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 6. Ocorrências e Eventos -->
+<section class="grid grid-cols-2 gap-8 mb-10">
+<div>
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-4 border-l-4 border-red-500 pl-3 uppercase tracking-wide">
+                    Ocorrências e Incidentes
+                </h2>
+<div class="bg-red-50 p-4 rounded-sm border border-red-100 flex items-start gap-3">
+<span class="material-symbols-outlined text-red-500 text-lg">warning</span>
+<p class="font-body text-[11px] text-red-900 leading-tight">
+                        Nenhuma ocorrência de segurança registrada nas últimas 24h. 
+                        Manutenção preventiva realizada no gerador G-03 sem impacto no cronograma.
+                    </p>
+</div>
+</div>
+<div>
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-4 border-l-4 border-zinc-300 pl-3 uppercase tracking-wide">
+                    Chuva (Intensidade)
+                </h2>
+<div class="bg-zinc-50 p-4 rounded-sm border border-zinc-200 flex items-start gap-3">
+<span class="material-symbols-outlined text-zinc-400 text-lg">cloudy_snowing</span>
+<p class="font-body text-[11px] text-zinc-600 leading-tight">
+                        Precipitação leve (2mm) registrada entre 11:30 e 12:00. Solo com boa drenagem, sem necessidade de interrupção operacional.
+                    </p>
+</div>
+</div>
+</section>
+<!-- 7. Observações Gerais -->
+<section class="mb-auto">
+<h2 class="font-headline text-lg font-bold flex items-center gap-2 mb-4 copper-accent pl-3 uppercase tracking-wide">
+                Observações Gerais
+            </h2>
+<div class="p-4 border border-zinc-200 rounded-sm bg-zinc-50/30 min-h-[80px]">
+<p class="font-body text-xs text-zinc-600 leading-relaxed italic">
+                    {{OBSERVACOES}}
+                </p>
+</div>
+</section>
+<!-- 8. Assinatura Digital -->
+<footer class="mt-16 pt-10 border-t border-zinc-200">
+<div class="grid grid-cols-2 gap-20">
+<div class="text-center">
+<div class="h-12 flex items-end justify-center mb-2">
+<!-- Assinatura Image Placeholder -->
+<span class="font-label text-zinc-300 italic text-[10px] tracking-tighter">AUTHENTICATED_HASH_7782_RF</span>
+</div>
+<div class="border-t border-zinc-300 pt-3">
+<p class="font-body font-bold text-xs uppercase">{{RESPONSAVEL}}</p>
+<p class="font-label text-[9px] text-zinc-400 uppercase tracking-widest">Engenheiro Responsável (CREA-TX 405)</p>
+<div class="mt-2 flex items-center justify-center gap-1 text-patina">
+<span class="material-symbols-outlined text-xs">verified_user</span>
+<span class="font-label text-[8px] font-bold">ASSINATURA DIGITAL VALIDADA</span>
+</div>
+</div>
+</div>
+<div class="text-center">
+<div class="h-12 flex items-end justify-center mb-2">
+<span class="font-label text-zinc-300 italic text-[10px] tracking-tighter">SYSTEM_VAL_009_MASTER</span>
+</div>
+<div class="border-t border-zinc-300 pt-3">
+<p class="font-body font-bold text-xs uppercase">Fiscalização Master</p>
+<p class="font-label text-[9px] text-zinc-400 uppercase tracking-widest">Consórcio Alpha-Zeta</p>
+<div class="mt-2 flex items-center justify-center gap-1 text-zinc-400">
+<span class="material-symbols-outlined text-xs">history</span>
+<span class="font-label text-[8px] font-bold uppercase">Aguardando Revisão Manual</span>
+</div>
+</div>
+</div>
+</div>
+</footer>
+<!-- Bottom Tracking ID -->
+<div class="absolute bottom-6 left-12 right-12 flex justify-between items-center opacity-30 pointer-events-none border-t border-zinc-100 pt-2">
+<span class="font-label text-[7px] uppercase tracking-[0.2em] font-bold text-ink">FIELD_OPS_V1 // PROJECT_ALPHA_EXPANSION // RDO-2024-X99</span>
+<span class="font-label text-[7px] uppercase tracking-[0.2em] font-bold text-ink">PAGINA 01 DE 01</span>
+</div>
+</article>
+</main>
+</body></html>

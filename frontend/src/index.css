@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
 @layer base {
   :root {
     --background: 150 20% 3%;

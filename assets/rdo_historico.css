@@ -1,0 +1,463 @@
+/* ============================================================
+   RDO HISTÓRICO — Lobby Page Styles
+   Deep Tectonic Theme · Bomtempo Engenharia
+   Executive Trim v2 — Refined spacing & hierarchy
+   ============================================================ */
+
+/* ── Topnav ───────────────────────────────────────────────── */
+/* Handled inline in Python; this selector polishes the wrapper */
+.rdo-historico-wrap {
+    min-height: 100vh;
+    background: #0B1A15;
+}
+
+/* ── Page Content Gutter ──────────────────────────────────── */
+/* Extra spacing between the sticky topnav and hero */
+.rdo-lobby-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 28px 32px 26px;
+    margin-top: 18px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(14, 26, 23, 0.75);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    margin-bottom: 24px;
+    box-shadow: inset 0 0 80px rgba(201, 139, 42, 0.04);
+    animation: pageFadeUp 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rdo-lobby-hero::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, #C98B2A 0%, #2A9D8F 100%);
+    border-radius: 3px 0 0 3px;
+}
+
+.rdo-lobby-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(201, 139, 42, 0.06) 0%, transparent 55%);
+    pointer-events: none;
+}
+
+.rdo-lobby-title {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 2.1rem !important;
+    letter-spacing: -0.02em !important;
+    color: #fff !important;
+    line-height: 1.1 !important;
+}
+
+.rdo-lobby-subtitle {
+    font-size: 13px !important;
+    color: #6B9090 !important;
+    margin-top: 6px !important;
+    font-family: 'Outfit', sans-serif !important;
+    letter-spacing: 0.01em !important;
+}
+
+/* ── Stats Cards ──────────────────────────────────────────── */
+.rdo-stat-card {
+    position: relative;
+    overflow: hidden;
+    padding: 18px 20px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    animation: pageFadeUp 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rdo-stat-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.015) 0%, transparent 60%);
+    pointer-events: none;
+}
+
+.rdo-stat-card:nth-child(1) { animation-delay: 80ms; }
+.rdo-stat-card:nth-child(2) { animation-delay: 140ms; }
+.rdo-stat-card:nth-child(3) { animation-delay: 200ms; }
+
+.rdo-stat-card:hover {
+    border-color: rgba(201, 139, 42, 0.28);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+}
+
+.rdo-stat-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: box-shadow 0.2s ease;
+}
+
+.rdo-stat-card:hover .rdo-stat-icon.copper {
+    box-shadow: 0 0 16px rgba(201, 139, 42, 0.2);
+}
+
+.rdo-stat-card:hover .rdo-stat-icon.patina {
+    box-shadow: 0 0 16px rgba(42, 157, 143, 0.2);
+}
+
+.rdo-stat-card:hover .rdo-stat-icon.amber {
+    box-shadow: 0 0 16px rgba(224, 160, 48, 0.2);
+}
+
+.rdo-stat-icon.copper {
+    background: rgba(201, 139, 42, 0.1);
+    border: 1px solid rgba(201, 139, 42, 0.22);
+}
+
+.rdo-stat-icon.patina {
+    background: rgba(42, 157, 143, 0.1);
+    border: 1px solid rgba(42, 157, 143, 0.22);
+}
+
+.rdo-stat-icon.amber {
+    background: rgba(224, 160, 48, 0.1);
+    border: 1px solid rgba(224, 160, 48, 0.22);
+}
+
+.rdo-stat-value {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 2.5rem !important;
+    line-height: 1 !important;
+    letter-spacing: -0.02em !important;
+}
+
+.rdo-stat-label {
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+    color: #5C8080 !important;
+    margin-bottom: 4px !important;
+    font-family: 'Rajdhani', sans-serif !important;
+}
+
+/* ── Section Divider between Stats and Tabs ───────────────── */
+.rdo-section-divider {
+    width: 100%;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.05);
+    margin: 4px 0 20px;
+}
+
+/* ── RDO List Card ────────────────────────────────────────── */
+.rdo-list-card {
+    position: relative;
+    overflow: hidden;
+    padding: 16px 18px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    animation: fadeSlideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rdo-list-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+    transition: opacity 0.2s ease;
+}
+
+.rdo-list-card.status-finalizado::before {
+    background: #2A9D8F;
+    box-shadow: 2px 0 8px rgba(42, 157, 143, 0.25);
+}
+
+.rdo-list-card.status-rascunho::before {
+    background: rgba(201, 139, 42, 0.8);
+    box-shadow: 2px 0 8px rgba(201, 139, 42, 0.2);
+}
+
+.rdo-list-card.status-processando::before {
+    background: rgba(249, 115, 22, 0.8);
+    box-shadow: 2px 0 8px rgba(249, 115, 22, 0.2);
+}
+
+.rdo-list-card:hover {
+    border-color: rgba(201, 139, 42, 0.28);
+    background: rgba(255, 255, 255, 0.055);
+    transform: translateX(3px);
+}
+
+.rdo-list-card:active {
+    transform: scale(0.99) translateX(1px);
+}
+
+/* ── Status Badge ─────────────────────────────────────────── */
+.rdo-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-family: 'Rajdhani', sans-serif;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.rdo-status-badge.finalizado {
+    background: rgba(42, 157, 143, 0.12);
+    border: 1px solid rgba(42, 157, 143, 0.3);
+    color: #2A9D8F;
+}
+
+.rdo-status-badge.rascunho {
+    background: rgba(201, 139, 42, 0.10);
+    border: 1px solid rgba(201, 139, 42, 0.28);
+    color: #C98B2A;
+}
+
+.rdo-status-badge.processando {
+    background: rgba(249, 115, 22, 0.10);
+    border: 1px solid rgba(249, 115, 22, 0.28);
+    color: #F97316;
+}
+
+/* ── Action Pill Buttons ──────────────────────────────────── */
+.rdo-action-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    padding: 5px 11px !important;
+    border-radius: 4px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    letter-spacing: 0.04em !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    text-transform: uppercase !important;
+    border: 1px solid !important;
+    flex-shrink: 0 !important;
+    height: 28px !important;
+}
+
+.rdo-action-pill.pdf {
+    background: rgba(201, 139, 42, 0.10) !important;
+    border-color: rgba(201, 139, 42, 0.32) !important;
+    color: #C98B2A !important;
+}
+
+.rdo-action-pill.pdf:hover {
+    background: rgba(201, 139, 42, 0.2) !important;
+    box-shadow: 0 2px 12px rgba(201, 139, 42, 0.22) !important;
+}
+
+.rdo-action-pill.view {
+    background: rgba(42, 157, 143, 0.10) !important;
+    border-color: rgba(42, 157, 143, 0.32) !important;
+    color: #2A9D8F !important;
+}
+
+.rdo-action-pill.view:hover {
+    background: rgba(42, 157, 143, 0.2) !important;
+    box-shadow: 0 2px 12px rgba(42, 157, 143, 0.18) !important;
+}
+
+.rdo-action-pill.edit {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: #E8F0EE !important;
+}
+
+.rdo-action-pill.edit:hover {
+    border-color: rgba(201, 139, 42, 0.3) !important;
+    background: rgba(201, 139, 42, 0.06) !important;
+}
+
+.rdo-action-pill.danger {
+    background: rgba(239, 68, 68, 0.07) !important;
+    border-color: rgba(239, 68, 68, 0.22) !important;
+    color: #EF4444 !important;
+}
+
+.rdo-action-pill.danger:hover {
+    background: rgba(239, 68, 68, 0.15) !important;
+}
+
+.rdo-action-pill.generate {
+    background: rgba(249, 115, 22, 0.08) !important;
+    border-color: rgba(249, 115, 22, 0.3) !important;
+    color: #F97316 !important;
+}
+
+.rdo-action-pill.generate:hover {
+    background: rgba(249, 115, 22, 0.16) !important;
+}
+
+/* ── Filter Pills ─────────────────────────────────────────── */
+.rdo-filter-pill {
+    padding: 5px 14px !important;
+    border-radius: 3px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    color: #6B9090 !important;
+    height: 30px !important;
+}
+
+.rdo-filter-pill.active {
+    background: rgba(201, 139, 42, 0.15) !important;
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    color: #C98B2A !important;
+    box-shadow: 0 0 14px rgba(201, 139, 42, 0.12) !important;
+}
+
+.rdo-filter-pill:hover:not(.active) {
+    border-color: rgba(255, 255, 255, 0.16) !important;
+    color: #C0D4D0 !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ── Novo RDO Button ──────────────────────────────────────── */
+.rdo-new-btn {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 0 22px !important;
+    height: 44px !important;
+    border-radius: 4px !important;
+    background: linear-gradient(135deg, #C98B2A 0%, #9B6820 100%) !important;
+    color: #fff !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    cursor: pointer !important;
+    border: none !important;
+    box-shadow: 0 4px 18px rgba(201, 139, 42, 0.38) !important;
+    transition: all 0.15s ease !important;
+    white-space: nowrap !important;
+}
+
+.rdo-new-btn:hover {
+    box-shadow: 0 6px 26px rgba(201, 139, 42, 0.55) !important;
+    transform: translateY(-1px) !important;
+}
+
+.rdo-new-btn:active {
+    transform: scale(0.97) !important;
+    box-shadow: 0 2px 10px rgba(201, 139, 42, 0.3) !important;
+}
+
+/* ── Email Row ────────────────────────────────────────────── */
+.rdo-email-row {
+    padding: 10px 14px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.02);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.rdo-email-row:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Empty State ──────────────────────────────────────────── */
+.rdo-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 72px 24px;
+    gap: 16px;
+    text-align: center;
+}
+
+.rdo-empty-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+
+/* ── ID Monospace ─────────────────────────────────────────── */
+.rdo-id-text {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: #C98B2A !important;
+    letter-spacing: 0.02em !important;
+}
+
+/* ── Meta Info Row ────────────────────────────────────────── */
+.rdo-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+/* ── Mobile ───────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .rdo-lobby-hero {
+        padding: 20px 18px 18px;
+    }
+
+    .rdo-lobby-title {
+        font-size: 1.7rem !important;
+    }
+
+    .rdo-stat-card {
+        padding: 14px 16px;
+    }
+
+    .rdo-stat-value {
+        font-size: 2.1rem !important;
+    }
+
+    .rdo-list-card {
+        padding: 13px 14px;
+    }
+
+    .rdo-action-pill {
+        font-size: 10px !important;
+        padding: 4px 8px !important;
+        height: 26px !important;
+    }
+
+    .rdo-new-btn {
+        padding: 0 16px !important;
+        height: 40px !important;
+        font-size: 13px !important;
+    }
+}

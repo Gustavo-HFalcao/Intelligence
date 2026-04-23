@@ -1,0 +1,515 @@
+/* ============================================================
+   RDO FORM — Mobile-First Enhanced Styles
+   Deep Tectonic Theme · Bomtempo Engenharia
+   Executive Trim v2 — Refined spacing & focus states
+   ============================================================ */
+
+/* ── Progress Tracker Bar ─────────────────────────────────── */
+.rdo-progress-bar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: rgba(11, 26, 21, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+}
+
+.rdo-progress-bar::-webkit-scrollbar { display: none; }
+
+.rdo-progress-step {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    padding: 5px 11px;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'Rajdhani', sans-serif;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: rgba(136, 153, 153, 0.65);
+    transition: all 0.2s ease;
+    cursor: default;
+    scroll-snap-align: start;
+}
+
+.rdo-progress-step.done {
+    background: rgba(42, 157, 143, 0.10);
+    border-color: rgba(42, 157, 143, 0.38);
+    color: #2A9D8F;
+}
+
+.rdo-progress-step.active {
+    background: rgba(201, 139, 42, 0.14);
+    border-color: rgba(201, 139, 42, 0.52);
+    color: #C98B2A;
+    box-shadow: 0 0 12px rgba(201, 139, 42, 0.14);
+}
+
+.rdo-progress-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+
+.rdo-progress-step.done .rdo-progress-dot {
+    background: #2A9D8F;
+}
+
+.rdo-progress-step.active .rdo-progress-dot {
+    background: #C98B2A;
+    animation: stepDotPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes stepDotPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(201, 139, 42, 0.45); }
+    50%       { box-shadow: 0 0 0 4px rgba(201, 139, 42, 0); }
+}
+
+/* ── Section Cards ────────────────────────────────────────── */
+.rdo-section-card {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+    padding: 24px 22px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    animation: sectionReveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rdo-section-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: rgba(201, 139, 42, 0.35);
+    border-radius: 3px 0 0 3px;
+    transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.rdo-section-card.section-done::before {
+    background: #2A9D8F;
+    box-shadow: 0 0 10px rgba(42, 157, 143, 0.35);
+}
+
+.rdo-section-card.section-active::before {
+    background: #C98B2A;
+    box-shadow: 0 0 14px rgba(201, 139, 42, 0.45);
+}
+
+@keyframes sectionReveal {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.rdo-section-card:nth-child(1)  { animation-delay: 0ms; }
+.rdo-section-card:nth-child(2)  { animation-delay: 60ms; }
+.rdo-section-card:nth-child(3)  { animation-delay: 120ms; }
+.rdo-section-card:nth-child(4)  { animation-delay: 180ms; }
+.rdo-section-card:nth-child(5)  { animation-delay: 240ms; }
+.rdo-section-card:nth-child(6)  { animation-delay: 300ms; }
+.rdo-section-card:nth-child(7)  { animation-delay: 360ms; }
+.rdo-section-card:nth-child(8)  { animation-delay: 420ms; }
+
+/* ── Section Header ───────────────────────────────────────── */
+.rdo-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rdo-section-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: rgba(201, 139, 42, 0.1);
+    border: 1px solid rgba(201, 139, 42, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.section-done .rdo-section-icon {
+    background: rgba(42, 157, 143, 0.12);
+    border-color: rgba(42, 157, 143, 0.3);
+}
+
+.rdo-section-title {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 12px !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    color: #C0CCC8 !important;
+    flex: 1;
+}
+
+.rdo-section-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.rdo-section-badge.badge-done {
+    background: rgba(42, 157, 143, 0.14);
+    color: #2A9D8F;
+    border: 1px solid rgba(42, 157, 143, 0.3);
+}
+
+.rdo-section-badge.badge-count {
+    background: rgba(201, 139, 42, 0.12);
+    color: #C98B2A;
+    border: 1px solid rgba(201, 139, 42, 0.25);
+}
+
+/* ── Field Labels ─────────────────────────────────────────── */
+.rdo-field-label {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    letter-spacing: 0.09em !important;
+    text-transform: uppercase !important;
+    color: #5C8080 !important;
+    margin-bottom: 5px !important;
+    display: block !important;
+}
+
+.rdo-readonly-badge {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    padding: 9px 12px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+}
+
+/* ── Upload Zone ──────────────────────────────────────────── */
+.rdo-upload-zone {
+    border: 2px dashed rgba(255, 255, 255, 0.10) !important;
+    border-radius: 4px !important;
+    padding: 32px 20px !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    transition: all 0.2s ease !important;
+    cursor: pointer;
+    text-align: center;
+}
+
+.rdo-upload-zone:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+
+.rdo-upload-zone:active {
+    background: rgba(201, 139, 42, 0.08) !important;
+    transform: scale(0.99);
+}
+
+.rdo-upload-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    background: rgba(201, 139, 42, 0.08);
+    border: 1px solid rgba(201, 139, 42, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 14px;
+    transition: all 0.2s ease;
+}
+
+.rdo-upload-zone:hover .rdo-upload-icon {
+    background: rgba(201, 139, 42, 0.16);
+    border-color: rgba(201, 139, 42, 0.38);
+    box-shadow: 0 0 18px rgba(201, 139, 42, 0.12);
+}
+
+/* ── GPS Card ─────────────────────────────────────────────── */
+.rdo-gps-box {
+    padding: 16px 18px;
+    border-radius: 4px;
+    border: 1px solid rgba(42, 157, 143, 0.25);
+    background: rgba(42, 157, 143, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.rdo-gps-box::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: #2A9D8F;
+}
+
+.rdo-gps-pending {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.rdo-gps-pending::before {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── GPS Button ───────────────────────────────────────────── */
+.rdo-gps-btn {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-height: 48px !important;
+    border-radius: 4px !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 13px !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: #E8F0EE !important;
+}
+
+.rdo-gps-btn:active {
+    transform: scale(0.97) !important;
+}
+
+.rdo-gps-btn.done {
+    background: rgba(42, 157, 143, 0.12) !important;
+    border-color: rgba(42, 157, 143, 0.38) !important;
+    color: #2A9D8F !important;
+}
+
+.rdo-gps-btn:hover {
+    border-color: rgba(201, 139, 42, 0.38) !important;
+    background: rgba(201, 139, 42, 0.06) !important;
+}
+
+/* ── Activity Item ────────────────────────────────────────── */
+.rdo-activity-item {
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.rdo-activity-item:hover {
+    border-color: rgba(201, 139, 42, 0.22);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* ── Photo Evidence Card ──────────────────────────────────── */
+.rdo-ev-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    overflow: hidden;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.rdo-ev-card:hover {
+    border-color: rgba(201, 139, 42, 0.32);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Bottom Action Bar (Mobile Submit) ────────────────────── */
+.rdo-bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 16px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    background: rgba(8, 18, 16, 0.98);
+    border-top: 1px solid rgba(201, 139, 42, 0.18);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    z-index: 45;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+/* ── Submit Button ────────────────────────────────────────── */
+.rdo-submit-btn {
+    flex: 1;
+    height: 48px !important;
+    border-radius: 4px !important;
+    background: linear-gradient(135deg, #C98B2A 0%, #9B6820 100%) !important;
+    color: #fff !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 15px !important;
+    letter-spacing: 0.07em !important;
+    text-transform: uppercase !important;
+    border: none !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    transition: all 0.15s ease !important;
+    box-shadow: 0 4px 20px rgba(201, 139, 42, 0.32) !important;
+}
+
+.rdo-submit-btn:hover {
+    box-shadow: 0 6px 28px rgba(201, 139, 42, 0.52) !important;
+    transform: translateY(-1px) !important;
+}
+
+.rdo-submit-btn:active {
+    transform: scale(0.97) !important;
+    box-shadow: 0 2px 10px rgba(201, 139, 42, 0.25) !important;
+}
+
+/* ── Draft Banner ─────────────────────────────────────────── */
+.rdo-draft-banner {
+    padding: 14px 18px;
+    background: rgba(201, 139, 42, 0.09);
+    border: 1px solid rgba(201, 139, 42, 0.25);
+    border-radius: 4px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: draftBannerIn 0.3s ease both;
+}
+
+@keyframes draftBannerIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Signature Canvas ─────────────────────────────────────── */
+.rdo-sig-canvas-wrap {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+    position: relative;
+}
+
+.rdo-sig-canvas-wrap::after {
+    content: 'ASSINE AQUI';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    color: rgba(255, 255, 255, 0.04);
+    pointer-events: none;
+}
+
+/* ── Confirm Dialog Styles ────────────────────────────────── */
+.rdo-confirm-summary {
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    margin: 14px 0;
+}
+
+.rdo-confirm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rdo-confirm-row:last-child {
+    border-bottom: none;
+    padding-bottom: 2px;
+}
+
+/* ── Activity Progress Bar ────────────────────────────────── */
+.rdo-at-progress {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.rdo-at-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #C98B2A, #E0A63B);
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Checkmark Bounce ─────────────────────────────────────── */
+@keyframes checkmarkBounce {
+    0%   { transform: scale(0); }
+    50%  { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+.rdo-checkmark-anim {
+    animation: checkmarkBounce 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Mobile Overrides ─────────────────────────────────────── */
+@media (max-width: 640px) {
+    .rdo-section-card {
+        padding: 16px 14px !important;
+        border-radius: 5px !important;
+    }
+
+    .rdo-section-header {
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+    }
+
+    .rdo-progress-bar {
+        padding: 8px 12px;
+        gap: 5px;
+    }
+
+    .rdo-section-title {
+        font-size: 11px !important;
+    }
+
+    /* Extra bottom breathing room for the fixed action bar */
+    .rdo-form-content {
+        padding-bottom: 84px !important;
+    }
+
+    .rdo-upload-zone {
+        padding: 24px 16px !important;
+    }
+}

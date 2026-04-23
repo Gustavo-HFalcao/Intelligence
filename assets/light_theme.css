@@ -1,0 +1,903 @@
+/* ═══════════════════════════════════════════════════════════════════
+   BOMTEMPO INTELLIGENCE — LIGHT THEME
+   Rewrite limpo — sem conflitos acumulados.
+
+   DESIGN DECISIONS:
+   ─ Fundo global: #FBF4E8 (âmbar creme quente)
+   ─ Cards: rgba(255,250,240,0.85) com borda âmbar — translúcido, não branco sólido
+   ─ Textos no conteúdo: marrom escuro #2C1A06 (máximo contraste)
+   ─ Sidebar + topbar: INTOCADOS — fundo escuro, fonte branca
+   ─ Accent copper #C98B2A mantido em ambos os temas
+   ─ Recharts: fill/tick hardcoded no Python, só o wrapper muda
+
+   ATIVAÇÃO: MutationObserver (default.py) adiciona class="light" em
+   <html> e <body> quando Radix seta class="light" em [data-is-root-theme].
+   ═══════════════════════════════════════════════════════════════════ */
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 0 — CSS VARS (declarados em todos os seletores possíveis
+   para garantir herança independente da estrutura DOM)
+   ══════════════════════════════════════════════════════════════ */
+
+:root.light,
+html.light,
+body.light,
+[data-is-root-theme].light {
+    --bg-void:           #FBF4E8;
+    --bg-depth:          #F3E8CE;
+    --bg-surface:        #FFFDF7;
+    --bg-glass:          rgba(255, 250, 240, 0.88);
+    --bg-elevated:       #FFFDF7;
+
+    --copper-500:        #C98B2A;
+    --copper-400:        #E0A63B;
+    --copper-glow:       rgba(201, 139, 42, 0.18);
+
+    --patina-500:        #1D4A42;
+    --patina-glow:       rgba(29, 74, 66, 0.10);
+
+    --text-main:         #2C1A06;
+    --text-secondary:    #4A3018;
+    --text-muted:        #7A5C30;
+
+    --border-subtle:     rgba(180, 110, 20, 0.18);
+    --border-medium:     rgba(180, 110, 20, 0.28);
+    --border-highlight:  rgba(201, 139, 42, 0.55);
+
+    --ease-out-expo:     cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* bg-image overrides */
+    --bg-gradient:       radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,139,42,0.07) 0%, transparent 65%);
+    --bg-noise:          url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.018'/%3E%3C/svg%3E");
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 1 — BODY & ROOT BACKGROUND
+   Crítico: body está fora de [data-is-root-theme], então precisa
+   de regras diretas via body.light (adicionado pelo JS).
+   ══════════════════════════════════════════════════════════════ */
+
+html.light,
+body.light {
+    background-color: #FBF4E8 !important;
+    color: #2C1A06 !important;
+}
+
+body.light {
+    background-image:
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,139,42,0.07) 0%, transparent 65%),
+        url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.018'/%3E%3C/svg%3E") !important;
+}
+
+/* Fallback :has() para browsers modernos */
+html body:has([data-is-root-theme].light) {
+    background-color: #FBF4E8 !important;
+    color: #2C1A06 !important;
+}
+
+/* Radix root element */
+html [data-is-root-theme].light,
+[data-is-root-theme].light {
+    background-color: #FBF4E8 !important;
+    color: #2C1A06 !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 2 — LAYOUT PRINCIPAL
+   ══════════════════════════════════════════════════════════════ */
+
+body.light .main-layout-flex,
+html.light .main-layout-flex,
+[data-is-root-theme].light .main-layout-flex {
+    background: #FBF4E8 !important;
+    color: #2C1A06 !important;
+}
+
+body.light .app-main-content,
+html.light .app-main-content,
+[data-is-root-theme].light .app-main-content {
+    background: #FBF4E8 !important;
+    color: #2C1A06 !important;
+}
+
+/* Headings no conteúdo */
+[data-is-root-theme].light .app-main-content h1,
+[data-is-root-theme].light .app-main-content h2,
+[data-is-root-theme].light .app-main-content h3,
+[data-is-root-theme].light .app-main-content h4,
+[data-is-root-theme].light .app-main-content h5,
+body.light .app-main-content h1,
+body.light .app-main-content h2,
+body.light .app-main-content h3,
+body.light .app-main-content h4 {
+    color: #2C1A06 !important;
+}
+
+/* Page bg text watermark */
+[data-is-root-theme].light .page-bg-text {
+    color: rgba(180, 110, 20, 0.06) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 3 — SIDEBAR (PERMANECE ESCURA — INTOCADA)
+   ══════════════════════════════════════════════════════════════ */
+
+[data-is-root-theme].light .app-sidebar,
+body.light .app-sidebar,
+html.light .app-sidebar {
+    background: linear-gradient(180deg, #0E1A17 0%, #091410 100%) !important;
+    border-right: 1px solid rgba(201, 139, 42, 0.20) !important;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25) !important;
+    color: rgba(240, 247, 245, 0.85) !important;
+}
+
+/* Todo texto na sidebar continua branco/claro */
+[data-is-root-theme].light .app-sidebar p,
+[data-is-root-theme].light .app-sidebar span,
+[data-is-root-theme].light .app-sidebar a,
+body.light .app-sidebar p,
+body.light .app-sidebar span,
+body.light .app-sidebar a {
+    color: rgba(240, 247, 245, 0.85) !important;
+}
+
+[data-is-root-theme].light .app-sidebar svg,
+body.light .app-sidebar svg {
+    color: rgba(240, 247, 245, 0.50) !important;
+}
+
+/* Sidebar section labels */
+[data-is-root-theme].light .app-sidebar .sidebar-section-label,
+[data-is-root-theme].light .sidebar-section-label {
+    color: rgba(240, 247, 245, 0.30) !important;
+    letter-spacing: 0.15em !important;
+}
+
+/* Copper accent na sidebar (ativo) — mantém */
+[data-is-root-theme].light .app-sidebar [style*="color: #C98B2A"],
+[data-is-root-theme].light .app-sidebar [style*="color: #c98b2a"] {
+    color: #E0A63B !important;
+}
+
+/* Sidebar bg overrides — elementos com bg escuro hardcoded ficam consistentes */
+[data-is-root-theme].light .app-sidebar [style*="background: #142420"],
+[data-is-root-theme].light .app-sidebar [style*="background:#142420"],
+[data-is-root-theme].light .app-sidebar [style*="background: #0e1a17"],
+[data-is-root-theme].light .app-sidebar [style*="background: #0E1A17"] {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-is-root-theme].light .app-sidebar [style*="background: rgba(255, 255, 255, 0.08)"],
+[data-is-root-theme].light .app-sidebar hr {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Textos brancos/escuros hardcoded na sidebar — todos ficam claros */
+[data-is-root-theme].light .app-sidebar [style*="color: white"],
+[data-is-root-theme].light .app-sidebar [style*="color: #FFFFFF"],
+[data-is-root-theme].light .app-sidebar [style*="color: #E0E0E0"],
+[data-is-root-theme].light .app-sidebar [style*="color: rgb(224, 224, 224)"] {
+    color: rgba(240, 247, 245, 0.90) !important;
+}
+
+[data-is-root-theme].light .app-sidebar [style*="color: #889999"],
+[data-is-root-theme].light .app-sidebar [style*="color: rgb(136, 153, 153)"] {
+    color: rgba(240, 247, 245, 0.45) !important;
+}
+
+/* Headings na sidebar (logo BOMTEMPO etc.) */
+[data-is-root-theme].light .app-sidebar h1,
+[data-is-root-theme].light .app-sidebar h2,
+[data-is-root-theme].light .app-sidebar h3 {
+    color: #F0F7F5 !important;
+}
+
+/* User area na sidebar */
+[data-is-root-theme].light .app-sidebar > div:last-child {
+    background: rgba(0, 0, 0, 0.15) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Sidebar toggle button */
+[data-is-root-theme].light .app-sidebar > div > [style*="position: absolute"] {
+    background: #1D3028 !important;
+    border-color: rgba(201, 139, 42, 0.30) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 4 — TOP BAR (PERMANECE ESCURA)
+   ══════════════════════════════════════════════════════════════ */
+
+/* O topbar usa rgba(14,26,23,...) como background inline */
+[data-is-root-theme].light [style*="background: rgba(14,26,23"],
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"],
+[data-is-root-theme].light [style*="background:rgba(14,26,23"] {
+    background: rgba(14, 26, 23, 0.97) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border-bottom: 1px solid rgba(201, 139, 42, 0.20) !important;
+}
+
+/* Todo texto no topbar continua claro */
+[data-is-root-theme].light [style*="background: rgba(14,26,23"] p,
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"] p,
+[data-is-root-theme].light [style*="background: rgba(14,26,23"] span,
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"] span,
+[data-is-root-theme].light [style*="background: rgba(14,26,23"] *,
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"] * {
+    color: rgba(240, 247, 245, 0.85) !important;
+}
+
+/* Copper no topbar mantém */
+[data-is-root-theme].light [style*="background: rgba(14,26,23"] [style*="color: #C98B2A"],
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"] [style*="color: #C98B2A"] {
+    color: #E0A63B !important;
+}
+
+/* Topbar SVGs */
+[data-is-root-theme].light [style*="background: rgba(14,26,23"] svg,
+[data-is-root-theme].light [style*="background: rgba(14, 26, 23"] svg {
+    color: rgba(240, 247, 245, 0.55) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 5 — CARDS E PAINÉIS DE CONTEÚDO
+   Estratégia: todos os bgs escuros → card âmbar translúcido.
+   Textos nos filhos → escuros automaticamente.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Variável de card light — usada em todo lugar ── */
+/* Card: fundo âmbar translúcido com borda cobre sutil */
+/* NÃO é branco puro — é rgba(255,250,240,0.88) sobre fundo âmbar = efeito warm glass */
+
+/* Glass panel (usado por charts, hero, seções grandes) */
+[data-is-root-theme].light .glass-panel,
+body.light .glass-panel {
+    background: rgba(255, 250, 240, 0.88) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 2px 8px rgba(140, 80, 0, 0.07), 0 8px 32px rgba(140, 80, 0, 0.05) !important;
+}
+[data-is-root-theme].light .glass-panel-hover:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    box-shadow: 0 4px 16px rgba(140, 80, 0, 0.10), 0 8px 40px rgba(201, 139, 42, 0.10) !important;
+}
+
+/* KPI card */
+[data-is-root-theme].light .kpi-card,
+body.light .kpi-card {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.20) !important;
+    box-shadow: 0 1px 4px rgba(140, 80, 0, 0.06), 0 4px 16px rgba(140, 80, 0, 0.04) !important;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+[data-is-root-theme].light .kpi-card:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    box-shadow: 0 4px 16px rgba(140, 80, 0, 0.10), 0 8px 40px rgba(201, 139, 42, 0.10) !important;
+}
+
+/* Project card */
+[data-is-root-theme].light .project-card,
+body.light .project-card {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.20) !important;
+    box-shadow: 0 1px 4px rgba(140, 80, 0, 0.06), 0 4px 16px rgba(140, 80, 0, 0.04) !important;
+}
+[data-is-root-theme].light .project-card:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    box-shadow: 0 4px 16px rgba(140, 80, 0, 0.10), 0 8px 40px rgba(201, 139, 42, 0.10) !important;
+}
+
+/* ── Bgs inline escuros → card âmbar ── */
+/* BG_GLASS rgba(14,26,23) → EXCEÇÃO: já tratado no topbar acima.
+   Aqui só para elements DENTRO de .app-main-content */
+[data-is-root-theme].light .app-main-content [style*="background: rgba(14, 26, 23"],
+[data-is-root-theme].light .app-main-content [style*="background: rgba(14,26,23"],
+[data-is-root-theme].light .app-main-content [style*="background:rgba(14, 26, 23"],
+[data-is-root-theme].light .app-main-content [style*="background:rgba(14,26,23"],
+body.light .app-main-content [style*="background: rgba(14, 26, 23"],
+body.light .app-main-content [style*="background: rgba(14,26,23"] {
+    background: rgba(255, 250, 240, 0.88) !important;
+    border-color: rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 2px 8px rgba(140, 80, 0, 0.07), 0 8px 32px rgba(140, 80, 0, 0.05) !important;
+}
+
+/* BG_SURFACE #0e1a17 → card âmbar */
+[data-is-root-theme].light .app-main-content [style*="background: #0e1a17"],
+[data-is-root-theme].light .app-main-content [style*="background: #0E1A17"],
+[data-is-root-theme].light .app-main-content [style*="background:#0e1a17"],
+[data-is-root-theme].light .app-main-content [style*="background-color: #0e1a17"],
+[data-is-root-theme].light .app-main-content [style*="background-color: #0E1A17"],
+body.light .app-main-content [style*="background: #0e1a17"],
+body.light .app-main-content [style*="background: #0E1A17"],
+body.light .app-main-content [style*="background-color: #0e1a17"],
+body.light .app-main-content [style*="background-color: #0E1A17"] {
+    background: rgba(255, 250, 240, 0.88) !important;
+    border-color: rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 2px 8px rgba(140, 80, 0, 0.07), 0 8px 32px rgba(140, 80, 0, 0.05) !important;
+}
+
+/* BG_ELEVATED #142420 → card âmbar (usado nos chart cards) */
+[data-is-root-theme].light .app-main-content [style*="background: #142420"],
+[data-is-root-theme].light .app-main-content [style*="background:#142420"],
+[data-is-root-theme].light .app-main-content [style*="background-color: #142420"],
+body.light .app-main-content [style*="background: #142420"],
+body.light .app-main-content [style*="background-color: #142420"] {
+    background: rgba(255, 250, 240, 0.88) !important;
+    border-color: rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 2px 8px rgba(140, 80, 0, 0.07), 0 8px 32px rgba(140, 80, 0, 0.05) !important;
+}
+
+/* BG_VOID #030504 e BG_DEPTH #081210 → fundo da página */
+[data-is-root-theme].light .app-main-content [style*="background: #030504"],
+[data-is-root-theme].light .app-main-content [style*="background:#030504"],
+[data-is-root-theme].light .app-main-content [style*="background-color: #030504"],
+[data-is-root-theme].light .app-main-content [style*="background: #081210"],
+[data-is-root-theme].light .app-main-content [style*="background:#081210"],
+[data-is-root-theme].light .app-main-content [style*="background-color: #081210"],
+body.light .app-main-content [style*="background: #030504"],
+body.light .app-main-content [style*="background: #081210"] {
+    background: #FBF4E8 !important;
+}
+
+/* var(--bg-void) inline */
+[data-is-root-theme].light [style*="var(--bg-void)"] {
+    background: #FBF4E8 !important;
+}
+
+/* Outros dark panels encontrados em charts/analytics */
+[data-is-root-theme].light .app-main-content [style*="background: #111"],
+[data-is-root-theme].light .app-main-content [style*="background:#111"],
+[data-is-root-theme].light .app-main-content [style*="background: #0B1A15"],
+[data-is-root-theme].light .app-main-content [style*="background: #162820"],
+[data-is-root-theme].light .app-main-content [style*="background: #1A2420"] {
+    background: rgba(255, 250, 240, 0.88) !important;
+    border-color: rgba(201, 139, 42, 0.22) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 6 — TEXTOS NO CONTEÚDO
+   Regra: quem está em fundo claro → texto escuro.
+   Os filhos dos cards convertidos herdam cor escura.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Todos os filhos dos cards convertidos → texto escuro */
+[data-is-root-theme].light .app-main-content [style*="background: rgba(14, 26, 23"] *,
+[data-is-root-theme].light .app-main-content [style*="background: rgba(14,26,23"] *,
+[data-is-root-theme].light .app-main-content [style*="background: #0e1a17"] *,
+[data-is-root-theme].light .app-main-content [style*="background: #0E1A17"] *,
+[data-is-root-theme].light .app-main-content [style*="background:#0e1a17"] *,
+[data-is-root-theme].light .app-main-content [style*="background: #142420"] *,
+[data-is-root-theme].light .app-main-content [style*="background:#142420"] *,
+body.light .app-main-content [style*="background: rgba(14, 26, 23"] *,
+body.light .app-main-content [style*="background: rgba(14,26,23"] *,
+body.light .app-main-content [style*="background: #0e1a17"] *,
+body.light .app-main-content [style*="background: #0E1A17"] *,
+body.light .app-main-content [style*="background: #142420"] * {
+    color: #2C1A06 !important;
+}
+
+/* KPI card — textos escuros */
+[data-is-root-theme].light .kpi-card p,
+[data-is-root-theme].light .kpi-card span,
+[data-is-root-theme].light .kpi-card h1,
+[data-is-root-theme].light .kpi-card h2,
+[data-is-root-theme].light .kpi-card h3,
+body.light .kpi-card p,
+body.light .kpi-card span {
+    color: #2C1A06 !important;
+}
+
+/* Project card — textos escuros */
+[data-is-root-theme].light .project-card p,
+[data-is-root-theme].light .project-card span,
+[data-is-root-theme].light .project-card h1,
+[data-is-root-theme].light .project-card h2,
+[data-is-root-theme].light .project-card h3,
+body.light .project-card p,
+body.light .project-card span {
+    color: #2C1A06 !important;
+}
+
+/* Glass panel — textos escuros */
+[data-is-root-theme].light .glass-panel p,
+[data-is-root-theme].light .glass-panel span,
+[data-is-root-theme].light .glass-panel h1,
+[data-is-root-theme].light .glass-panel h2,
+[data-is-root-theme].light .glass-panel h3,
+body.light .glass-panel p,
+body.light .glass-panel span {
+    color: #2C1A06 !important;
+}
+
+/* ── Cores semânticas no conteúdo ── */
+
+/* Copper — mantém mas levemente saturado para fundo claro */
+[data-is-root-theme].light .app-main-content [style*="color: #C98B2A"],
+[data-is-root-theme].light .app-main-content [style*="color: #c98b2a"],
+[data-is-root-theme].light .app-main-content [style*="color: rgb(201, 139, 42)"],
+[data-is-root-theme].light .kpi-card [style*="color: #C98B2A"],
+[data-is-root-theme].light .glass-panel [style*="color: #C98B2A"],
+[data-is-root-theme].light .project-card [style*="color: #C98B2A"],
+body.light .app-main-content [style*="color: #C98B2A"],
+body.light .app-main-content [style*="color: #c98b2a"] {
+    color: #A86A10 !important;
+}
+
+/* TEXT_MUTED #889999 → muted âmbar */
+[data-is-root-theme].light .app-main-content [style*="color: #889999"],
+[data-is-root-theme].light .app-main-content [style*="color: rgb(136, 153, 153)"],
+[data-is-root-theme].light .kpi-card [style*="color: #889999"],
+[data-is-root-theme].light .glass-panel [style*="color: #889999"],
+[data-is-root-theme].light .project-card [style*="color: #889999"],
+body.light .app-main-content [style*="color: #889999"],
+body.light .app-main-content [style*="color: rgb(136, 153, 153)"] {
+    color: #7A5C30 !important;
+}
+
+/* TEXT_PRIMARY #E0E0E0 → escuro âmbar */
+[data-is-root-theme].light .app-main-content [style*="color: #E0E0E0"],
+[data-is-root-theme].light .app-main-content [style*="color: rgb(224, 224, 224)"],
+body.light .app-main-content [style*="color: #E0E0E0"],
+body.light .app-main-content [style*="color: rgb(224, 224, 224)"] {
+    color: #2C1A06 !important;
+}
+
+/* Patina/verde — intensificado para contraste no fundo claro */
+[data-is-root-theme].light .app-main-content [style*="color: #2A9D8F"],
+[data-is-root-theme].light .app-main-content [style*="color: rgb(42, 157, 143)"],
+body.light .app-main-content [style*="color: #2A9D8F"] {
+    color: #1A7A6F !important;
+}
+
+/* Status danger */
+[data-is-root-theme].light .app-main-content [style*="color: #EF4444"],
+[data-is-root-theme].light .app-main-content [style*="color: rgb(239, 68, 68)"],
+body.light .app-main-content [style*="color: #EF4444"] {
+    color: #B91C1C !important;
+}
+
+/* Status warning */
+[data-is-root-theme].light .app-main-content [style*="color: #F59E0B"],
+body.light .app-main-content [style*="color: #F59E0B"] {
+    color: #92400E !important;
+}
+
+/* Bordas rgba(255,255,255,...) → âmbar */
+[data-is-root-theme].light .app-main-content [style*="border: 1px solid rgba(255, 255, 255"],
+[data-is-root-theme].light .app-main-content [style*="border: 1px solid rgba(255,255,255"],
+[data-is-root-theme].light .app-main-content [style*="border-bottom: 1px solid rgba(255, 255, 255"],
+[data-is-root-theme].light .app-main-content [style*="border-top: 1px solid rgba(255, 255, 255"],
+[data-is-root-theme].light .app-main-content [style*="border-left: 1px solid rgba(255, 255, 255"] {
+    border-color: rgba(201, 139, 42, 0.18) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 7 — RADIX UI COMPONENTS
+   ══════════════════════════════════════════════════════════════ */
+
+/* Tabs */
+[data-is-root-theme].light .rt-TabsList {
+    background: rgba(201, 139, 42, 0.08) !important;
+    border: 1px solid rgba(201, 139, 42, 0.18) !important;
+}
+[data-is-root-theme].light .rt-TabsTrigger {
+    color: #7A5C30 !important;
+}
+[data-is-root-theme].light .rt-TabsTrigger[data-state="active"] {
+    color: #2C1A06 !important;
+    background: rgba(255, 250, 240, 0.95) !important;
+    box-shadow: 0 1px 4px rgba(140, 80, 0, 0.12) !important;
+}
+[data-is-root-theme].light .rt-TabsTrigger:hover {
+    color: #2C1A06 !important;
+}
+
+/* Popover / Dialog */
+[data-is-root-theme].light .rt-PopoverContent,
+[data-is-root-theme].light .rt-DialogContent,
+[data-is-root-theme].light .rt-HoverCardContent,
+[data-is-root-theme].light .rt-AlertDialogContent {
+    background: #FFFDF7 !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 8px 48px rgba(140, 80, 0, 0.14), 0 2px 8px rgba(140, 80, 0, 0.08) !important;
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-PopoverContent *,
+[data-is-root-theme].light .rt-DialogContent *,
+[data-is-root-theme].light .rt-AlertDialogContent * {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-DialogContent [style*="color: #C98B2A"],
+[data-is-root-theme].light .rt-PopoverContent [style*="color: #C98B2A"] {
+    color: #A86A10 !important;
+}
+
+/* Dropdown / Context Menu */
+[data-is-root-theme].light .rt-DropdownMenuContent,
+[data-is-root-theme].light .rt-ContextMenuContent {
+    background: #FFFDF7 !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 8px 40px rgba(140, 80, 0, 0.12) !important;
+}
+[data-is-root-theme].light .rt-DropdownMenuItem,
+[data-is-root-theme].light .rt-ContextMenuItem {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-DropdownMenuItem:hover,
+[data-is-root-theme].light .rt-ContextMenuItem:hover {
+    background: rgba(201, 139, 42, 0.08) !important;
+    color: #1A0E04 !important;
+}
+[data-is-root-theme].light .rt-DropdownMenuSeparator,
+[data-is-root-theme].light .rt-ContextMenuSeparator {
+    background: rgba(201, 139, 42, 0.12) !important;
+}
+
+/* Select */
+[data-is-root-theme].light .rt-SelectContent {
+    background: #FFFDF7 !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    box-shadow: 0 8px 32px rgba(140, 80, 0, 0.10) !important;
+}
+[data-is-root-theme].light .rt-SelectItem {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-SelectItem[data-highlighted] {
+    background: rgba(201, 139, 42, 0.10) !important;
+    color: #1A0E04 !important;
+}
+[data-is-root-theme].light .rt-SelectItem[data-state="checked"] {
+    color: #A86A10 !important;
+}
+[data-is-root-theme].light .rt-SelectTrigger {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.25) !important;
+    color: #2C1A06 !important;
+    box-shadow: none !important;
+}
+[data-is-root-theme].light .rt-SelectTrigger:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+}
+[data-is-root-theme].light .rt-SelectTriggerInner {
+    color: #2C1A06 !important;
+}
+
+/* Text Fields / Inputs */
+[data-is-root-theme].light .rt-TextFieldRoot,
+[data-is-root-theme].light .rt-TextAreaRoot {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.25) !important;
+    box-shadow: none !important;
+}
+[data-is-root-theme].light .rt-TextFieldRoot:focus-within,
+[data-is-root-theme].light .rt-TextAreaRoot:focus-within {
+    border-color: #C98B2A !important;
+    box-shadow: 0 0 0 3px rgba(201, 139, 42, 0.12) !important;
+}
+[data-is-root-theme].light .rt-TextFieldInput,
+[data-is-root-theme].light .rt-TextAreaInput {
+    color: #2C1A06 !important;
+    background: transparent !important;
+}
+[data-is-root-theme].light .rt-TextFieldInput::placeholder,
+[data-is-root-theme].light .rt-TextAreaInput::placeholder {
+    color: rgba(44, 26, 6, 0.38) !important;
+}
+
+/* Inputs nativos */
+[data-is-root-theme].light .app-main-content input:not([type="range"]),
+[data-is-root-theme].light .app-main-content textarea,
+[data-is-root-theme].light .app-main-content select,
+body.light .app-main-content input:not([type="range"]),
+body.light .app-main-content textarea {
+    background: rgba(255, 250, 240, 0.92) !important;
+    color: #2C1A06 !important;
+    border-color: rgba(201, 139, 42, 0.25) !important;
+}
+[data-is-root-theme].light .app-main-content input::placeholder,
+body.light .app-main-content input::placeholder {
+    color: rgba(44, 26, 6, 0.38) !important;
+}
+
+/* Badges */
+[data-is-root-theme].light .rt-Badge[data-color="green"] {
+    background: rgba(29, 74, 66, 0.10) !important;
+    color: #1D4A42 !important;
+    border-color: rgba(29, 74, 66, 0.25) !important;
+}
+[data-is-root-theme].light .rt-Badge[data-color="red"] {
+    background: rgba(185, 28, 28, 0.08) !important;
+    color: #991B1B !important;
+    border-color: rgba(185, 28, 28, 0.20) !important;
+}
+[data-is-root-theme].light .rt-Badge[data-color="orange"],
+[data-is-root-theme].light .rt-Badge[data-color="yellow"] {
+    background: rgba(201, 139, 42, 0.12) !important;
+    color: #7A4E0A !important;
+    border-color: rgba(201, 139, 42, 0.28) !important;
+}
+[data-is-root-theme].light .rt-Badge[data-color="blue"] {
+    background: rgba(30, 64, 175, 0.08) !important;
+    color: #1E3EA0 !important;
+    border-color: rgba(30, 64, 175, 0.20) !important;
+}
+
+/* Tables */
+[data-is-root-theme].light .rt-TableColumnHeaderCell {
+    background: rgba(201, 139, 42, 0.08) !important;
+    color: #4A3018 !important;
+    border-bottom: 2px solid rgba(201, 139, 42, 0.20) !important;
+    font-weight: 700 !important;
+}
+[data-is-root-theme].light .rt-TableCell {
+    color: #2C1A06 !important;
+    border-bottom: 1px solid rgba(201, 139, 42, 0.10) !important;
+}
+[data-is-root-theme].light .rt-TableRow:hover .rt-TableCell {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+
+/* Callout */
+[data-is-root-theme].light .rt-CalloutRoot {
+    background: rgba(201, 139, 42, 0.07) !important;
+    border: 1px solid rgba(201, 139, 42, 0.20) !important;
+}
+[data-is-root-theme].light .rt-CalloutText {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-CalloutIcon svg {
+    color: #A86A10 !important;
+}
+
+/* Button */
+[data-is-root-theme].light .rt-Button[data-variant="solid"] {
+    background: #1D4A42 !important;
+    color: #F0F7F5 !important;
+}
+[data-is-root-theme].light .rt-Button[data-variant="solid"]:hover {
+    background: #245049 !important;
+}
+[data-is-root-theme].light .rt-Button[data-variant="outline"] {
+    border-color: rgba(201, 139, 42, 0.35) !important;
+    color: #4A3018 !important;
+}
+[data-is-root-theme].light .rt-Button[data-variant="ghost"] {
+    color: #4A3018 !important;
+}
+[data-is-root-theme].light .rt-Button[data-variant="ghost"]:hover {
+    background: rgba(201, 139, 42, 0.08) !important;
+}
+
+/* Progress */
+[data-is-root-theme].light .rt-ProgressRoot {
+    background: rgba(201, 139, 42, 0.12) !important;
+}
+[data-is-root-theme].light .rt-ProgressIndicator {
+    background: #C98B2A !important;
+}
+
+/* Separator */
+[data-is-root-theme].light .rt-Separator {
+    background: rgba(201, 139, 42, 0.15) !important;
+}
+
+/* Generic Radix text */
+[data-is-root-theme].light .rt-Text {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .rt-Heading {
+    color: #2C1A06 !important;
+}
+
+/* Card Radix */
+[data-is-root-theme].light .rt-Card {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border-color: rgba(201, 139, 42, 0.20) !important;
+    box-shadow: 0 1px 4px rgba(140, 80, 0, 0.06), 0 4px 16px rgba(140, 80, 0, 0.04) !important;
+}
+
+/* Avatar */
+[data-is-root-theme].light .rt-AvatarFallback {
+    background: rgba(201, 139, 42, 0.15) !important;
+    color: #7A4E0A !important;
+}
+
+/* Tooltip */
+[data-is-root-theme].light .rt-TooltipContent,
+[data-is-root-theme].light .rt-TooltipText {
+    background: #1A0E04 !important;
+    color: #F5E8CC !important;
+    border: 1px solid rgba(201, 139, 42, 0.30) !important;
+}
+
+/* Dialog overlay */
+[data-is-root-theme].light .rt-DialogOverlay,
+[data-is-root-theme].light .rt-AlertDialogOverlay {
+    background: rgba(44, 26, 6, 0.45) !important;
+}
+
+/* Checkbox */
+[data-is-root-theme].light .rt-CheckboxButton[data-state="checked"],
+[data-is-root-theme].light .rt-BaseCheckboxRoot[data-state="checked"] {
+    background: #C98B2A !important;
+    border-color: #C98B2A !important;
+}
+
+/* Switch */
+[data-is-root-theme].light .rt-SwitchRoot[data-state="checked"] {
+    background: #C98B2A !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 8 — RECHARTS
+   ══════════════════════════════════════════════════════════════ */
+
+[data-is-root-theme].light .recharts-default-tooltip {
+    background: #FFFDF7 !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    border-radius: 6px !important;
+    box-shadow: 0 4px 16px rgba(140, 80, 0, 0.10) !important;
+}
+[data-is-root-theme].light .recharts-tooltip-label {
+    color: #4A3018 !important;
+    font-weight: 600 !important;
+}
+[data-is-root-theme].light .recharts-tooltip-item {
+    color: #2C1A06 !important;
+}
+[data-is-root-theme].light .recharts-cartesian-axis-tick-value {
+    fill: #7A5C30 !important;
+}
+[data-is-root-theme].light .recharts-legend-item-text {
+    color: #4A3018 !important;
+    fill: #4A3018 !important;
+}
+[data-is-root-theme].light .recharts-cartesian-grid-horizontal line,
+[data-is-root-theme].light .recharts-cartesian-grid-vertical line {
+    stroke: rgba(201, 139, 42, 0.10) !important;
+}
+[data-is-root-theme].light .recharts-reference-line line {
+    stroke: rgba(201, 139, 42, 0.25) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 9 — DATA TABLE CUSTOMIZADA
+   ══════════════════════════════════════════════════════════════ */
+
+[data-is-root-theme].light .data-table th {
+    background: rgba(201, 139, 42, 0.08) !important;
+    color: #4A3018 !important;
+    border-bottom: 2px solid rgba(201, 139, 42, 0.18) !important;
+    font-weight: 700 !important;
+}
+[data-is-root-theme].light .data-table td {
+    color: #2C1A06 !important;
+    border-bottom: 1px solid rgba(201, 139, 42, 0.08) !important;
+}
+[data-is-root-theme].light .data-table tr:hover td {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+
+/* Tooltips custom (.rt-TooltipContent em style.css) */
+[data-is-root-theme].light .rt-TooltipContent {
+    background: #1A0E04 !important;
+    color: #F5E8CC !important;
+    border: 1px solid rgba(201, 139, 42, 0.30) !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION 10 — MISC
+   ══════════════════════════════════════════════════════════════ */
+
+/* Suggestion chips */
+[data-is-root-theme].light .suggestion-chip {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.20) !important;
+    color: #4A3018 !important;
+    box-shadow: 0 1px 3px rgba(140, 80, 0, 0.05) !important;
+}
+[data-is-root-theme].light .suggestion-chip:hover {
+    border-color: rgba(201, 139, 42, 0.50) !important;
+    color: #A86A10 !important;
+    background: rgba(255, 248, 220, 0.95) !important;
+}
+
+/* Pagination */
+[data-is-root-theme].light .pagination-btn {
+    background: rgba(255, 250, 240, 0.92) !important;
+    border: 1px solid rgba(201, 139, 42, 0.20) !important;
+    color: #4A3018 !important;
+}
+[data-is-root-theme].light .pagination-btn:hover {
+    border-color: rgba(201, 139, 42, 0.45) !important;
+    color: #A86A10 !important;
+}
+[data-is-root-theme].light .pagination-btn:disabled {
+    opacity: 0.4 !important;
+}
+
+/* Skeleton shimmer */
+[data-is-root-theme].light .skeleton-block {
+    background: linear-gradient(
+        90deg,
+        rgba(255, 240, 200, 0.6) 25%,
+        rgba(255, 250, 230, 0.9) 50%,
+        rgba(255, 240, 200, 0.6) 75%
+    ) !important;
+    background-size: 400% 100% !important;
+    animation: skeleton-shimmer 1.4s ease infinite !important;
+}
+@keyframes skeleton-shimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* Loading overlays */
+[data-is-root-theme].light .loading-overlay,
+[data-is-root-theme].light .page-loading-overlay {
+    background: rgba(251, 244, 232, 0.90) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+/* Sonner toasts */
+[data-is-root-theme].light [data-sonner-toast] {
+    background: #FFFDF7 !important;
+    border: 1px solid rgba(201, 139, 42, 0.22) !important;
+    color: #2C1A06 !important;
+    box-shadow: 0 4px 24px rgba(140, 80, 0, 0.10) !important;
+}
+
+/* FAB */
+[data-is-root-theme].light .fab-ai {
+    background: #C98B2A !important;
+    color: #FFFDF7 !important;
+    border-color: rgba(201, 139, 42, 0.50) !important;
+    box-shadow: 0 4px 16px rgba(201, 139, 42, 0.35) !important;
+}
+[data-is-root-theme].light .fab-ai:hover {
+    background: #B07820 !important;
+}
+
+/* Status dot */
+[data-is-root-theme].light .status-dot-green,
+[data-is-root-theme].light [class*="status-online"] {
+    background: #1D6A5A !important;
+}
+
+/* Error text global (fora de cards) */
+[data-is-root-theme].light [style*="color: #EF4444"],
+[data-is-root-theme].light [style*="color: rgb(239, 68, 68)"] {
+    color: #B91C1C !important;
+}
+
+/* Scrollbars */
+[data-is-root-theme].light ::-webkit-scrollbar-track {
+    background: rgba(201, 139, 42, 0.04) !important;
+}
+[data-is-root-theme].light ::-webkit-scrollbar-thumb {
+    background: rgba(201, 139, 42, 0.22) !important;
+    border-radius: 4px !important;
+}
+[data-is-root-theme].light ::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 139, 42, 0.45) !important;
+}
+
+/* Page hero border */
+[data-is-root-theme].light .page-hero {
+    border-top: 3px solid #C98B2A !important;
+}
+
+/* ── End of Light Theme ─────────────────────────────────────── */

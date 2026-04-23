@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
 import { useState, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -204,22 +204,31 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
     queryKey: ['hub-visao-geral', contrato],
     queryFn:  () => api.get(`/hub/visao-geral?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
+    staleTime: 2 * 60_000,
+    placeholderData: keepPreviousData,
   })
   const { data: insightsData, refetch: refetchInsights } = useQuery({
     queryKey: ['hub-agente-insights', contrato],
     queryFn:  () => api.get(`/hub/agente/insights?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
   })
   const [riscoOpen, setRiscoOpen] = useState(false)
   const [alertaOpen, setAlertaOpen] = useState(false)
   const [generatingInsights, setGeneratingInsights] = useState(false)
+  const [liveInsights, setLiveInsights] = useState<any[] | null>(null)
 
   async function handleGerarInsights() {
     setGeneratingInsights(true)
     try {
-      await refetchInsights()
-      await queryClient.invalidateQueries({ queryKey: ['hub-visao-geral', contrato] })
+      // POST gera ao vivo e retorna inline — sem esperar Celery
+      const res = await api.post(`/hub/agente/insights/generate`, { contrato })
+      const fresh = res.data?.insights
+      if (fresh?.length) {
+        setLiveInsights(fresh)
+        // Atualiza cache sem refetch
+        queryClient.setQueryData(['hub-agente-insights', contrato], (old: any) => ({ ...old, insights: fresh }))
+      }
     } finally {
       setGeneratingInsights(false)
     }
@@ -227,8 +236,8 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
 
   if (isLoading) return <Skeleton />
   const d = data ?? {}
-  // Prefer live insights from agente/insights; fallback to visao-geral embedded insights
-  const insights: any[] = (insightsData?.insights?.length ? insightsData.insights : d.insights) || []
+  // liveInsights tem prioridade (resultado do botão), depois cache, depois visao-geral
+  const insights: any[] = liveInsights ?? (insightsData?.insights?.length ? insightsData.insights : d.insights) ?? []
 
   // Coordenadas do contrato para o Windy — usa lat/lng do contrato ou default Brasil
   const windyLat = contratoInfo?.latitude ?? d.latitude ?? -15.78
@@ -394,8 +403,8 @@ function DashboardTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-dashboard', contrato],
     queryFn:  () => api.get(`/hub/dashboard?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
   if (isLoading) return <Skeleton />
   const d = data ?? {}
@@ -984,8 +993,8 @@ function CronogramaTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-cronograma', contrato],
     queryFn:  () => api.get(`/hub/cronograma?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const allRows: any[] = data?.atividades || []
@@ -1235,6 +1244,8 @@ function AuditoriaTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-auditoria', contrato],
     queryFn:  () => api.get(`/hub/auditoria?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
+    staleTime: 10 * 60_000,
+    placeholderData: keepPreviousData,
   })
   const [lightbox, setLightbox] = useState<any>(null)
 
@@ -1366,6 +1377,8 @@ function TimelineTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-timeline', contrato],
     queryFn:  () => api.get(`/hub/timeline?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const [tipo, setTipo]     = useState('Reunião')
@@ -1604,6 +1617,8 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['hub-financeiro', contrato],
     queryFn:  () => api.get(`/hub/financeira?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
+    staleTime: 10 * 60_000,
+    placeholderData: keepPreviousData,
     enabled:  !!contrato,
   })
 
@@ -1656,11 +1671,31 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const shimmer = 'relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.5s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/5 before:to-transparent'
+
 function Skeleton() {
   return (
-    <div className="flex flex-col gap-4 animate-pulse">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4"><div className="h-24 bg-white/5 rounded-xl"/><div className="h-24 bg-white/5 rounded-xl"/><div className="h-24 bg-white/5 rounded-xl"/><div className="h-24 bg-white/5 rounded-xl"/></div>
-      <div className="h-64 bg-white/5 rounded-xl" />
+    <div className="flex flex-col gap-5 animate-in fade-in duration-300">
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {Array.from({length: 5}).map((_, i) => (
+          <div key={i} className={`h-24 bg-white/[0.04] rounded-2xl border border-white/[0.04] ${shimmer}`} />
+        ))}
+      </div>
+      {/* Main chart area */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className={`lg:col-span-2 h-64 bg-white/[0.04] rounded-2xl border border-white/[0.04] ${shimmer}`} />
+        <div className="flex flex-col gap-4">
+          {Array.from({length: 4}).map((_, i) => (
+            <div key={i} className={`h-12 bg-white/[0.04] rounded-xl border border-white/[0.04] ${shimmer}`} />
+          ))}
+        </div>
+      </div>
+      {/* Bottom row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className={`h-48 bg-white/[0.04] rounded-2xl border border-white/[0.04] ${shimmer}`} />
+        <div className={`h-48 bg-white/[0.04] rounded-2xl border border-white/[0.04] ${shimmer}`} />
+      </div>
     </div>
   )
 }
@@ -1671,12 +1706,36 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
   const [searchParams, setSearchParams] = useSearchParams()
   const contrato = searchParams.get('contrato') ?? ''
   const activeTab = hubTab || searchParams.get('tab') || 'visao_geral'
+  const queryClient = useQueryClient()
 
   const { data: contratosList } = useQuery({
     queryKey: ['hub-contratos'],
     queryFn:  () => api.get('/hub/contratos').then(r => r.data),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
+    placeholderData: keepPreviousData,
   })
+
+  // Prefetch todas as tabs em background quando contrato é selecionado
+  const prefetchTabs = useCallback((cod: string) => {
+    if (!cod) return
+    const tabs = [
+      { key: ['hub-visao-geral', cod],  url: `/hub/visao-geral?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-dashboard', cod],    url: `/hub/dashboard?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-cronograma', cod],   url: `/hub/cronograma?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-timeline', cod],     url: `/hub/timeline?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-auditoria', cod],    url: `/hub/auditoria?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-financeiro', cod],   url: `/hub/financeira?contrato=${encodeURIComponent(cod)}` },
+      { key: ['hub-agente-insights', cod], url: `/hub/agente/insights?contrato=${encodeURIComponent(cod)}` },
+    ]
+    tabs.forEach(({ key, url }) => {
+      queryClient.prefetchQuery({
+        queryKey: key,
+        queryFn:  () => api.get(url).then(r => r.data),
+        staleTime: 5 * 60_000,
+      })
+    })
+  }, [queryClient])
 
   const contratos: any[] = contratosList?.contratos ?? []
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false)
@@ -1720,7 +1779,8 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
                 <div
                   key={c.contrato}
                   className="project-card-glow glass-panel rounded-2xl p-6 flex flex-col group border-white/5 cursor-pointer"
-                  onClick={() => setSearchParams({ contrato: c.contrato })}
+                  onMouseEnter={() => prefetchTabs(c.contrato)}
+                  onClick={() => { prefetchTabs(c.contrato); setSearchParams({ contrato: c.contrato }) }}
                 >
                   {/* Status badge + menu */}
                   <div className="flex items-center justify-between mb-4">

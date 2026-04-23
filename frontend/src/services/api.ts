@@ -13,14 +13,18 @@ const api = axios.create({
   },
 })
 
-// Redireciona para /login em caso de 401, exceto na verificação de sessão inicial
+let _loggingOut = false
+
+export function setLoggingOut(v: boolean) { _loggingOut = v }
+
+// Redireciona para /login em caso de 401, exceto em auth routes e durante logout
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     const url = err.config?.url ?? ''
     const is401 = err.response?.status === 401
-    const isSessionCheck = url.includes('/auth/me')
-    if (is401 && !isSessionCheck && window.location.pathname !== '/login') {
+    const isAuthRoute = url.includes('/auth/')
+    if (is401 && !isAuthRoute && !_loggingOut && window.location.pathname !== '/login') {
       window.location.href = '/login'
     }
     return Promise.reject(err)

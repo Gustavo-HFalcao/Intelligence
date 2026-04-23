@@ -99,17 +99,20 @@ async def login(body: LoginRequest, response: Response):
 async def logout(
     response: Response,
     session_id: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    user: dict = Depends(get_current_user),
 ):
-    audit_log(
-        category=AuditCategory.LOGOUT,
-        action=f"Logout: {user.get('login', user.get('email', ''))}",
-        username=user.get("login", user.get("email", "")),
-        client_id=str(user.get("client_id") or ""),
-    )
+    # Não requer autenticação — idempotente: chamadas repetidas são seguras
+    from backend.middleware.auth import get_session
+    user = get_session(session_id) if session_id else None
+    if user:
+        audit_log(
+            category=AuditCategory.LOGOUT,
+            action=f"Logout: {user.get('login', user.get('email', ''))}",
+            username=user.get("login", user.get("email", "")),
+            client_id=str(user.get("client_id") or ""),
+        )
     if session_id:
         destroy_session(session_id)
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(SESSION_COOKIE, samesite="lax")
     return {"ok": True}
 
 

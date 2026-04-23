@@ -4,7 +4,8 @@
  * Substitui as variáveis de auth do GlobalState (current_user_id, current_user_role, etc.).
  */
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import api from '@/services/api'
+import { useQueryClient } from '@tanstack/react-query'
+import api, { setLoggingOut } from '@/services/api'
 
 export interface User {
   user_id: string
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isPremiumLoading, setIsPremiumLoading] = useState(false)
+  const queryClient = useQueryClient()
 
   // Rehydrata sessão ao montar (verifica cookie existente)
   useEffect(() => {
@@ -45,21 +47,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.post<User>('/auth/login', { email, password })
-    
+
+    // Limpa cache antigo de outro usuário antes de setar o novo
+    queryClient.clear()
+
     // Inicia sequência premium de 5.5s (Paridade 1:1)
     setIsPremiumLoading(true)
     setUser(res.data)
-    
+
     setTimeout(() => {
       setIsPremiumLoading(false)
     }, 5500)
-  }, [])
+  }, [queryClient])
 
   const logout = useCallback(async () => {
-    await api.post('/auth/logout')
+    // Sinaliza ao interceptor para ignorar 401s durante o logout
+    setLoggingOut(true)
+    // Seta null imediatamente — evita race com requests pendentes
     setUser(null)
     setIsPremiumLoading(false)
-  }, [])
+    // Limpa todo o cache React Query — evita dados do usuário anterior
+    queryClient.clear()
+    // Fire-and-forget: não bloqueia e não propaga erro 401
+    api.post('/auth/logout').catch(() => {/* sessão já morta — ok */}).finally(() => setLoggingOut(false))
+  }, [queryClient])
 
   return (
     <AuthContext.Provider value={{ 

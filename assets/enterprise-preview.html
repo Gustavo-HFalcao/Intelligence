@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOMTEMPO — Enterprise UI Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Variables ─────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-void:    #030504;
+  --bg-depth:   #081210;
+  --bg-surface: #0e1a17;
+  --bg-elev:    #142420;
+  --copper:     #C98B2A;
+  --copper-lt:  #E0A63B;
+  --copper-dim: rgba(201,139,42,0.12);
+  --patina:     #2A9D8F;
+  --patina-dim: rgba(42,157,143,0.12);
+  --text-main:  #E0E0E0;
+  --text-muted: #637070;
+  --text-dim:   #3e5050;
+  --border:     rgba(255,255,255,0.07);
+  --border-cu:  rgba(201,139,42,0.28);
+
+  /* ENTERPRISE = sharp, not round */
+  --r-control: 3px;   /* inputs, buttons, badges */
+  --r-card:    6px;   /* cards, panels */
+  --r-modal:   8px;   /* modals, popups */
+
+  --font-tech: 'Rajdhani', sans-serif;
+  --font-body: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body { background: #0a0f0e; color: var(--text-main); font-family: var(--font-body); }
+
+/* ── Nav Tabs ──────────────────────────────────────────── */
+.preview-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+  background: rgba(3,5,4,0.96);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  display: flex; align-items: center; gap: 0;
+  padding: 0 24px; height: 48px;
+}
+.preview-nav-brand {
+  font-family: var(--font-tech); font-weight: 700;
+  letter-spacing: 0.12em; font-size: 14px; color: var(--copper);
+  margin-right: 32px; white-space: nowrap;
+}
+.nav-tab {
+  height: 48px; padding: 0 20px; cursor: pointer;
+  font-family: var(--font-tech); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.08em; color: var(--text-muted);
+  border: none; background: transparent; text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.nav-tab:hover { color: var(--text-main); }
+.nav-tab.active { color: var(--copper); border-bottom-color: var(--copper); }
+
+.preview-section {
+  display: none; padding-top: 48px; min-height: 100vh;
+}
+.preview-section.active { display: block; }
+
+/* ═══════════════════════════════════════════
+   SECTION 1 — LOGIN
+═══════════════════════════════════════════ */
+
+/* ── Background Grid (login) ─────────────── */
+.login-bg {
+  position: fixed; inset: 0; overflow: hidden;
+  background: var(--bg-void);
+}
+.login-bg::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(201,139,42,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201,139,42,0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.login-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 55% at 0% 100%, rgba(42,157,143,0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 100% 0%, rgba(201,139,42,0.07) 0%, transparent 55%);
+}
+
+/* ── Login Layout ──────────────────────── */
+.login-wrap {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: calc(100vh - 48px);
+}
+
+/* ── Left: Brand Panel ─────────────────── */
+.login-left {
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 64px 56px;
+  border-right: 1px solid var(--border);
+  position: relative; overflow: hidden;
+}
+.login-left-inner { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+/* Decorative coordinate lines */
+.coord-lines {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.4;
+}
+.coord-h { position: absolute; left: 56px; right: 56px; height: 1px; background: var(--border); }
+.coord-v { position: absolute; top: 64px; bottom: 64px; width: 1px; background: var(--border); }
+.coord-dot {
+  position: absolute; width: 4px; height: 4px;
+  border-radius: 50%; background: var(--copper); opacity: 0.5;
+  transform: translate(-50%, -50%);
+}
+
+.brand-eyebrow {
+  font-family: var(--font-mono); font-size: 10px; color: var(--patina);
+  letter-spacing: 0.2em; text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex; align-items: center; gap: 10px;
+}
+.brand-eyebrow::before {
+  content: ''; width: 24px; height: 1px; background: var(--patina);
+}
+.brand-title {
+  font-family: var(--font-tech); font-size: 4rem; font-weight: 700;
+  color: white; line-height: 0.9; letter-spacing: -0.02em;
+}
+.brand-title span { color: var(--copper); }
+.brand-sub {
+  font-family: var(--font-tech); font-size: 0.85rem; font-weight: 600;
+  letter-spacing: 0.3em; color: var(--text-muted); margin-top: 10px;
+}
+.brand-desc {
+  margin-top: 32px; font-size: 0.82rem; color: var(--text-muted);
+  line-height: 1.7; max-width: 340px;
+}
+
+/* Data stats panel */
+.login-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  border: 1px solid var(--border); background: var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  margin-top: 48px;
+}
+.stat-cell {
+  background: var(--bg-depth); padding: 18px 20px;
+}
+.stat-label {
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+  letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 6px;
+}
+.stat-value {
+  font-family: var(--font-tech); font-size: 1.5rem; font-weight: 700;
+  color: var(--copper);
+}
+.stat-value.patina { color: var(--patina); }
+
+/* Login footer info */
+.login-left-footer {
+  display: flex; align-items: center; gap: 16px;
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-dim); letter-spacing: 0.12em;
+}
+.login-left-footer-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--patina); }
+.login-left-footer-dot.pulse { animation: statusPulse 2s ease-in-out infinite; }
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(42,157,143,0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(42,157,143,0); }
+}
+
+/* ── Right: Auth Panel ─────────────────── */
+.login-right {
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 64px 72px;
+}
+.auth-header { margin-bottom: 40px; }
+.auth-eyebrow {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+  letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 12px;
+}
+.auth-title {
+  font-family: var(--font-tech); font-size: 1.8rem; font-weight: 700;
+  color: white; letter-spacing: -0.01em;
+}
+
+/* Form */
+.form-field { margin-bottom: 20px; }
+.form-label {
+  display: block; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); letter-spacing: 0.14em;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.form-input {
+  width: 100%; height: 44px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  color: white; font-family: var(--font-body); font-size: 14px;
+  padding: 0 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-input::placeholder { color: var(--text-dim); }
+.form-input:focus {
+  border-color: var(--copper);
+  box-shadow: 0 0 0 2px rgba(201,139,42,0.18);
+}
+
+/* Submit Button States */
+.btn-submit {
+  width: 100%; height: 48px;
+  background: var(--copper);
+  border: none; border-radius: var(--r-control);
+  color: #080f0d; font-family: var(--font-tech);
+  font-size: 14px; font-weight: 700; letter-spacing: 0.12em;
+  cursor: pointer; position: relative; overflow: hidden;
+  transition: background 0.15s, transform 0.1s;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  text-transform: uppercase;
+}
+.btn-submit:hover { background: var(--copper-lt); }
+.btn-submit:active { transform: scale(0.99); }
+
+/* Authenticating state */
+.btn-submit.auth-loading {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-cu);
+  color: var(--copper);
+  cursor: not-allowed;
+}
+
+/* Auth progress bar inside button */
+.btn-auth-bar {
+  position: absolute; bottom: 0; left: 0; height: 2px;
+  background: var(--copper);
+  animation: authBarProgress 2.5s var(--ease-out) forwards;
+}
+@keyframes authBarProgress {
+  0% { width: 0%; }
+  60% { width: 75%; }
+  90% { width: 92%; }
+  100% { width: 100%; }
+}
+
+/* Auth spinner (inline) */
+.auth-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(201,139,42,0.2);
+  border-top-color: var(--copper);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Error state */
+.form-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; margin-top: 16px;
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.22);
+  border-left: 3px solid #EF4444;
+  border-radius: var(--r-control);
+  font-size: 13px; color: rgba(239,68,68,0.9);
+}
+
+/* Auth state tabs (for preview only) */
+.state-switcher {
+  display: flex; gap: 8px; margin-bottom: 32px;
+}
+.state-btn {
+  padding: 5px 12px;
+  background: var(--bg-depth);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); cursor: pointer;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  transition: all 0.15s;
+}
+.state-btn:hover, .state-btn.active {
+  border-color: var(--copper); color: var(--copper);
+}
+
+/* Auth form content panels */
+.auth-state { display: none; }
+.auth-state.visible { display: block; }
+
+/* Divider */
+.auth-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 24px 0; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.auth-meta {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-dim); letter-spacing: 0.1em;
+  text-align: center; margin-top: 28px;
+  text-transform: uppercase;
+}
+
+
+/* ═══════════════════════════════════════════
+   SECTION 2 — POST-LOGIN LOADER
+═══════════════════════════════════════════ */
+
+.loader-bg {
+  min-height: calc(100vh - 48px);
+  background: var(--bg-void);
+  position: relative; overflow: hidden;
+  display: flex;
+}
+/* Background grid */
+.loader-bg::before {
+  content: '';
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(201,139,42,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201,139,42,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Left info panel */
+.loader-left {
+  width: 340px; min-width: 340px;
+  border-right: 1px solid var(--border);
+  padding: 48px 40px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative; z-index: 1;
+}
+.loader-brand { margin-bottom: 48px; }
+.loader-brand-name {
+  font-family: var(--font-tech); font-size: 1.6rem; font-weight: 700;
+  color: white; letter-spacing: 0.06em; line-height: 1;
+}
+.loader-brand-name span { color: var(--copper); }
+.loader-brand-sub {
+  font-family: var(--font-tech); font-size: 0.7rem;
+  letter-spacing: 0.3em; color: var(--text-muted); margin-top: 4px;
+}
+
+/* System status block */
+.loader-sys-status { margin-top: 40px; }
+.sys-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em;
+  color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sys-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.sys-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.sys-row:last-child { border-bottom: none; }
+.sys-row-key { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.sys-row-val { font-family: var(--font-mono); font-size: 10px; color: var(--patina); }
+.sys-row-val.copper { color: var(--copper); }
+
+/* Global progress */
+.global-prog { margin-top: 40px; }
+.prog-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 8px;
+}
+.prog-label-text {
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+  letter-spacing: 0.15em; text-transform: uppercase;
+}
+.prog-label-pct { font-family: var(--font-mono); font-size: 12px; color: var(--copper); }
+.prog-track {
+  height: 2px; background: rgba(255,255,255,0.06); position: relative;
+}
+.prog-fill {
+  height: 100%; background: linear-gradient(90deg, var(--copper), var(--copper-lt));
+  animation: progFill 4s var(--ease-out) forwards;
+  box-shadow: 0 0 8px rgba(201,139,42,0.4);
+}
+@keyframes progFill {
+  0% { width: 0%; } 25% { width: 40%; } 50% { width: 65%; }
+  75% { width: 80%; } 90% { width: 92%; } 100% { width: 100%; }
+}
+
+.prog-pct-live {
+  animation: pctCount 4s steps(100,end) forwards;
+}
+@keyframes pctCount {
+  0%  { content: "0%"; }  25% { content: "40%"; }
+  50% { content: "65%"; } 75% { content: "80%"; }
+  90% { content: "92%"; } 100% { content: "100%"; }
+}
+
+/* Session info */
+.session-info {
+  margin-top: auto; padding-top: 32px;
+  border-top: 1px solid var(--border);
+}
+.session-row {
+  display: flex; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.session-key { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.session-val { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+
+/* Right: steps */
+.loader-right {
+  flex: 1; padding: 48px 56px;
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.loader-right-header { margin-bottom: 48px; }
+.loader-step-eyebrow {
+  font-family: var(--font-mono); font-size: 9px; color: var(--patina);
+  letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 16px;
+}
+.loader-main-title {
+  font-family: var(--font-tech); font-size: 2.4rem; font-weight: 700;
+  color: white; line-height: 1; letter-spacing: -0.01em;
+}
+.loader-main-title span { color: var(--copper); }
+.loader-subtitle {
+  font-size: 13px; color: var(--text-muted); margin-top: 12px; line-height: 1.6;
+}
+
+/* Step list */
+.step-list { display: flex; flex-direction: column; gap: 0; max-width: 520px; }
+
+.step-item {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  animation: stepSlideIn 0.4s var(--ease-out) both;
+  opacity: 0;
+}
+.step-item:last-child { border-bottom: none; }
+.step-item:nth-child(1) { animation-delay: 0.1s; }
+.step-item:nth-child(2) { animation-delay: 0.8s; }
+.step-item:nth-child(3) { animation-delay: 1.5s; }
+.step-item:nth-child(4) { animation-delay: 2.1s; }
+.step-item:nth-child(5) { animation-delay: 2.7s; }
+.step-item:nth-child(6) { animation-delay: 3.3s; }
+
+@keyframes stepSlideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.step-index-col { flex-shrink: 0; padding-top: 2px; }
+.step-num {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim); width: 20px;
+}
+.step-status {
+  width: 16px; height: 16px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 2px;
+}
+.step-status.done .dot-check {
+  width: 16px; height: 16px;
+  background: rgba(42,157,143,0.15);
+  border: 1px solid rgba(42,157,143,0.4);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; color: var(--patina);
+}
+.step-status.running .mini-spin {
+  width: 14px; height: 14px;
+  border: 1.5px solid rgba(201,139,42,0.18);
+  border-top-color: var(--copper);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.step-status.pending .dot-pending {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-dim); margin: 5px;
+}
+
+.step-body { flex: 1; }
+.step-title {
+  font-family: var(--font-tech); font-size: 14px; font-weight: 600;
+  letter-spacing: 0.04em; color: white;
+}
+.step-status-done .step-title { color: var(--text-muted); }
+.step-desc {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim); margin-top: 3px; letter-spacing: 0.02em;
+}
+
+.step-elapsed {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-dim); flex-shrink: 0; padding-top: 3px;
+}
+.step-elapsed.done { color: var(--patina); }
+
+/* Top scan line */
+.loader-scan {
+  position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--copper) 30%, var(--copper-lt) 50%, var(--copper) 70%, transparent 100%);
+  box-shadow: 0 0 8px rgba(201,139,42,0.4);
+  animation: scanDown 5s linear infinite;
+  pointer-events: none; z-index: 10;
+}
+@keyframes scanDown {
+  0%   { top: 0%; opacity: 1; }
+  85%  { opacity: 0.6; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* User badge top-right */
+.loader-user-badge {
+  position: absolute; top: 24px; right: 32px; z-index: 2;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border); border-radius: var(--r-control);
+}
+.user-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(201,139,42,0.12);
+  border: 1px solid rgba(201,139,42,0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-tech); font-size: 11px;
+  font-weight: 700; color: var(--copper);
+}
+.user-info-name { font-family: var(--font-tech); font-size: 12px; font-weight: 600; color: white; }
+.user-info-role { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+
+
+/* ═══════════════════════════════════════════
+   SECTION 3 — SIDEBAR
+═══════════════════════════════════════════ */
+
+.sidebar-demo {
+  display: flex; min-height: calc(100vh - 48px); background: var(--bg-void);
+}
+
+/* New Sidebar */
+.sidebar-new {
+  width: 236px; min-width: 236px;
+  background: var(--bg-depth);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 48px;
+  height: calc(100vh - 48px);
+  overflow: hidden;
+}
+
+/* Logo section */
+.sb-logo {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sb-logo-name {
+  font-family: var(--font-tech); font-size: 1.4rem; font-weight: 700;
+  color: white; letter-spacing: 0.06em; line-height: 1;
+}
+.sb-logo-name span { color: var(--copper); }
+.sb-logo-sub {
+  font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.25em; color: var(--text-muted); margin-top: 3px;
+}
+
+/* Version tag */
+.sb-version {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 10px; padding: 3px 7px;
+  background: rgba(42,157,143,0.08);
+  border: 1px solid rgba(42,157,143,0.18);
+  border-radius: 2px;
+  font-family: var(--font-mono); font-size: 9px; color: var(--patina);
+  letter-spacing: 0.1em;
+}
+.sb-version-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--patina); animation: statusPulse 2s ease-in-out infinite; }
+
+/* Nav */
+.sb-nav { flex: 1; overflow-y: auto; padding: 12px 10px; }
+.sb-nav::-webkit-scrollbar { width: 0; }
+
+/* Section label */
+.sb-section-label {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.18em;
+  color: var(--text-dim); text-transform: uppercase;
+  padding: 14px 10px 6px; display: flex; align-items: center; gap: 8px;
+}
+.sb-section-label::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.04); }
+
+/* Nav item */
+.sb-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 4px;
+  cursor: pointer; position: relative;
+  transition: background 0.12s, color 0.12s;
+  text-decoration: none; color: var(--text-muted);
+  font-family: var(--font-tech); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.sb-item:hover {
+  background: rgba(255,255,255,0.03); color: var(--text-main);
+}
+.sb-item:hover .sb-icon { color: var(--text-main); }
+.sb-item.active {
+  background: rgba(201,139,42,0.07); color: white;
+}
+.sb-item.active::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--copper);
+  border-radius: 0 2px 2px 0;
+}
+.sb-icon {
+  width: 16px; height: 16px; flex-shrink: 0;
+  color: var(--text-dim); transition: color 0.12s;
+  display: flex; align-items: center; justify-content: center;
+}
+.sb-item.active .sb-icon { color: var(--copper); }
+.sb-badge {
+  margin-left: auto; font-family: var(--font-mono); font-size: 9px;
+  color: var(--copper); background: rgba(201,139,42,0.1);
+  padding: 2px 6px; border-radius: 2px;
+}
+
+/* Collapsed sidebar preview */
+.sb-icon-only {
+  width: 56px; min-width: 56px;
+  background: var(--bg-depth);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 48px;
+  height: calc(100vh - 48px);
+}
+.sb-icon-only-logo {
+  width: 56px; height: 56px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-tech); font-size: 18px; font-weight: 700; color: var(--copper);
+}
+.sb-icon-item {
+  width: 56px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; position: relative;
+  color: var(--text-dim);
+  transition: background 0.12s, color 0.12s;
+}
+.sb-icon-item:hover { background: rgba(255,255,255,0.03); color: var(--text-main); }
+.sb-icon-item.active { color: var(--copper); }
+.sb-icon-item.active::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--copper);
+}
+
+/* User footer */
+.sb-user {
+  padding: 12px 10px;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sb-user:hover { background: rgba(255,255,255,0.02); }
+.sb-user-av {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(201,139,42,0.12);
+  border: 1px solid rgba(201,139,42,0.28);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-tech); font-size: 11px; font-weight: 700; color: var(--copper);
+}
+.sb-user-name { font-family: var(--font-tech); font-size: 13px; font-weight: 600; color: white; }
+.sb-user-role { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+.sb-user-chevron { margin-left: auto; color: var(--text-dim); }
+
+/* Demo content area */
+.demo-content {
+  flex: 1; padding: 32px 40px;
+  display: flex; flex-direction: column; gap: 24px;
+}
+.demo-label {
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+  letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 12px;
+}
+.demo-card {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--r-card); padding: 20px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  line-height: 1.6;
+}
+.demo-card strong { color: var(--copper); }
+.demo-row { display: flex; gap: 24px; align-items: flex-start; }
+
+/* SVG icons simplified */
+svg.icon { display: block; }
+
+/* ── UX Notes ──────────────────────────── */
+.ux-notes {
+  padding: 24px 32px; background: var(--bg-depth);
+  border-top: 1px solid var(--border);
+}
+.ux-title { font-family: var(--font-tech); font-size: 13px; font-weight: 700; color: var(--copper); letter-spacing: 0.08em; margin-bottom: 16px; }
+.ux-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.ux-item { padding: 14px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--r-card); }
+.ux-item-title { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 8px; }
+.ux-item-val { font-family: var(--font-tech); font-size: 14px; font-weight: 600; color: white; }
+.ux-item-val.copper { color: var(--copper); }
+.ux-item-val.patina { color: var(--patina); }
+
+/* Tokens diff display */
+.token-diff { display: flex; flex-direction: column; gap: 8px; }
+.token-row { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-size: 10px; }
+.token-old { color: var(--text-dim); text-decoration: line-through; }
+.token-arrow { color: var(--text-dim); }
+.token-new { color: var(--patina); }
+.token-label { color: var(--text-muted); margin-left: auto; }
+
+</style>
+</head>
+<body>
+
+<!-- ── Navigation ───────────────────────────────────── -->
+<nav class="preview-nav">
+  <span class="preview-nav-brand">BOMTEMPO / ENTERPRISE PREVIEW</span>
+  <button class="nav-tab active" onclick="switchTab('login')">01 — Login</button>
+  <button class="nav-tab" onclick="switchTab('loader')">02 — Loader</button>
+  <button class="nav-tab" onclick="switchTab('sidebar')">03 — Sidebar</button>
+  <button class="nav-tab" onclick="switchTab('tokens')">04 — Design System</button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════
+     TAB 1 — LOGIN
+═══════════════════════════════════════════════════ -->
+<div id="tab-login" class="preview-section active">
+  <div class="login-bg"></div>
+  <div class="login-wrap" style="position:relative;z-index:1;">
+
+    <!-- Left brand panel -->
+    <div class="login-left">
+      <div class="coord-lines">
+        <div class="coord-h" style="top:33%"></div>
+        <div class="coord-h" style="top:66%"></div>
+        <div class="coord-v" style="left:40%"></div>
+        <div class="coord-dot" style="top:33%;left:40%"></div>
+        <div class="coord-dot" style="top:66%;left:40%"></div>
+      </div>
+
+      <div class="login-left-inner">
+        <div class="brand-eyebrow">Sistema Operacional</div>
+        <div class="brand-title">BÔMTEMPO<br><span>INTELIGÊNCIA</span></div>
+        <div class="brand-sub">Intelligence Platform v2.0</div>
+        <div class="brand-desc">
+          Plataforma centralizada de dados operacionais,
+          controle financeiro e analytics preditivo para
+          gestão de obras e contratos de engenharia.
+        </div>
+
+        <div class="login-stats">
+          <div class="stat-cell">
+            <div class="stat-label">Contratos Ativos</div>
+            <div class="stat-value">147</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">RDOs Processados</div>
+            <div class="stat-value patina">8.4k</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Volume Gerenciado</div>
+            <div class="stat-value">R$ 2.1B</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Uptime</div>
+            <div class="stat-value patina">99.97%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="login-left-footer">
+        <div class="login-left-footer-dot pulse"></div>
+        SISTEMAS OPERACIONAIS
+        <span style="margin-left:8px;">·</span>
+        INFRAESTRUTURA OK
+        <span style="margin-left:8px;">·</span>
+        UTC-3 BRT
+      </div>
+    </div>
+
+    <!-- Right auth panel -->
+    <div class="login-right">
+      <div class="auth-header">
+        <div class="auth-eyebrow">Acesso Seguro</div>
+        <div class="auth-title">Autentique-se</div>
+      </div>
+
+      <!-- State switcher (preview tool) -->
+      <div class="state-switcher">
+        <button class="state-btn active" onclick="setAuthState('default')">Padrão</button>
+        <button class="state-btn" onclick="setAuthState('loading')">Autenticando</button>
+        <button class="state-btn" onclick="setAuthState('error')">Erro</button>
+      </div>
+
+      <!-- State: default -->
+      <div id="auth-default" class="auth-state visible">
+        <div class="form-field">
+          <label class="form-label">Usuário</label>
+          <input class="form-input" type="text" placeholder="nome.sobrenome" value="">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Senha</label>
+          <input class="form-input" type="password" placeholder="••••••••••">
+        </div>
+        <button class="btn-submit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          ENTRAR NA PLATAFORMA
+        </button>
+      </div>
+
+      <!-- State: loading (authenticating) -->
+      <div id="auth-loading" class="auth-state">
+        <div class="form-field">
+          <label class="form-label">Usuário</label>
+          <input class="form-input" type="text" value="gustavo.bomtempo" disabled style="opacity:0.5;cursor:not-allowed">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Senha</label>
+          <input class="form-input" type="password" value="••••••••" disabled style="opacity:0.5;cursor:not-allowed">
+        </div>
+        <button class="btn-submit auth-loading" disabled>
+          <div class="auth-spinner"></div>
+          AUTENTICANDO CREDENCIAIS
+          <div class="btn-auth-bar"></div>
+        </button>
+        <div style="margin-top:14px; font-family:var(--font-mono); font-size:10px; color:var(--text-dim); letter-spacing:0.1em; text-align:center; text-transform:uppercase;">
+          Verificando permissões de acesso…
+        </div>
+      </div>
+
+      <!-- State: error -->
+      <div id="auth-error" class="auth-state">
+        <div class="form-field">
+          <label class="form-label">Usuário</label>
+          <input class="form-input" type="text" value="gustavo.bomtempo" style="border-color:rgba(239,68,68,0.3)">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Senha</label>
+          <input class="form-input" type="password" placeholder="••••••••" style="border-color:rgba(239,68,68,0.3)">
+        </div>
+        <button class="btn-submit" style="background:#C98B2A">TENTAR NOVAMENTE</button>
+        <div class="form-error">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Credenciais inválidas. Verifique usuário e senha.
+        </div>
+      </div>
+
+      <div class="auth-meta">
+        Bomtempo Engenharia · Plataforma Restrita · Acesso Monitorado
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     TAB 2 — POST-LOGIN LOADER
+═══════════════════════════════════════════════════ -->
+<div id="tab-loader" class="preview-section">
+  <div class="loader-bg">
+    <div class="loader-scan"></div>
+
+    <!-- User badge -->
+    <div class="loader-user-badge">
+      <div class="user-avatar">GB</div>
+      <div>
+        <div class="user-info-name">Gustavo Bomtempo</div>
+        <div class="user-info-role">ADMINISTRADOR</div>
+      </div>
+    </div>
+
+    <!-- Left info panel -->
+    <div class="loader-left">
+      <div>
+        <div class="loader-brand">
+          <div class="loader-brand-name">BOM<span>TEMPO</span></div>
+          <div class="loader-brand-sub">Intelligence Platform</div>
+        </div>
+
+        <div class="loader-sys-status">
+          <div class="sys-label">Status do Sistema</div>
+          <div class="sys-row">
+            <span class="sys-row-key">Supabase</span>
+            <span class="sys-row-val">CONECTADO</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row-key">Auth Service</span>
+            <span class="sys-row-val">ATIVO</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row-key">Estado Global</span>
+            <span class="sys-row-val copper">CARREGANDO</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row-key">Cache</span>
+            <span class="sys-row-val">LIMPO</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-row-key">Módulos</span>
+            <span class="sys-row-val copper">14 HABILITADOS</span>
+          </div>
+        </div>
+
+        <div class="global-prog" style="margin-top:40px">
+          <div class="prog-label">
+            <span class="prog-label-text">Progresso Geral</span>
+            <span class="prog-label-pct" id="pct-display">0%</span>
+          </div>
+          <div class="prog-track">
+            <div class="prog-fill" id="prog-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-info">
+        <div class="session-row">
+          <span class="session-key">Sessão</span>
+          <span class="session-val">#BT-20260312</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Ambiente</span>
+          <span class="session-val">PRODUÇÃO</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Região</span>
+          <span class="session-val">SA-EAST-1</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right steps -->
+    <div class="loader-right">
+      <div class="loader-right-header">
+        <div class="loader-step-eyebrow">Inicialização do Sistema</div>
+        <div class="loader-main-title">Preparando<br><span>Ambiente</span></div>
+        <div class="loader-subtitle">
+          Carregando módulos, permissões e dados do perfil. Aguarde alguns instantes.
+        </div>
+      </div>
+
+      <div class="step-list">
+
+        <div class="step-item step-status-done">
+          <div class="step-index-col"><div class="step-num">01</div></div>
+          <div class="step-status done"><div class="dot-check">✓</div></div>
+          <div class="step-body">
+            <div class="step-title">Verificação de Sessão</div>
+            <div class="step-desc">Token JWT validado · Permissões carregadas</div>
+          </div>
+          <div class="step-elapsed done">0.3s</div>
+        </div>
+
+        <div class="step-item step-status-done">
+          <div class="step-index-col"><div class="step-num">02</div></div>
+          <div class="step-status done"><div class="dot-check">✓</div></div>
+          <div class="step-body">
+            <div class="step-title">Dados do Usuário</div>
+            <div class="step-desc">Perfil, avatar e preferências sincronizados</div>
+          </div>
+          <div class="step-elapsed done">0.7s</div>
+        </div>
+
+        <div class="step-item step-status-done">
+          <div class="step-index-col"><div class="step-num">03</div></div>
+          <div class="step-status done"><div class="dot-check">✓</div></div>
+          <div class="step-body">
+            <div class="step-title">Módulos Habilitados</div>
+            <div class="step-desc">14 módulos carregados com base no perfil</div>
+          </div>
+          <div class="step-elapsed done">1.1s</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-index-col"><div class="step-num">04</div></div>
+          <div class="step-status running"><div class="mini-spin"></div></div>
+          <div class="step-body">
+            <div class="step-title">Contratos & Projetos</div>
+            <div class="step-desc">Carregando filtros e opções globais…</div>
+          </div>
+          <div class="step-elapsed">—</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-index-col"><div class="step-num">05</div></div>
+          <div class="step-status pending"><div class="dot-pending"></div></div>
+          <div class="step-body">
+            <div class="step-title">Dados do Dashboard</div>
+            <div class="step-desc">KPIs, gráficos e métricas operacionais</div>
+          </div>
+          <div class="step-elapsed">—</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-index-col"><div class="step-num">06</div></div>
+          <div class="step-status pending"><div class="dot-pending"></div></div>
+          <div class="step-body">
+            <div class="step-title">Preparando Interface</div>
+            <div class="step-desc">Montando layout e componentes visuais</div>
+          </div>
+          <div class="step-elapsed">—</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     TAB 3 — SIDEBAR
+═══════════════════════════════════════════════════ -->
+<div id="tab-sidebar" class="preview-section">
+  <div class="sidebar-demo">
+
+    <!-- New sidebar (expanded) -->
+    <div class="sidebar-new">
+      <!-- Logo -->
+      <div class="sb-logo">
+        <div class="sb-logo-name">BOM<span>TEMPO</span></div>
+        <div class="sb-logo-sub">Intelligence Platform</div>
+        <div class="sb-version">
+          <div class="sb-version-dot"></div>
+          v2.0 · Produção
+        </div>
+      </div>
+
+      <!-- Nav -->
+      <div class="sb-nav">
+
+        <div class="sb-section-label">Principal</div>
+
+        <a class="sb-item active" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </span>
+          Visão Geral
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20M5 20V9l7-6 7 6v11"/><path d="M9 20v-5h6v5"/></svg>
+          </span>
+          Obras
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+          </span>
+          Projetos
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+          </span>
+          Financeiro
+        </a>
+
+        <div class="sb-section-label">Operacional</div>
+
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </span>
+          O&amp;M
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </span>
+          Analytics
+          <span class="sb-badge">NEW</span>
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+          </span>
+          Previsões ML
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </span>
+          Relatórios
+        </a>
+
+        <div class="sb-section-label">RDO</div>
+
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+          </span>
+          RDO Diário
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+          Meus RDOs
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </span>
+          RDO Analytics
+        </a>
+
+        <div class="sb-section-label">Serviços</div>
+
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </span>
+          Chat IA
+        </a>
+        <a class="sb-item" href="#">
+          <span class="sb-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+          </span>
+          Reembolso
+        </a>
+      </div>
+
+      <!-- User footer -->
+      <div class="sb-user">
+        <div class="sb-user-av">GB</div>
+        <div>
+          <div class="sb-user-name">Gustavo B.</div>
+          <div class="sb-user-role">ADMINISTRADOR</div>
+        </div>
+        <div class="sb-user-chevron">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsed sidebar preview -->
+    <div class="sb-icon-only">
+      <div class="sb-icon-only-logo">B</div>
+      <div style="padding: 12px 0; display:flex; flex-direction:column; gap:2px; align-items:center;">
+        <div class="sb-icon-item active">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </div>
+        <div class="sb-icon-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20M5 20V9l7-6 7 6v11"/></svg>
+        </div>
+        <div class="sb-icon-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        </div>
+        <div class="sb-icon-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="sb-icon-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </div>
+        <div class="sb-icon-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+      </div>
+      <!-- Collapsed user -->
+      <div style="margin-top:auto; padding:12px; border-top:1px solid var(--border); display:flex; justify-content:center;">
+        <div class="sb-user-av">GB</div>
+      </div>
+    </div>
+
+    <!-- Demo content -->
+    <div class="demo-content">
+      <div>
+        <div class="demo-label">Changelog da Sidebar — O que muda</div>
+        <div class="demo-row">
+          <div class="demo-card" style="flex:1">
+            <div style="color:var(--copper); font-family:var(--font-tech); font-size:13px; margin-bottom:12px; font-weight:700;">✦ Novo Design</div>
+            <strong>Flush ao viewport</strong> — sem card flutuante com margens<br><br>
+            <strong>Seções agrupadas</strong> — "Principal", "Operacional", "RDO", "Serviços"<br><br>
+            <strong>Active indicator</strong> — borda esquerda 2px copper + bg sutil (sem border ao redor)<br><br>
+            <strong>Hover</strong> — somente bg change 0.12s, sem glow explosion<br><br>
+            <strong>Logo</strong> — tipografia limpa, sem typewriter effect na sidebar<br><br>
+            <strong>Version badge</strong> — v2.0 · Produção com dot pulsante<br><br>
+            <strong>Border-radius</strong> — itens: 4px (vs 12px anterior)
+          </div>
+          <div class="demo-card" style="flex:1">
+            <div style="color:var(--text-muted); font-family:var(--font-tech); font-size:13px; margin-bottom:12px; font-weight:700;">✕ O que sai</div>
+            Card flutuante com margin 1rem e border-radius 16px<br><br>
+            Typewriter effect na sidebar (SLOP — distrai ao navegar)<br><br>
+            Border completa no item ativo (parece um retângulo selecionado)<br><br>
+            "Hamburger" collapse no meio da sidebar (move para atalho de teclado)<br><br>
+            Logs, Alertas e Gerenciar Usuários escondidos no popover do usuário<br><br>
+            <em style="font-size:10px;color:var(--text-dim)">→ Eles ficam em seção Admin na sidebar</em>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     TAB 4 — DESIGN SYSTEM
+═══════════════════════════════════════════════════ -->
+<div id="tab-tokens" class="preview-section">
+  <div style="padding: 40px; max-width: 1100px; margin: 0 auto;">
+
+    <div style="font-family:var(--font-tech); font-size: 1.6rem; font-weight:700; color:white; margin-bottom:8px;">Design System — Enterprise Upgrade</div>
+    <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted); margin-bottom:40px; letter-spacing:0.08em;">
+      Tokens que mudam para eliminar o AI SLOP e atingir padrão enterprise
+    </div>
+
+    <!-- Border Radius -->
+    <div style="margin-bottom:40px">
+      <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
+        Border Radius — A principal mudança
+        <span style="flex:1; height:1px; background:var(--border); display:block"></span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px;">
+
+        <div>
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.1em; text-transform:uppercase;">Controles (inputs, buttons)</div>
+          <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+            <div style="width:80px;height:36px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--text-dim)">12px</div>
+            <span style="color:var(--text-dim); font-size:18px">→</span>
+            <div style="width:80px;height:36px;background:var(--bg-elev);border:1px solid var(--border-cu);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--copper)">3px</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.1em; text-transform:uppercase;">Cards / Panels</div>
+          <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+            <div style="width:80px;height:36px;background:var(--bg-elev);border:1px solid var(--border);border-radius:24px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--text-dim)">24px</div>
+            <span style="color:var(--text-dim); font-size:18px">→</span>
+            <div style="width:80px;height:36px;background:var(--bg-elev);border:1px solid var(--border-cu);border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--copper)">6px</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.1em; text-transform:uppercase;">Badges / Pills</div>
+          <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+            <div style="padding:4px 10px;background:var(--bg-elev);border:1px solid var(--border);border-radius:9999px;font-family:var(--font-mono);font-size:9px;color:var(--text-dim)">full-round</div>
+            <span style="color:var(--text-dim); font-size:18px">→</span>
+            <div style="padding:4px 10px;background:rgba(201,139,42,0.1);border:1px solid var(--border-cu);border-radius:2px;font-family:var(--font-mono);font-size:9px;color:var(--copper)">2px</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.1em; text-transform:uppercase;">Nav items (sidebar)</div>
+          <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+            <div style="width:80px;height:36px;background:rgba(201,139,42,0.1);border:1px solid rgba(201,139,42,0.5);border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--text-dim)">12px</div>
+            <span style="color:var(--text-dim); font-size:18px">→</span>
+            <div style="width:80px;height:36px;background:rgba(201,139,42,0.07);border-left:2px solid var(--copper);border-radius:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9px;color:var(--copper)">Left strip</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Typography -->
+    <div style="margin-bottom:40px">
+      <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
+        Typography Scale (mantida)
+        <span style="flex:1; height:1px; background:var(--border); display:block"></span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+        <div style="padding:16px; background:var(--bg-depth); border:1px solid var(--border); border-radius:var(--r-card);">
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:8px;">RAJDHANI — Display/Tech</div>
+          <div style="font-family:var(--font-tech);font-size:1.8rem;font-weight:700;color:white;line-height:1">BOMTEMPO<br>INTELLIGENCE</div>
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);margin-top:6px">Headers · Títulos · Nav labels</div>
+        </div>
+        <div style="padding:16px; background:var(--bg-depth); border:1px solid var(--border); border-radius:var(--r-card);">
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:8px;">OUTFIT — Body</div>
+          <div style="font-family:var(--font-body);font-size:14px;color:var(--text-main);line-height:1.6">Plataforma centralizada de dados operacionais para gestão de obras.</div>
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);margin-top:6px">Body text · Descriptions · Forms</div>
+        </div>
+        <div style="padding:16px; background:var(--bg-depth); border:1px solid var(--border); border-radius:var(--r-card);">
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:8px;">JETBRAINS MONO — Data</div>
+          <div style="font-family:var(--font-mono);font-size:13px;color:var(--copper);line-height:1.5">R$ 2.147.839,00<br>#BT-2026-0312<br>SYS_STATUS: OK</div>
+          <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);margin-top:6px">Values · IDs · Metadata · Labels</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Color swatches -->
+    <div style="margin-bottom:40px">
+      <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
+        Paleta de Cores (mantida — enterprise-grade)
+        <span style="flex:1; height:1px; background:var(--border); display:block"></span>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#C98B2A;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Copper<br>#C98B2A</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#E0A63B;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Copper Lt<br>#E0A63B</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#2A9D8F;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Patina<br>#2A9D8F</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#030504;border:1px solid var(--border);border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Void<br>#030504</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#081210;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Depth<br>#081210</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#0e1a17;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Surface<br>#0E1A17</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#142420;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Elevated<br>#142420</div>
+        </div>
+        <div style="text-align:center">
+          <div style="width:64px;height:40px;background:#EF4444;border-radius:var(--r-card);margin-bottom:6px"></div>
+          <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">Danger<br>#EF4444</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UX Principles -->
+    <div>
+      <div style="font-family:var(--font-mono); font-size:9px; color:var(--text-muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
+        Princípios UX Enterprise — O que implementar
+        <span style="flex:1; height:1px; background:var(--border); display:block"></span>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(3,1fr); gap:12px;">
+        <div style="padding:18px;background:var(--bg-depth);border:1px solid var(--border);border-left:2px solid var(--copper);border-radius:var(--r-card)">
+          <div style="font-family:var(--font-tech);font-size:13px;font-weight:700;color:var(--copper);margin-bottom:8px">Login</div>
+          <div style="font-family:var(--font-body);font-size:12px;color:var(--text-muted);line-height:1.7">
+            · Split-screen layout (brand esquerda / auth direita)<br>
+            · Estado "AUTENTICANDO" inline no botão com spinner<br>
+            · Barra de progresso sutil dentro do botão<br>
+            · Erro com borda esquerda vermelha (sem card gordo)<br>
+            · Inputs border-radius: 3px<br>
+            · Stats panel decorativo (não interativo)
+          </div>
+        </div>
+        <div style="padding:18px;background:var(--bg-depth);border:1px solid var(--border);border-left:2px solid var(--patina);border-radius:var(--r-card)">
+          <div style="font-family:var(--font-tech);font-size:13px;font-weight:700;color:var(--patina);margin-bottom:8px">Loader Pós-Login</div>
+          <div style="font-family:var(--font-body);font-size:12px;color:var(--text-muted);line-height:1.7">
+            · Full-screen split: status panel esquerda / steps direita<br>
+            · 6 etapas numeradas: done✓ / running⟳ / pending·<br>
+            · Elapsed time por etapa<br>
+            · Barra de progresso linear (não circular)<br>
+            · Info de sessão: ambiente, região, ID<br>
+            · Scan line animada no topo
+          </div>
+        </div>
+        <div style="padding:18px;background:var(--bg-depth);border:1px solid var(--border);border-left:2px solid rgba(255,255,255,0.2);border-radius:var(--r-card)">
+          <div style="font-family:var(--font-tech);font-size:13px;font-weight:700;color:white;margin-bottom:8px">Sidebar</div>
+          <div style="font-family:var(--font-body);font-size:12px;color:var(--text-muted);line-height:1.7">
+            · Flush ao viewport (sem card com margens)<br>
+            · Seções agrupadas com micro-labels<br>
+            · Active: left-strip 2px copper + bg rgba(copper, 0.07)<br>
+            · Admin items visíveis na sidebar (não no popover do user)<br>
+            · Nav items: border-radius 4px<br>
+            · Sem typewriter na sidebar
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── JS ─────────────────────────────────────────────────── -->
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.preview-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+
+  // restart loader animations
+  if (name === 'loader') {
+    restartLoaderAnimations();
+  }
+}
+
+function setAuthState(state) {
+  document.querySelectorAll('.auth-state').forEach(s => s.classList.remove('visible'));
+  document.getElementById('auth-' + state).classList.add('visible');
+  document.querySelectorAll('.state-btn').forEach(b => b.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  // re-trigger auth bar animation
+  if (state === 'loading') {
+    const bar = document.querySelector('.btn-auth-bar');
+    if (bar) { bar.style.animation = 'none'; bar.offsetHeight; bar.style.animation = ''; }
+  }
+}
+
+function restartLoaderAnimations() {
+  const fill = document.getElementById('prog-fill');
+  const pct = document.getElementById('pct-display');
+  if (fill) { fill.style.animation = 'none'; fill.offsetHeight; fill.style.animation = ''; }
+
+  // Animate percentage counter
+  if (pct) {
+    const targets = [0,10,40,65,80,92,100];
+    const delays  = [0,500,1000,1800,2500,3200,4000];
+    targets.forEach((v, i) => {
+      setTimeout(() => { pct.textContent = v + '%'; }, delays[i]);
+    });
+  }
+
+  // Re-trigger step animations
+  document.querySelectorAll('.step-item').forEach(el => {
+    el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
+  });
+}
+
+// Auto-start pct counter on load
+window.addEventListener('load', () => {
+  const pct = document.getElementById('pct-display');
+  if (pct) {
+    const targets = [0,10,40,65,80,92,100];
+    const delays  = [0,500,1000,1800,2500,3200,4000];
+    targets.forEach((v, i) => {
+      setTimeout(() => { pct.textContent = v + '%'; }, delays[i]);
+    });
+  }
+});
+</script>
+</body>
+</html>

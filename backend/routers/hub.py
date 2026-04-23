@@ -444,22 +444,14 @@ async def trigger_insights_generation(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Aciona geração assíncrona de insights para o contrato (botão 'Gerar Insights')."""
+    """Gera insights ao vivo para o contrato e persiste. Retorna inline (sem esperar Celery)."""
     contrato = body.get("contrato", "")
     if not contrato:
         return {"ok": False, "error": "contrato obrigatório"}
 
-    try:
-        from backend.workers.tasks.insight_tasks import generate_insights
-        generate_insights.delay(contrato=contrato, rdo_id="manual", client_id=client_id or "")
-        return {"ok": True, "message": "Insights sendo gerados em background"}
-    except Exception:
-        # Celery not available — compute sync
-        rdos = sb_select("rdo_master", filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=1) or []
-        rdo_id = rdos[0]["id"] if rdos else "manual"
-        from backend.routers.rdo import _trigger_insights
-        _trigger_insights(contrato, rdo_id, client_id)
-        return {"ok": True, "message": "Insights gerados de forma síncrona"}
+    # Reutiliza a lógica do GET — gera inline e persiste
+    result = await get_agente_insights(contrato=contrato, _user=_user, client_id=client_id)
+    return {"ok": True, **result}
 
 
 # ── Aba: Visão Geral ──────────────────────────────────────────────────────────
@@ -516,22 +508,51 @@ async def get_visao_geral(
                 pct2 = pd.to_numeric(df_c["conclusao_pct"], errors="coerce").fillna(0)
                 criticas_pendentes = int((critico_mask & (pct2 < 100)).sum())
 
-    # SPI (1:1 Legacy Parity using Working Days)
+    # SPI + Desvio — calculado por atividade (não por datas do contrato)
+    # pct_esperado por atividade = fração do período já decorrido * 100
+    # weighted pelo peso_pct de cada atividade
     spi = 0.0
-    prazo_decorrido_pct = 0.0
-    if contrato_info.get("inicio") and contrato_info.get("termino"):
-        try:
-            d_ini = date.fromisoformat(str(contrato_info["inicio"])[:10])
-            d_fim = date.fromisoformat(str(contrato_info["termino"])[:10])
-            today = date.today()
-            # Legacy: working days
-            total_wd = _working_days_between(d_ini, d_fim + timedelta(days=1))
-            decorrido_wd = _working_days_between(d_ini, today + timedelta(days=1))
-            prazo_decorrido_pct = min(100.0, decorrido_wd / total_wd * 100) if total_wd > 0 else 0.0
-            if prazo_decorrido_pct > 0:
-                spi = round(progress_pct / prazo_decorrido_pct, 2)
-        except Exception:
-            pass
+    prazo_decorrido_pct = 0.0  # = % esperado ponderado das atividades em andamento
+    today = date.today()
+    if not projetos_df.empty and "contrato" in projetos_df.columns:
+        df_c2 = projetos_df[projetos_df["contrato"] == contrato].copy()
+        if not df_c2.empty:
+            peso_total = 0.0
+            pct_esp_pond = 0.0
+            pct_real_pond = 0.0
+            for _, row in df_c2.iterrows():
+                ini_s = str(row.get("inicio_previsto") or "")[:10]
+                ter_s = str(row.get("termino_previsto") or "")[:10]
+                if not ini_s or not ter_s:
+                    continue
+                try:
+                    d_ini = date.fromisoformat(ini_s)
+                    d_ter = date.fromisoformat(ter_s)
+                except ValueError:
+                    continue
+                # Atividade ainda não começou: pct esperado = 0
+                if today < d_ini:
+                    pct_esp = 0.0
+                # Atividade já encerrou: pct esperado = 100
+                elif today >= d_ter:
+                    pct_esp = 100.0
+                else:
+                    # Fração linear de dias corridos (hoje exclusive — hoje não encerrou)
+                    total_dias = max((d_ter - d_ini).days, 1)
+                    decorridos = (today - d_ini).days  # hoje exclusive
+                    pct_esp = min(100.0, decorridos / total_dias * 100)
+                peso = float(row.get("peso_pct") or 1)
+                pct_real = float(row.get("conclusao_pct") or 0)
+                peso_total += peso
+                pct_esp_pond += pct_esp * peso
+                pct_real_pond += pct_real * peso
+            if peso_total > 0:
+                prazo_decorrido_pct = round(pct_esp_pond / peso_total, 1)
+                progress_pct_pond = round(pct_real_pond / peso_total, 1)
+                # Recalcula progress_pct com o mesmo peso usado no esperado
+                progress_pct = progress_pct_pond
+                if prazo_decorrido_pct > 0:
+                    spi = round(progress_pct / prazo_decorrido_pct, 2)
 
     # Budget
     budget_planejado = 0.0
@@ -1319,20 +1340,42 @@ async def list_contratos(
         if not item.get("localizacao"):
             item["localizacao"] = None
 
-        # Saúde calculada: baseada em progresso vs prazo
+        # Saúde calculada: desvio baseado nas atividades do cronograma
         hoje = date.today()
         desvio_pct_v = 0.0
-        prazo_decorrido = 0.0
-        if item.get("data_inicio") and termino:
-            try:
-                d_ini = date.fromisoformat(str(item["data_inicio"])[:10])
-                d_fim = date.fromisoformat(str(termino)[:10])
-                total_d = max((d_fim - d_ini).days, 1)
-                dec_d   = max((hoje - d_ini).days, 0)
-                prazo_decorrido = min(100.0, dec_d / total_d * 100)
-                desvio_pct_v = round(prog - prazo_decorrido, 1)
-            except Exception:
-                pass
+        if not projetos_df.empty and "contrato" in projetos_df.columns:
+            df_cc = projetos_df[projetos_df["contrato"] == cod]
+            if not df_cc.empty:
+                peso_t = 0.0
+                esp_pond = 0.0
+                real_pond = 0.0
+                for _, ar in df_cc.iterrows():
+                    ini_s = str(ar.get("inicio_previsto") or "")[:10]
+                    ter_s = str(ar.get("termino_previsto") or "")[:10]
+                    if not ini_s or not ter_s:
+                        continue
+                    try:
+                        d_ai = date.fromisoformat(ini_s)
+                        d_at = date.fromisoformat(ter_s)
+                    except ValueError:
+                        continue
+                    if hoje < d_ai:
+                        pct_e = 0.0
+                    elif hoje >= d_at:
+                        pct_e = 100.0
+                    else:
+                        total_d = max((d_at - d_ai).days, 1)
+                        dec_d = (hoje - d_ai).days
+                        pct_e = min(100.0, dec_d / total_d * 100)
+                    pw = float(ar.get("peso_pct") or 1)
+                    pr = float(ar.get("conclusao_pct") or 0)
+                    peso_t += pw
+                    esp_pond += pct_e * pw
+                    real_pond += pr * pw
+                if peso_t > 0:
+                    pct_esp_contrato = esp_pond / peso_t
+                    pct_real_contrato = real_pond / peso_t
+                    desvio_pct_v = round(pct_real_contrato - pct_esp_contrato, 1)
 
         item["desvio_pct"] = desvio_pct_v
         if desvio_pct_v >= -5:

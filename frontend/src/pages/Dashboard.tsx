@@ -64,7 +64,9 @@ export default function Dashboard() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard-kpis', period, project],
     queryFn:  () => fetchKPIs(period, project),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    gcTime:    30 * 60_000,
+    refetchOnWindowFocus: false,
   })
 
   const projectOptions: string[] = data?.project_filter_options ?? []
