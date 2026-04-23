@@ -24,7 +24,7 @@ export default function ChatIA() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput]       = useState('')
   const [loading, setLoading]   = useState(false)
-  const [mode, setMode]         = useState<'direct' | 'agentic'>('direct')
+  const [mode, setMode]         = useState<'direct' | 'agentic'>('agentic')
   const [isRecording, setIsRecording] = useState(false)
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)

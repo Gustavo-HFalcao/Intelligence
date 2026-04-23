@@ -518,9 +518,14 @@ async def submit_rdo(
 
         # ── Insights assíncronos — fire-and-forget via Celery ────────────────
         try:
-            from backend.workers.tasks.insight_tasks import generate_insights
+            from backend.workers.tasks.insight_tasks import generate_insights, generate_rdo_ai_analysis
             generate_insights.delay(
                 contrato=contrato,
+                rdo_id=rdo_id,
+                client_id=client_id or "",
+            )
+            # Análise de IA do RDO do dia — persiste em rdo_master.ai_summary
+            generate_rdo_ai_analysis.delay(
                 rdo_id=rdo_id,
                 client_id=client_id or "",
             )
@@ -823,6 +828,32 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
     atividades = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
     evidencias = sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or []
 
+    # Enriquecer atividades com status atual do cronograma (hub_atividades)
+    if contrato and atividades:
+        hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, limit=500) or []
+        hub_by_name: Dict[str, Dict] = {}
+        for ha in hub_ativs:
+            nome = _norm(ha.get("atividade")).lower().strip()
+            if nome:
+                hub_by_name[nome] = ha
+
+        enriched = []
+        for at in atividades:
+            fmt = _fmt_atividade(at)
+            nome_lower = _norm(at.get("atividade")).lower().strip()
+            ha = hub_by_name.get(nome_lower)
+            if ha:
+                fmt["conclusao_pct"] = int(ha.get("conclusao_pct") or 0)
+                fmt["status_cronograma"] = _norm(ha.get("status"))
+                fmt["pct"] = fmt["conclusao_pct"]
+            else:
+                fmt["conclusao_pct"] = fmt["pct"]
+                fmt["status_cronograma"] = ""
+            enriched.append(fmt)
+        atividades_fmt = enriched
+    else:
+        atividades_fmt = [_fmt_atividade(a) for a in atividades]
+
     # Busca insights do agente para esse contrato
     insight_rows = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []
     insights = []
@@ -832,7 +863,7 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
 
     return {
         "rdo":        _fmt_rdo(r),
-        "atividades": [_fmt_atividade(a) for a in atividades],
+        "atividades": atividades_fmt,
         "evidencias": [_fmt_evidencia(e) for e in evidencias],
         "insights":   insights,
     }

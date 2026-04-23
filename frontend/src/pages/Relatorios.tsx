@@ -101,33 +101,33 @@ export default function Relatorios() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                <div className="space-y-2">
                   <label className="text-[9px] font-black uppercase tracking-widest text-text-muted">Tipo de Relatório</label>
-                  <select 
-                    className="w-full h-12 bg-void border border-white/10 rounded-xl px-4 text-xs font-bold text-copper outline-none transition-all"
+                  <select
+                    className="w-full h-12 bg-[#0d0d0d] border border-white/10 rounded-xl px-4 text-xs font-bold text-copper outline-none transition-all focus:border-copper/40"
                     onChange={e => handleInp('tipo', e.target.value)}
                   >
-                     {tipoList.map((t:any) => <option key={t.slug} value={t.slug}>{t.label}</option>)}
+                     {tipoList.map((t:any) => <option key={t.slug} value={t.slug} className="bg-[#0d0d0d] text-white">{t.label}</option>)}
                   </select>
                </div>
 
                <div className="space-y-2">
                   <label className="text-[9px] font-black uppercase tracking-widest text-text-muted">Contrato / Ativo</label>
-                  <select 
-                    className="w-full h-12 bg-void border border-white/10 rounded-xl px-4 text-xs font-bold text-white outline-none transition-all"
+                  <select
+                    className="w-full h-12 bg-[#0d0d0d] border border-white/10 rounded-xl px-4 text-xs font-bold text-white outline-none transition-all focus:border-copper/40"
                     onChange={e => handleInp('contrato', e.target.value)}
                   >
-                     <option value="">Todos</option>
-                     {contratoList.map((c:any) => <option key={c.contrato} value={c.contrato}>{c.contrato}</option>)}
+                     <option value="" className="bg-[#0d0d0d] text-white">Todos</option>
+                     {contratoList.map((c:any) => <option key={c.contrato} value={c.contrato} className="bg-[#0d0d0d] text-white">{c.contrato}</option>)}
                   </select>
                </div>
 
                <div className="space-y-2">
                   <label className="text-[9px] font-black uppercase tracking-widest text-text-muted">Início do Período</label>
-                  <Input type="date" className="h-12 bg-void border-white/10" onChange={e => handleInp('periodo_ini', e.target.value)} />
+                  <Input type="date" className="h-12 bg-[#0d0d0d] border-white/10 text-white [color-scheme:dark]" onChange={e => handleInp('periodo_inicio', e.target.value)} />
                </div>
 
                <div className="space-y-2">
                   <label className="text-[9px] font-black uppercase tracking-widest text-text-muted">Término do Período</label>
-                  <Input type="date" className="h-12 bg-void border-white/10" onChange={e => handleInp('periodo_fim', e.target.value)} />
+                  <Input type="date" className="h-12 bg-[#0d0d0d] border-white/10 text-white [color-scheme:dark]" onChange={e => handleInp('periodo_fim', e.target.value)} />
                </div>
 
                <div className="lg:col-span-4 space-y-2">

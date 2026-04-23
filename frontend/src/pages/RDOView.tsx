@@ -68,6 +68,7 @@ export default function RDOView() {
   const ats: any[]      = data.atividades ?? []
   const evs: any[]      = data.evidencias ?? []
   const insights: any[] = data.insights ?? []
+  const aiSummary: string = r.ai_summary || ''
 
   return (
     <div style={{ minHeight: '100vh', background: '#0d1117', color: '#e2c87a', fontFamily: 'Outfit, sans-serif', padding: '32px 24px', maxWidth: 820, margin: '0 auto' }}>
@@ -203,6 +204,17 @@ export default function RDOView() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* AI Daily Analysis */}
+      {aiSummary && (
+        <div style={{ background: `${TEAL}08`, border: `1px solid ${TEAL}30`, borderRadius: 12, padding: '20px', marginBottom: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Sparkles size={16} style={{ color: TEAL }} />
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em', color: TEAL }}>Análise de IA — Obra do Dia</span>
+          </div>
+          <p style={{ fontSize: 13, color: '#ccc', lineHeight: 1.7, margin: 0 }}>{aiSummary}</p>
         </div>
       )}
 

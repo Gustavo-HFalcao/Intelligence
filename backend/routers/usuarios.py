@@ -134,6 +134,7 @@ async def list_roles(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
+    filters: Dict[str, Any] = {"client_id": client_id} if client_id else {}
     rows = sb_select("roles", filters=filters, order="nome.asc", limit=200) or []
     return {
         "roles": rows, 

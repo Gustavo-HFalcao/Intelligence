@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  AreaChart, Area, CartesianGrid, ComposedChart, ReferenceLine, Bar, BarChart,
+  AreaChart, Area, CartesianGrid, ComposedChart, ReferenceLine, Bar, BarChart, LabelList,
 } from 'recharts'
 import {
   Plus, Image as ImageIcon, Clock, Activity,
@@ -205,6 +205,12 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
     queryFn:  () => api.get(`/hub/visao-geral?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
   })
+  const { data: insightsData, refetch: refetchInsights } = useQuery({
+    queryKey: ['hub-agente-insights', contrato],
+    queryFn:  () => api.get(`/hub/agente/insights?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
+    enabled:  !!contrato,
+    staleTime: 60_000,
+  })
   const [riscoOpen, setRiscoOpen] = useState(false)
   const [alertaOpen, setAlertaOpen] = useState(false)
   const [generatingInsights, setGeneratingInsights] = useState(false)
@@ -212,7 +218,7 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
   async function handleGerarInsights() {
     setGeneratingInsights(true)
     try {
-      await api.get(`/hub/agente/insights?contrato=${encodeURIComponent(contrato)}`)
+      await refetchInsights()
       await queryClient.invalidateQueries({ queryKey: ['hub-visao-geral', contrato] })
     } finally {
       setGeneratingInsights(false)
@@ -221,7 +227,8 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
 
   if (isLoading) return <Skeleton />
   const d = data ?? {}
-  const insights: any[] = d.insights || []
+  // Prefer live insights from agente/insights; fallback to visao-geral embedded insights
+  const insights: any[] = (insightsData?.insights?.length ? insightsData.insights : d.insights) || []
 
   // Coordenadas do contrato para o Windy — usa lat/lng do contrato ou default Brasil
   const windyLat = contratoInfo?.latitude ?? d.latitude ?? -15.78
@@ -463,8 +470,12 @@ function DashboardTab({ contrato }: { contrato: string }) {
               <XAxis dataKey="data" tick={{ fill: '#444', fontSize: 9 }} axisLine={false} />
               <YAxis tick={{ fill: '#444', fontSize: 9 }} axisLine={false} />
               <Tooltip content={<ProdDiariaTip />} />
-              <Bar dataKey="realizado" fill={TEAL} radius={[4,4,0,0]} opacity={0.8} />
-              <Bar dataKey="previsto" fill={COPPER} radius={[4,4,0,0]} opacity={0.4} />
+              <Bar dataKey="realizado" fill={TEAL} radius={[4,4,0,0]} opacity={0.85} minPointSize={4}>
+                <LabelList dataKey="realizado" position="top" style={{ fill: TEAL, fontSize: 9, fontWeight: 700 }} />
+              </Bar>
+              <Bar dataKey="previsto" fill={COPPER} radius={[4,4,0,0]} opacity={0.45}>
+                <LabelList dataKey="previsto" position="top" style={{ fill: COPPER, fontSize: 9, fontWeight: 700 }} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </ChartWrapper>
@@ -476,7 +487,9 @@ function DashboardTab({ contrato }: { contrato: string }) {
               <XAxis type="number" domain={[0,100]} tick={{ fill: '#444', fontSize: 9 }} axisLine={false} tickFormatter={v => `${v}%`} />
               <YAxis type="category" dataKey="disciplina" tick={{ fill: '#888', fontSize: 9 }} axisLine={false} width={90} />
               <Tooltip content={<DisciplinaTip />} />
-              <Bar dataKey="pct" fill={COPPER} radius={[0,4,4,0]} opacity={0.8} />
+              <Bar dataKey="pct" fill={COPPER} radius={[0,4,4,0]} opacity={0.85} minPointSize={4}>
+                <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} style={{ fill: '#aaa', fontSize: 9, fontWeight: 700 }} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </ChartWrapper>
@@ -1590,7 +1603,7 @@ function TimelineTab({ contrato }: { contrato: string }) {
 function FinanceiroTab({ contrato }: { contrato: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['hub-financeiro', contrato],
-    queryFn:  () => api.get(`/hub/financeiro?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
+    queryFn:  () => api.get(`/hub/financeira?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
   })
 

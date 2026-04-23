@@ -181,7 +181,7 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str
     if not d_inicio or not d_termino:
         return r
 
-    dias_uteis_decorridos = _working_days_between(d_inicio, today + timedelta(days=1))
+    dias_uteis_decorridos = _working_days_between(d_inicio, today)
     dia_atual = min(dias_uteis_decorridos, dias_plan)
     
     prod_plan = total_qty / dias_plan if total_qty > 0 and dias_plan > 0 else 0.0
@@ -291,8 +291,15 @@ def _calculate_risk_score(df_proj: Any, financeiro_df: Any, contrato_info: Dict[
     elif nota <= 6: label, color = "ATENÇÃO", "#F59E0B"
     elif nota <= 8: label, color = "ALTO", "#EF4444"
     else: label, color = "CRÍTICO", "#dc2626"
-    
-    return {"nota": str(nota), "label": label, "color": color}
+
+    criterios = [
+        {"nome": "Atraso Cronograma",  "nota": round(f1_score, 1), "peso": "30%"},
+        {"nome": "Atividades Críticas","nota": round(f2_score, 1), "peso": "20%"},
+        {"nome": "Impacto Climático",  "nota": round(f3_score, 1), "peso": "10%"},
+        {"nome": "Baseline",           "nota": 2.0,                "peso": "40%"},
+    ]
+
+    return {"nota": str(nota), "label": label, "color": color, "criterios": criterios}
 
 
 @router.get("/agente/insights")
@@ -430,6 +437,29 @@ async def get_agente_insights(
 
     return {"insights": insights, "spi": round(spi_medio, 2), "pct_geral": pct_geral}
 
+
+@router.post("/agente/insights/generate")
+async def trigger_insights_generation(
+    body: Dict[str, Any] = Body(...),
+    _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Aciona geração assíncrona de insights para o contrato (botão 'Gerar Insights')."""
+    contrato = body.get("contrato", "")
+    if not contrato:
+        return {"ok": False, "error": "contrato obrigatório"}
+
+    try:
+        from backend.workers.tasks.insight_tasks import generate_insights
+        generate_insights.delay(contrato=contrato, rdo_id="manual", client_id=client_id or "")
+        return {"ok": True, "message": "Insights sendo gerados em background"}
+    except Exception:
+        # Celery not available — compute sync
+        rdos = sb_select("rdo_master", filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=1) or []
+        rdo_id = rdos[0]["id"] if rdos else "manual"
+        from backend.routers.rdo import _trigger_insights
+        _trigger_insights(contrato, rdo_id, client_id)
+        return {"ok": True, "message": "Insights gerados de forma síncrona"}
 
 
 # ── Aba: Visão Geral ──────────────────────────────────────────────────────────
@@ -1084,13 +1114,43 @@ async def get_hub_dashboard(
             pt["realizado"] = round(real_acc, 1)
         scurve.append(pt)
 
-    # 2. Daily Productivity (Meta vs Realizado)
+    # 2. Daily Productivity — quantidade executada por dia (fonte: rdo_master + rdo_atividades via equipe_alocada)
     prod_data = []
-    for i in range(1, len(scurve)):
-        if "realizado" in scurve[i]:
-            meta = max(0, scurve[i]["previsto"] - scurve[i-1]["previsto"])
-            real = max(0, scurve[i]["realizado"] - scurve[i-1]["realizado"])
-            prod_data.append({"data": scurve[i]["data"], "meta": round(meta, 2), "realizado": round(real, 2)})
+    rdos_recentes = sb_select(
+        "rdo_master",
+        filters={"contrato": contrato},
+        client_id=client_id or None,
+        order="data.desc",
+        limit=30,
+    ) or []
+    if rdos_recentes:
+        from collections import defaultdict
+        by_day: Dict[str, Dict[str, float]] = defaultdict(lambda: {"realizado": 0.0, "previsto": 0.0})
+        for rdo in rdos_recentes:
+            d_key = str(rdo.get("data", "") or "")[:10]
+            if not d_key:
+                continue
+            equipe = float(rdo.get("equipe_alocada") or 0)
+            atividades_count = float(rdo.get("atividades_count") or 0)
+            by_day[d_key]["realizado"] += equipe if equipe > 0 else atividades_count
+            by_day[d_key]["previsto"] += equipe if equipe > 0 else max(atividades_count, 1)
+        for d_key in sorted(by_day.keys())[-14:]:
+            try:
+                d_label = date.fromisoformat(d_key).strftime("%d/%m")
+            except Exception:
+                d_label = d_key
+            prod_data.append({
+                "data": d_label,
+                "realizado": round(by_day[d_key]["realizado"], 1),
+                "previsto": round(by_day[d_key]["previsto"], 1),
+            })
+    else:
+        # Fallback: S-curve incremental deltas
+        for i in range(1, len(scurve)):
+            if "realizado" in scurve[i]:
+                meta = max(0, scurve[i]["previsto"] - scurve[i-1]["previsto"])
+                real = max(0, scurve[i]["realizado"] - scurve[i-1]["realizado"])
+                prod_data.append({"data": scurve[i]["data"], "realizado": round(real, 2), "previsto": round(meta, 2)})
 
     # 3. SPI Trend
     spi_trend = []
@@ -1134,7 +1194,7 @@ async def get_hub_dashboard(
     return {
         "scurve": scurve,
         "productivity": prod_data,
-        "produtividade_diaria": [{"data": p["data"], "realizado": p.get("realizado", 0), "previsto": p.get("meta", 0)} for p in prod_data],
+        "produtividade_diaria": prod_data,
         "spi_trend": spi_trend,
         "disciplinas": disciplinas if "disciplinas" in dir() else [],
         "por_disciplina": por_disciplina,

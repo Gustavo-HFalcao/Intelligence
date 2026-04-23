@@ -149,3 +149,94 @@ def generate_insights(self, contrato: str, rdo_id: str, client_id: str = "") -> 
     except Exception as e:
         logger.error(f"generate_insights error: contrato={contrato} {e}")
         return {"ok": False, "error": str(e)}
+
+
+@celery_app.task(
+    name="backend.workers.tasks.insight_tasks.generate_rdo_ai_analysis",
+    bind=True,
+    max_retries=1,
+    queue="ai",
+    soft_time_limit=90,
+    time_limit=120,
+)
+def generate_rdo_ai_analysis(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
+    """
+    Gera análise de IA para um RDO submetido usando contexto completo (atividades,
+    clima, interrupções, observações, cronograma). Persiste em rdo_master.ai_summary.
+    """
+    from backend.integrations.supabase import sb_select, sb_update
+
+    try:
+        rdo_rows = sb_select("rdo_master", filters={"id": rdo_id}, limit=1) or []
+        if not rdo_rows:
+            return {"ok": False, "error": "RDO não encontrado"}
+
+        rdo = rdo_rows[0]
+        contrato = rdo.get("contrato", "")
+        data_rdo = str(rdo.get("data", ""))[:10]
+
+        atividades_rdo = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
+        hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id or None, limit=500) or []
+
+        # Build activity lines
+        ativ_lines = []
+        hub_by_name = {str(h.get("atividade", "")).lower().strip(): h for h in hub_ativs}
+        for at in atividades_rdo:
+            nome = str(at.get("atividade", "")).strip()
+            qty = at.get("quantidade", 0)
+            unit = at.get("unidade", "")
+            efetivo = at.get("efetivo", 0)
+            ha = hub_by_name.get(nome.lower().strip(), {})
+            pct_atual = ha.get("conclusao_pct", "?")
+            pct_plan = ha.get("peso_pct", "?")
+            ter = str(ha.get("termino_previsto", "?"))[:10]
+            critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
+            ativ_lines.append(
+                f"  - {nome}: {qty}{unit} executado, {efetivo} pessoas, "
+                f"conclusao={pct_atual}%, prazo={ter}{'[CRÍTICO]' if critico else ''}"
+            )
+
+        ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
+
+        # Context
+        clima = rdo.get("condicao_climatica", rdo.get("clima", ""))
+        chuva = "Sim" if rdo.get("houve_chuva") else "Não"
+        interrupcao = rdo.get("motivo_interrupcao", "") if rdo.get("houve_interrupcao") else "Não houve"
+        observacoes = rdo.get("observacoes", "") or ""
+        equipe = rdo.get("equipe_alocada", "?")
+
+        prompt = f"""Você é um gestor sênior de obras. Analise o RDO abaixo e gere um insight conciso (3-4 frases) sobre a obra do dia.
+
+DATA: {data_rdo}
+CONTRATO: {contrato}
+CLIMA: {clima} | CHUVA: {chuva}
+EQUIPE: {equipe} pessoas
+INTERRUPÇÃO: {interrupcao}
+OBSERVAÇÕES: {observacoes}
+
+ATIVIDADES EXECUTADAS:
+{ativ_text}
+
+Formato de resposta: análise direta da produtividade, riscos identificados e recomendação objetiva para o próximo dia. Sem bullet points, texto corrido."""
+
+        import openai
+        from backend.core.config import Config
+
+        client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.4,
+        )
+        summary = resp.choices[0].message.content.strip() if resp.choices else ""
+
+        if summary:
+            sb_update("rdo_master", filters={"id": rdo_id}, data={"ai_summary": summary})
+
+        logger.info(f"rdo ai_summary gerado: rdo={rdo_id[:8]} chars={len(summary)}")
+        return {"ok": True, "summary": summary}
+
+    except Exception as e:
+        logger.error(f"generate_rdo_ai_analysis error: rdo={rdo_id} {e}")
+        return {"ok": False, "error": str(e)}
