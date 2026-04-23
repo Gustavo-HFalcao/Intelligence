@@ -665,7 +665,7 @@ class EmailService:
         view_url: str,
         ai_text: str = "",
     ) -> bool:
-        """Email RDO v2 com link de visualização online + PDF anexado."""
+        """Email RDO executivo com KPIs, atividades, produtividade, previsão e análise IA."""
         try:
             if not recipients:
                 return False
@@ -673,91 +673,299 @@ class EmailService:
                 logger.error("❌ RDO_EMAIL_PASSWORD não configurado")
                 return False
 
-            contrato = rdo_data.get("contrato", "—")
-            data_rdo = rdo_data.get("data", "—")
-            projeto  = rdo_data.get("projeto", "—") or "—"
-            clima    = rdo_data.get("condicao_climatica", rdo_data.get("clima", "—"))
-            mestre   = rdo_data.get("mestre_id", "—") or "—"
-            n_labor  = len(rdo_data.get("mao_obra", []))
-            n_acts   = len(rdo_data.get("atividades", []))
+            contrato    = rdo_data.get("contrato", "—")
+            data_rdo    = rdo_data.get("data", "—")
+            projeto     = rdo_data.get("projeto", "—") or "—"
+            cliente     = rdo_data.get("cliente", "—") or "—"
+            localizacao = rdo_data.get("localizacao", "—") or "—"
+            clima       = rdo_data.get("condicao_climatica", rdo_data.get("clima", "—")) or "—"
+            turno       = rdo_data.get("turno", "—") or "—"
+            hora_i      = rdo_data.get("hora_inicio", "—") or "—"
+            hora_f      = rdo_data.get("hora_termino", "—") or "—"
+            observacoes = (rdo_data.get("observacoes", "") or "").strip()
+            orientacao  = (rdo_data.get("orientacao", "") or "").strip()
 
-            # Build absolute URL for the email link
+            # Equipe
+            equipe_total = rdo_data.get("equipe_alocada", 0) or 0
+            mao_obra     = rdo_data.get("mao_obra", []) or []
+            atividades   = rdo_data.get("atividades", []) or []
+            houve_int    = rdo_data.get("houve_interrupcao", False)
+            motivo_int   = rdo_data.get("motivo_interrupcao", "") or ""
+            houve_chuva  = rdo_data.get("houve_chuva", False)
+            houve_acid   = rdo_data.get("houve_acidente", False)
+
+            # Produtividade: conta concluídas vs total
+            n_concluidas = sum(
+                1 for a in atividades
+                if str(a.get("status", "")).lower() in ("concluído", "concluida", "concluido", "concluída")
+            )
+            n_andamento  = len(atividades) - n_concluidas
+
+            # Efetivo total (soma dos efetivos por atividade, se não vier equipe_alocada)
+            if not equipe_total and atividades:
+                equipe_total = sum(
+                    int(a.get("efetivo") or a.get("efetivo_alocado") or 0)
+                    for a in atividades
+                )
+            if not equipe_total and mao_obra:
+                equipe_total = sum(int(m.get("quantidade") or 0) for m in mao_obra)
+
+            # Build absolute URL
             from bomtempo.core.config import Config as _Cfg
             abs_view_url = (
                 view_url if view_url.startswith("http")
                 else f"{_Cfg.APP_URL.rstrip('/')}{view_url}"
             ) if view_url else ""
-            view_btn = (
-                f'<a href="{abs_view_url}" style="display:inline-block;background:linear-gradient(135deg,#C98B2A,#9B6820);'
-                f'color:#fff;font-weight:700;font-size:13px;text-decoration:none;padding:12px 28px;'
-                f'border-radius:8px;letter-spacing:0.05em;text-transform:uppercase;margin-top:8px;">Ver RDO Online</a>'
+
+            # ── KPI cards ─────────────────────────────────────────────────────
+            clima_icon = {"ensolarado": "☀️", "nublado": "🌥️", "chuvoso": "🌧️", "parcialmente nublado": "⛅"}.get(
+                clima.lower(), "🌤️"
+            )
+            prod_pct = round(n_concluidas / len(atividades) * 100) if atividades else 0
+            prod_color = "#2A9D8F" if prod_pct >= 80 else "#C98B2A" if prod_pct >= 50 else "#EF4444"
+            prod_label = "Produtivo" if prod_pct >= 80 else "Parcial" if prod_pct >= 50 else "Abaixo"
+
+            kpi_cards = f"""
+<table style="width:100%;border-collapse:separate;border-spacing:8px;">
+  <tr>
+    <td style="width:33%;background:rgba(201,139,42,0.08);border:1px solid rgba(201,139,42,0.2);border-radius:10px;padding:14px 16px;text-align:center;vertical-align:top;">
+      <p style="margin:0 0 4px;font-size:22px;">👷</p>
+      <p style="margin:0;font-size:26px;font-weight:800;color:#C98B2A;line-height:1;">{equipe_total}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#889999;text-transform:uppercase;letter-spacing:0.08em;">Pessoas Alocadas</p>
+    </td>
+    <td style="width:33%;background:rgba(42,157,143,0.08);border:1px solid rgba(42,157,143,0.2);border-radius:10px;padding:14px 16px;text-align:center;vertical-align:top;">
+      <p style="margin:0 0 4px;font-size:22px;">📋</p>
+      <p style="margin:0;font-size:26px;font-weight:800;color:#2A9D8F;line-height:1;">{len(atividades)}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#889999;text-transform:uppercase;letter-spacing:0.08em;">Atividades Registradas</p>
+    </td>
+    <td style="width:33%;background:rgba({prod_color.lstrip('#')[:2]},{prod_color.lstrip('#')[2:4]},{prod_color.lstrip('#')[4:]},0.08) ;border:1px solid {prod_color}40;border-radius:10px;padding:14px 16px;text-align:center;vertical-align:top;">
+      <p style="margin:0 0 4px;font-size:22px;">{"✅" if prod_pct >= 80 else "⚡" if prod_pct >= 50 else "⚠️"}</p>
+      <p style="margin:0;font-size:26px;font-weight:800;color:{prod_color};line-height:1;">{prod_pct}%</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#889999;text-transform:uppercase;letter-spacing:0.08em;">Dia {prod_label}</p>
+    </td>
+  </tr>
+</table>"""
+
+            # ── Atividades table ───────────────────────────────────────────────
+            ativ_rows = ""
+            for i, a in enumerate(atividades):
+                nome     = a.get("atividade") or a.get("descricao") or "—"
+                efet     = a.get("efetivo") or a.get("efetivo_alocado") or "—"
+                status   = a.get("status") or "—"
+                prog     = a.get("progresso_percentual") or a.get("quantidade") or ""
+                unidade  = a.get("unidade") or ""
+                prod_dia = a.get("producao_dia") or ""
+                exec_q   = a.get("exec_qty") or ""
+                total_q  = a.get("total_qty") or ""
+
+                # Build progress string
+                if prod_dia and unidade:
+                    prog_str = f"{prod_dia} {unidade}"
+                elif exec_q and total_q:
+                    prog_str = f"{exec_q}/{total_q} {unidade}".strip()
+                elif prog:
+                    prog_str = f"{prog}{'%' if str(prog).replace('.','').isdigit() and float(str(prog)) <= 100 and not unidade else (' ' + unidade if unidade else '')}"
+                else:
+                    prog_str = "—"
+
+                status_lower = status.lower()
+                s_color = "#2A9D8F" if "conclu" in status_lower else "#C98B2A" if "andamento" in status_lower else "#889999"
+                bg = "rgba(201,139,42,0.04)" if i % 2 == 0 else "transparent"
+                efet_str = str(efet) if efet != "—" else "—"
+
+                ativ_rows += f"""
+<tr style="background:{bg};">
+  <td style="padding:10px 12px;color:#E0E0E0;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.05);">{nome}</td>
+  <td style="padding:10px 12px;color:#C98B2A;font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid rgba(255,255,255,0.05);">{efet_str}</td>
+  <td style="padding:10px 12px;font-size:13px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.05);">
+    <span style="background:{s_color}22;color:{s_color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;">{status}</span>
+  </td>
+  <td style="padding:10px 12px;color:#C8D8D4;font-size:13px;text-align:right;border-bottom:1px solid rgba(255,255,255,0.05);">{prog_str}</td>
+</tr>"""
+
+            atividades_section = f"""
+<table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;">
+  <thead>
+    <tr style="background:rgba(201,139,42,0.12);">
+      <th style="padding:10px 12px;text-align:left;color:#C98B2A;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid rgba(201,139,42,0.25);">Atividade</th>
+      <th style="padding:10px 12px;text-align:center;color:#C98B2A;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid rgba(201,139,42,0.25);">Efetivo</th>
+      <th style="padding:10px 12px;text-align:center;color:#C98B2A;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid rgba(201,139,42,0.25);">Status</th>
+      <th style="padding:10px 12px;text-align:right;color:#C98B2A;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid rgba(201,139,42,0.25);">Produção</th>
+    </tr>
+  </thead>
+  <tbody>{ativ_rows if ativ_rows else '<tr><td colspan="4" style="padding:16px;color:#889999;font-size:13px;text-align:center;">Nenhuma atividade registrada.</td></tr>'}</tbody>
+</table>""" if atividades else ""
+
+            # ── Alertas / incidentes ───────────────────────────────────────────
+            alertas = []
+            if houve_int and motivo_int:
+                alertas.append(f"⏸️ <strong>Interrupção:</strong> {motivo_int}")
+            elif houve_int:
+                alertas.append("⏸️ Houve interrupção no dia")
+            if houve_chuva:
+                alertas.append(f"🌧️ Chuva registrada — pode impactar o andamento")
+            if houve_acid:
+                alertas.append(f"🚨 <strong>Acidente registrado</strong> — verificar ocorrência no RDO")
+
+            alertas_html = ""
+            if alertas:
+                items = "".join(
+                    f'<p style="margin:4px 0;color:#C8D8D4;font-size:13px;">{a}</p>' for a in alertas
+                )
+                alertas_html = f"""
+<div style="background:rgba(249,115,22,0.06);border-left:3px solid #F97316;padding:14px 18px;border-radius:0 8px 8px 0;margin-bottom:20px;">
+  <p style="margin:0 0 8px;color:#F97316;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">⚠️ Ocorrências do Dia</p>
+  {items}
+</div>"""
+
+            # ── Previsão dia seguinte (orientação) ────────────────────────────
+            proximo_dia_html = ""
+            if orientacao:
+                proximo_dia_html = f"""
+<div style="background:rgba(42,157,143,0.06);border-left:3px solid #2A9D8F;padding:14px 18px;border-radius:0 8px 8px 0;margin-bottom:20px;">
+  <p style="margin:0 0 8px;color:#2A9D8F;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">🔭 Previsão para Amanhã</p>
+  <p style="margin:0;color:#C8D8D4;font-size:13px;line-height:1.6;">{orientacao}</p>
+</div>"""
+            elif n_andamento > 0:
+                proximo_dia_html = f"""
+<div style="background:rgba(42,157,143,0.06);border-left:3px solid #2A9D8F;padding:14px 18px;border-radius:0 8px 8px 0;margin-bottom:20px;">
+  <p style="margin:0 0 8px;color:#2A9D8F;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">🔭 Previsão para Amanhã</p>
+  <p style="margin:0;color:#C8D8D4;font-size:13px;line-height:1.6;">{n_andamento} atividade(s) em andamento seguem para o próximo dia.</p>
+</div>"""
+
+            # ── Observações ───────────────────────────────────────────────────
+            obs_html = ""
+            if observacoes:
+                obs_html = f"""
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:14px 18px;margin-bottom:20px;">
+  <p style="margin:0 0 6px;color:#889999;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">📝 Observações</p>
+  <p style="margin:0;color:#C8D8D4;font-size:13px;line-height:1.6;">{observacoes}</p>
+</div>"""
+
+            # ── AI section ────────────────────────────────────────────────────
+            ai_section_html = ""
+            if ai_text:
+                ai_section_html = f"""
+<div style="background:rgba(42,157,143,0.05);border:1px solid rgba(42,157,143,0.18);border-radius:12px;padding:22px 24px;margin-bottom:20px;">
+  <div style="margin-bottom:14px;">
+    <p style="margin:0;color:#2A9D8F;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;">🤖 Análise BOMTEMPO Intelligence</p>
+    <p style="margin:2px 0 0;color:#556666;font-size:11px;">Gerado automaticamente com base nos dados deste RDO</p>
+  </div>
+  <div style="color:#C8D8D4;font-size:13px;line-height:1.75;">{_md_to_html(ai_text)}</div>
+</div>"""
+
+            # ── View button + PDF notice ───────────────────────────────────────
+            view_btn = ""
+            if abs_view_url:
+                view_btn = f"""
+<a href="{abs_view_url}"
+   style="display:inline-block;background:linear-gradient(135deg,#C98B2A,#9B6820);
+          color:#fff;font-weight:700;font-size:13px;text-decoration:none;
+          padding:13px 32px;border-radius:8px;letter-spacing:0.06em;text-transform:uppercase;">
+  Ver RDO Completo Online
+</a>"""
+
+            pdf_notice = (
+                '<p style="margin:10px 0 0;color:#889999;font-size:12px;">📎 PDF completo em anexo.</p>'
+                if pdf_path and Path(pdf_path).exists()
+                else '<p style="margin:10px 0 0;color:#F97316;font-size:12px;">⚠️ PDF não disponível — acesse pelo link acima.</p>'
                 if abs_view_url else ""
             )
 
-            ai_section = (
-                f'<div style="background:rgba(42,157,143,0.07);border-left:3px solid #2A9D8F;'
-                f'padding:16px 20px;border-radius:0 8px 8px 0;margin:0 32px 28px;">'
-                f'<p style="margin:0 0 8px;color:#2A9D8F;font-size:12px;font-weight:700;text-transform:uppercase;">🤖 Análise BTP Intelligence</p>'
-                f'<div style="color:#C8D8D4;font-size:13px;line-height:1.7;">{_md_to_html(ai_text)}</div>'
-                f'</div>'
-                if ai_text else ""
-            )
+            # ── Info row (clima, turno, horário) ──────────────────────────────
+            info_row = f"""
+<table style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;">
+  <tr>
+    <td style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 14px;text-align:center;">
+      <p style="margin:0;font-size:18px;">{clima_icon}</p>
+      <p style="margin:2px 0 0;font-size:12px;color:#C8D8D4;">{clima}</p>
+      <p style="margin:0;font-size:10px;color:#556666;text-transform:uppercase;letter-spacing:0.06em;">Clima</p>
+    </td>
+    <td style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 14px;text-align:center;">
+      <p style="margin:0;font-size:18px;">⏱️</p>
+      <p style="margin:2px 0 0;font-size:12px;color:#C8D8D4;">{hora_i} – {hora_f}</p>
+      <p style="margin:0;font-size:10px;color:#556666;text-transform:uppercase;letter-spacing:0.06em;">Horário · {turno}</p>
+    </td>
+    <td style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 14px;text-align:center;">
+      <p style="margin:0;font-size:18px;">📍</p>
+      <p style="margin:2px 0 0;font-size:12px;color:#C8D8D4;">{localizacao[:28]}{"…" if len(localizacao) > 28 else ""}</p>
+      <p style="margin:0;font-size:10px;color:#556666;text-transform:uppercase;letter-spacing:0.06em;">Localização</p>
+    </td>
+  </tr>
+</table>"""
 
-            # Personalized intro para o RDO
-            doc_label_rdo = f"RDO do contrato {contrato} de {data_rdo}"
-            personalized_intro = _generate_personalized_intro(
-                doc_label=doc_label_rdo,
-                context_hint=f"Projeto: {projeto}. Clima: {clima}. {n_acts} atividade(s) registrada(s).",
+            # ── Summary line ──────────────────────────────────────────────────
+            summary = (
+                f"Hoje o contrato <strong style='color:#C98B2A;'>{contrato}</strong> registrou "
+                f"<strong style='color:#C98B2A;'>{equipe_total} profissional(is)</strong> em campo, "
+                f"com <strong style='color:#2A9D8F;'>{len(atividades)} atividade(s)</strong> — "
+                f"<strong style='color:{prod_color};'>{n_concluidas} concluída(s)</strong> e "
+                f"{n_andamento} em andamento. Dia classificado como <strong style='color:{prod_color};'>{prod_label}</strong>."
             )
-            intro_text = personalized_intro or f"Segue o Relatório Diário de Obra do contrato <strong style='color:#C98B2A;'>{contrato}</strong> de <strong style='color:#C98B2A;'>{data_rdo}</strong>."
 
             body_html = f"""<!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="UTF-8"></head>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#030504;font-family:'Segoe UI',Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#030504;">
-  <tr><td align="center" style="padding:32px 16px;">
-    <table width="600" cellpadding="0" cellspacing="0"
-      style="max-width:600px;width:100%;background:#0e1a17;border-radius:16px;overflow:hidden;border:1px solid rgba(201,139,42,0.2);">
-      <tr><td style="background:linear-gradient(135deg,#1a0e00,#C98B2A 60%,#2A9D8F);padding:28px 32px;text-align:center;">
-        <p style="margin:0 0 4px;color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:0.15em;text-transform:uppercase;">BOMTEMPO INTELLIGENCE</p>
-        <h1 style="margin:0 0 8px;color:#fff;font-size:22px;font-weight:700;">Relatório Diário de Obra — v2</h1>
-        <p style="margin:0;background:rgba(0,0,0,0.25);display:inline-block;padding:6px 16px;border-radius:20px;color:#fff;font-size:14px;">{contrato} &nbsp;·&nbsp; {data_rdo}</p>
-      </td></tr>
-      <tr><td style="padding:20px 32px 4px;">
-        <p style="margin:0;color:#C8D8D4;font-size:14px;line-height:1.7;">{intro_text}</p>
-      </td></tr>
-      <tr><td style="padding:12px 32px 0;">
-        <table style="width:100%;border-collapse:collapse;">
-          <tr style="background:rgba(201,139,42,0.06);">
-            <td style="padding:9px 12px;color:#889999;font-size:13px;width:40%;">Projeto</td>
-            <td style="padding:9px 12px;color:#E0E0E0;font-size:13px;">{projeto}</td>
-          </tr>
-          <tr><td style="padding:9px 12px;color:#889999;font-size:13px;">Clima</td>
-              <td style="padding:9px 12px;color:#E0E0E0;font-size:13px;">{clima}</td></tr>
-          <tr style="background:rgba(201,139,42,0.06);">
-            <td style="padding:9px 12px;color:#889999;font-size:13px;">Mestre</td>
-            <td style="padding:9px 12px;color:#E0E0E0;font-size:13px;">{mestre}</td>
-          </tr>
-          <tr><td style="padding:9px 12px;color:#889999;font-size:13px;">Equipe</td>
-              <td style="padding:9px 12px;color:#C98B2A;font-size:13px;font-weight:700;">{n_labor} tipo(s) · {n_acts} atividade(s)</td></tr>
-        </table>
-      </td></tr>
-      <tr><td style="padding:24px 32px;text-align:center;">
-        {view_btn}
-        {"<p style='margin:12px 0 0;color:#889999;font-size:12px;'>📎 O PDF completo está anexado a este email.</p>" if pdf_path else "<p style='margin:12px 0 0;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:8px;padding:10px 16px;color:#F97316;font-size:12px;display:inline-block;'>⚠️ O PDF não pôde ser gerado automaticamente. Acesse a plataforma pelo link acima para gerar o arquivo novamente.</p>"}
-      </td></tr>
-      {f'<tr><td>{ai_section}</td></tr>' if ai_section else ''}
-      <tr><td style="background:#081210;padding:16px 32px;border-top:1px solid rgba(255,255,255,0.06);text-align:center;">
-        <p style="margin:0;color:#4a5a58;font-size:11px;">Gerado automaticamente · BOMTEMPO Dashboard · Não responda este email.</p>
-      </td></tr>
-    </table>
+<tr><td align="center" style="padding:32px 16px;">
+<table width="600" cellpadding="0" cellspacing="0"
+  style="max-width:600px;width:100%;background:#0e1a17;border-radius:16px;overflow:hidden;border:1px solid rgba(201,139,42,0.22);">
+
+  <!-- HEADER -->
+  <tr><td style="background:linear-gradient(135deg,#1a0e00 0%,#C98B2A 55%,#2A9D8F 100%);padding:30px 32px 24px;text-align:center;">
+    <p style="margin:0 0 4px;color:rgba(255,255,255,0.65);font-size:10px;letter-spacing:0.18em;text-transform:uppercase;">BOMTEMPO INTELLIGENCE</p>
+    <h1 style="margin:0 0 10px;color:#fff;font-size:21px;font-weight:800;letter-spacing:0.01em;">Relatório Diário de Obra</h1>
+    <p style="margin:0;background:rgba(0,0,0,0.28);display:inline-block;padding:6px 18px;border-radius:20px;color:#fff;font-size:14px;font-weight:600;">
+      {contrato}&nbsp;&nbsp;·&nbsp;&nbsp;{data_rdo}
+    </p>
+    <p style="margin:8px 0 0;color:rgba(255,255,255,0.55);font-size:12px;">{projeto} &nbsp;·&nbsp; {cliente}</p>
   </td></tr>
-</table></body></html>"""
+
+  <!-- SUMMARY -->
+  <tr><td style="padding:24px 32px 16px;">
+    <p style="margin:0;color:#C8D8D4;font-size:14px;line-height:1.7;">{summary}</p>
+  </td></tr>
+
+  <!-- KPI CARDS -->
+  <tr><td style="padding:0 32px 20px;">{kpi_cards}</td></tr>
+
+  <!-- INFO ROW -->
+  <tr><td style="padding:0 32px 20px;">{info_row}</td></tr>
+
+  {"<!-- ALERTAS --><tr><td style='padding:0 32px 4px;'>" + alertas_html + "</td></tr>" if alertas_html else ""}
+
+  {"<!-- ATIVIDADES --><tr><td style='padding:0 32px;'><p style='margin:0 0 10px;color:#C98B2A;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;'>Atividades do Dia</p>" + atividades_section + "</td></tr><tr><td style='padding:0;height:20px;'></td></tr>" if atividades_section else ""}
+
+  {"<!-- OBS --><tr><td style='padding:0 32px;'>" + obs_html + "</td></tr>" if obs_html else ""}
+
+  {"<!-- PROXIMO DIA --><tr><td style='padding:0 32px;'>" + proximo_dia_html + "</td></tr>" if proximo_dia_html else ""}
+
+  <!-- DIVIDER -->
+  <tr><td style="padding:4px 32px 16px;"><div style="border-top:1px solid rgba(255,255,255,0.07);"></div></td></tr>
+
+  {"<!-- AI --><tr><td style='padding:0 32px 8px;'>" + ai_section_html + "</td></tr>" if ai_section_html else ""}
+
+  <!-- CTA -->
+  <tr><td style="padding:8px 32px 28px;text-align:center;">
+    {view_btn}
+    {pdf_notice}
+  </td></tr>
+
+  <!-- FOOTER -->
+  <tr><td style="background:#081210;padding:16px 32px;border-top:1px solid rgba(255,255,255,0.05);text-align:center;">
+    <p style="margin:0;color:#4a5a58;font-size:11px;line-height:1.6;">Gerado automaticamente · BOMTEMPO Dashboard · Não responda este email.</p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body></html>"""
 
             msg = MIMEMultipart("mixed")
             msg["From"]    = Config.RDO_EMAIL_USER
             msg["To"]      = ", ".join(recipients)
-            msg["Subject"] = f"📋 RDO v2 | {contrato} | {data_rdo} | BOMTEMPO"
+            msg["Subject"] = f"📋 RDO | {contrato} | {data_rdo} | {prod_label} | BOMTEMPO"
             msg.attach(MIMEText(body_html, "html", "utf-8"))
 
             if pdf_path and Path(pdf_path).exists():
@@ -771,7 +979,7 @@ class EmailService:
                 server.login(Config.RDO_EMAIL_USER, Config.RDO_EMAIL_PASSWORD)
                 server.send_message(msg)
 
-            logger.info(f"✅ RDO2 email enviado → {recipients}")
+            logger.info(f"✅ RDO email executivo enviado → {recipients}")
             return True
         except Exception as e:
             logger.error(f"❌ send_rdo2_email: {e}")
