@@ -51,7 +51,7 @@ export default function RDOHistorico() {
       if (dateTo) params.set('date_to', dateTo)
       return api.get(`/rdo/historico?${params}`).then(r => r.data)
     },
-    staleTime: 30_000,
+    staleTime: Infinity,
   })
 
   // Email subscribers — load when panel open for selected contract
@@ -59,7 +59,7 @@ export default function RDOHistorico() {
     queryKey: ['rdo-subscribers', emailContrato],
     queryFn: () => api.get(`/rdo/subscribers?contrato=${encodeURIComponent(emailContrato)}`).then(r => r.data),
     enabled: !!emailContrato,
-    staleTime: 0,
+    staleTime: Infinity,
   })
   const subscribers: any[] = subData?.subscribers ?? []
 

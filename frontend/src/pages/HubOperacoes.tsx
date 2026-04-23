@@ -204,14 +204,14 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
     queryKey: ['hub-visao-geral', contrato],
     queryFn:  () => api.get(`/hub/visao-geral?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 2 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
   const { data: insightsData, refetch: refetchInsights } = useQuery({
     queryKey: ['hub-agente-insights', contrato],
     queryFn:  () => api.get(`/hub/agente/insights?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
   })
   const [riscoOpen, setRiscoOpen] = useState(false)
   const [alertaOpen, setAlertaOpen] = useState(false)
@@ -403,7 +403,7 @@ function DashboardTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-dashboard', contrato],
     queryFn:  () => api.get(`/hub/dashboard?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
   if (isLoading) return <Skeleton />
@@ -993,7 +993,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-cronograma', contrato],
     queryFn:  () => api.get(`/hub/cronograma?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
 
@@ -1244,7 +1244,7 @@ function AuditoriaTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-auditoria', contrato],
     queryFn:  () => api.get(`/hub/auditoria?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 10 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
   const [lightbox, setLightbox] = useState<any>(null)
@@ -1377,7 +1377,7 @@ function TimelineTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-timeline', contrato],
     queryFn:  () => api.get(`/hub/timeline?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
 
@@ -1391,7 +1391,7 @@ function TimelineTab({ contrato }: { contrato: string }) {
   const { data: usersData } = useQuery({
     queryKey: ['hub-users'],
     queryFn: () => api.get('/users').then(r => r.data),
-    staleTime: 300_000,
+    staleTime: Infinity,
   })
   const userList: any[] = usersData?.users ?? []
 
@@ -1617,7 +1617,7 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['hub-financeiro', contrato],
     queryFn:  () => api.get(`/hub/financeira?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
-    staleTime: 10 * 60_000,
+    staleTime: Infinity,
     placeholderData: keepPreviousData,
     enabled:  !!contrato,
   })
@@ -1711,7 +1711,7 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
   const { data: contratosList } = useQuery({
     queryKey: ['hub-contratos'],
     queryFn:  () => api.get('/hub/contratos').then(r => r.data),
-    staleTime: 5 * 60_000,
+    staleTime: Infinity,
     gcTime:    30 * 60_000,
     placeholderData: keepPreviousData,
   })
@@ -1732,7 +1732,7 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
       queryClient.prefetchQuery({
         queryKey: key,
         queryFn:  () => api.get(url).then(r => r.data),
-        staleTime: 5 * 60_000,
+        staleTime: Infinity,
       })
     })
   }, [queryClient])

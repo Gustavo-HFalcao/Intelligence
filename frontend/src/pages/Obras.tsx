@@ -23,7 +23,7 @@ export default function Obras() {
   const { data, isLoading } = useQuery({
     queryKey: ['obras-list'],
     queryFn:  () => api('/api/hub/contratos'),
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 
   const all: any[] = data?.contratos ?? []

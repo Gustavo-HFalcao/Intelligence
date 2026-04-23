@@ -183,7 +183,7 @@ export default function RDOForm() {
   const { data: contratosData } = useQuery({
     queryKey: ['hub-contratos'],
     queryFn:  () => api.get('/hub/contratos').then(r => r.data),
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
   const contratos: any[] = contratosData?.contratos ?? []
 
@@ -191,7 +191,7 @@ export default function RDOForm() {
     queryKey: ['cronograma-atividades', form.contrato],
     queryFn:  () => api.get(`/hub/cronograma?contrato=${encodeURIComponent(form.contrato)}`).then(r => r.data),
     enabled:  !!form.contrato,
-    staleTime: 30_000,
+    staleTime: Infinity,
   })
   const atividadesCronogramaRaw: any[] = cronogramaData?.atividades ?? []
   // Sort by fase hierarchy

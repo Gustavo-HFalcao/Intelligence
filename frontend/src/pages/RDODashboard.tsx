@@ -81,7 +81,7 @@ export default function RDODashboard() {
   const { data: contratos } = useQuery({
     queryKey: ['hub-contratos'],
     queryFn:  () => api('/api/hub/contratos'),
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
   const { data, isLoading } = useQuery({
     queryKey: ['rdo-dashboard', contrato],

@@ -11,11 +11,11 @@ import './index.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime:  1000 * 60 * 5,   // 5 min — dados são "frescos" por 5min
-      gcTime:     1000 * 60 * 30,  // 30 min em memória após desmontar (sem refetch ao voltar)
+      staleTime:  Infinity,  // perma-cache — só invalida via trigger (RDO submit / CRUD)
+      gcTime:     Infinity,  // nunca expulsa da memória enquanto o app estiver aberto
       retry: 1,
-      refetchOnWindowFocus: false,  // não refetch ao trocar de aba do browser
-      refetchOnReconnect: 'always',
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   },
 })

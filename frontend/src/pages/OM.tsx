@@ -35,7 +35,7 @@ export default function OM() {
     queryKey:['om', contrato],
     queryFn:()=> contrato ? api(`/api/om/${contrato}`) : api('/api/om'),
   })
-  const { data:contratos } = useQuery({ queryKey:['hub-contratos'], queryFn:()=>api('/api/hub/contratos'), staleTime:60_000 })
+  const { data:contratos } = useQuery({ queryKey:['hub-contratos'], queryFn:()=>api('/api/hub/contratos'), staleTime: Infinity })
 
   const createMut = useMutation({
     mutationFn:(body:any) => api(`/api/om/${contrato}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }),

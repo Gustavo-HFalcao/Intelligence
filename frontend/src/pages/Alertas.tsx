@@ -183,7 +183,7 @@ function CriarTab() {
   const [voiceActive, setVoiceActive] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
 
-  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: 60_000 })
+  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: Infinity })
   const clList: any[] = contratos?.contratos ?? []
 
   const createMut = useMutation({
@@ -420,11 +420,11 @@ function HistoricoTab() {
   const [page, setPage] = useState(1)
   const [contrato, setContrato] = useState('')
 
-  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: 60_000 })
+  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: Infinity })
   const { data: histData } = useQuery({
     queryKey: ['alertas-hist', page, contrato],
     queryFn: () => api(`/api/alertas/history?page=${page}${contrato ? `&contrato=${contrato}` : ''}`),
-    staleTime: 15_000,
+    staleTime: Infinity,
   })
 
   const markReadMut = useMutation({

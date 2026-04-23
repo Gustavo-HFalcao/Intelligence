@@ -61,13 +61,13 @@ export default function Financeiro() {
   const { data, isLoading } = useQuery({
     queryKey: ['financeiro', contrato],
     queryFn:  () => contrato ? api(`/api/financeiro/${contrato}`) : api('/api/financeiro'),
-    staleTime: 30_000,
+    staleTime: Infinity,
   })
 
   const { data: contratosList } = useQuery({
     queryKey: ['hub-contratos'],
     queryFn:  () => api('/api/hub/contratos'),
-    staleTime: 60_000,
+    staleTime: Infinity,
   })
 
   const createMut = useMutation({

@@ -37,7 +37,7 @@ export default function Projetos() {
   const { data, isLoading } = useQuery({
     queryKey: ['contratos-list'],
     queryFn: () => api('/api/hub/contratos'),
-    staleTime: 30_000,
+    staleTime: Infinity,
     refetchInterval: 30_000,
   })
 

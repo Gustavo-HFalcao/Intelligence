@@ -17,7 +17,7 @@ export default function Analytics() {
   const { data, isLoading } = useQuery({
     queryKey:['analytics-kpis'],
     queryFn:()=>api('/api/dashboard/kpis'),
-    staleTime:60_000,
+    staleTime: Infinity,
   })
 
   if (isLoading) return (

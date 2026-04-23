@@ -28,9 +28,9 @@ export default function Relatorios() {
   const [search, setSearch]     = useState('')
   const qc = useQueryClient()
 
-  const { data, isLoading }  = useQuery({ queryKey:['relatorios'], queryFn:()=>api('/api/relatorios'), staleTime:30_000 })
+  const { data, isLoading }  = useQuery({ queryKey:['relatorios'], queryFn:()=>api('/api/relatorios'), staleTime: Infinity })
   const { data:tipos } = useQuery({ queryKey:['rel-tipos'], queryFn:()=>api('/api/relatorios/tipos') })
-  const { data:contratos } = useQuery({ queryKey:['hub-contratos'], queryFn:()=>api('/api/hub/contratos'), staleTime:60_000 })
+  const { data:contratos } = useQuery({ queryKey:['hub-contratos'], queryFn:()=>api('/api/hub/contratos'), staleTime: Infinity })
 
   const genMut = useMutation({
     mutationFn:(body:any) => api('/api/relatorios/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }),

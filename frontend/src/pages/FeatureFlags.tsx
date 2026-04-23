@@ -110,7 +110,7 @@ export default function FeatureFlags() {
   const [selectedContract, setSelectedContract] = useState('')
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
 
-  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: 60_000 })
+  const { data: contratos } = useQuery({ queryKey: ['hub-contratos'], queryFn: () => api('/api/hub/contratos'), staleTime: Infinity })
   const { data: flagsData, isLoading } = useQuery({
     queryKey: ['feature-flags', selectedContract],
     queryFn: () => api(`/api/hub/contratos?search=${selectedContract}`).then(r => {
