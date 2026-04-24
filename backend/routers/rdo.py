@@ -102,6 +102,8 @@ def _fmt_atividade(a: Dict) -> Dict:
         "status":       _norm(a.get("observacao")),   # observacao = status/notas
         "observacao":   _norm(a.get("observacao")),
         "created_at":   _norm(a.get("created_at")),
+        "is_extra":     bool(a.get("is_extra", False)),
+        "atividade_id": _norm(a.get("atividade_id")),
     }
 
 
@@ -255,28 +257,32 @@ async def add_atividade(
     rdo_id: str,
     body: Dict[str, Any] = Body(...),
     _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     """Schema rdo_atividades: atividade, quantidade, unidade, efetivo, observacao"""
-    descricao = body.get("descricao", "")
-    pct       = int(body.get("pct", 0))
-    status    = body.get("status", "Em andamento")
-    efetivo   = int(body.get("efetivo") or body.get("qtd_executada") or 0) if not body.get("unidade") else 0
+    descricao  = body.get("descricao", "")
+    pct        = int(body.get("pct", 0))
+    status     = body.get("status", "Em andamento")
+    is_extra   = bool(body.get("is_extra", False))  # atividade não mapeada no cronograma
+    atividade_id = body.get("atividade_id") or None  # link ao hub_atividades
 
-    # Se há unidade específica, quantidade = qtd_executada; senão quantidade = pct
+    # Se há unidade específica, quantidade = qtd_executada (produção do dia); senão quantidade = pct
     unidade = body.get("unidade", "") or ""
     if unidade and unidade != "%":
-        quantidade = float(body.get("qtd_executada") or body.get("pct") or 0)
+        quantidade = float(body.get("qtd_executada") or 0)
     else:
         quantidade = float(pct)
         unidade = "%"
 
     payload = {
-        "rdo_id":    rdo_id,
-        "atividade": descricao,
-        "quantidade": quantidade,
-        "unidade":   unidade,
-        "efetivo":   int(body.get("efetivo") or 0),
-        "observacao": status,
+        "rdo_id":      rdo_id,
+        "atividade":   descricao,
+        "quantidade":  quantidade,
+        "unidade":     unidade,
+        "efetivo":     int(body.get("efetivo") or 0),
+        "observacao":  status,
+        "is_extra":    is_extra,
+        "atividade_id": atividade_id,
     }
     row = sb_insert("rdo_atividades", payload)
     return {"ok": True, "row": _fmt_atividade(row) if isinstance(row, dict) else row}
@@ -429,6 +435,8 @@ async def submit_rdo(
         _affected_parents: set = set()  # track parents that need % rollup
 
         for at in atividades_rdo:
+            if at.get("is_extra"):
+                continue  # extras são tratados no bloco seguinte
             atividade_nome = _norm(at.get("atividade"))
             quantidade     = float(at.get("quantidade") or 0)
             unidade_at     = _norm(at.get("unidade"))
@@ -436,14 +444,18 @@ async def submit_rdo(
             if not atividade_nome:
                 continue
 
-            # Busca atividade no hub pelo nome + contrato
-            hub_rows = sb_select(
-                "hub_atividades",
-                filters={"contrato": contrato},
-                raw_filters={"atividade": f"ilike.*{atividade_nome[:40]}*"},
-                limit=1,
-                client_id=client_id,
-            ) or []
+            # Preferência: atividade_id direto (novo fluxo); fallback: busca por nome
+            hub_rows = []
+            if at.get("atividade_id"):
+                hub_rows = sb_select("hub_atividades", filters={"id": at["atividade_id"]}, limit=1, client_id=client_id) or []
+            if not hub_rows:
+                hub_rows = sb_select(
+                    "hub_atividades",
+                    filters={"contrato": contrato},
+                    raw_filters={"atividade": f"ilike.*{atividade_nome[:40]}*"},
+                    limit=1,
+                    client_id=client_id,
+                ) or []
 
             if not hub_rows:
                 continue
@@ -504,6 +516,32 @@ async def submit_rdo(
                     "created_at":         datetime.utcnow().isoformat(),
                     "client_id":          client_id,
                 })
+
+        # ── Atividades extras (não mapeadas) → pendentes de aprovação no hub ────
+        for at in atividades_rdo:
+            if not at.get("is_extra"):
+                continue
+            atividade_nome = _norm(at.get("atividade"))
+            if not atividade_nome:
+                continue
+            # Cria no hub como pendente de aprovação — gestor completa macro, fase, datas
+            try:
+                sb_insert("hub_atividades", {
+                    "contrato":           contrato,
+                    "atividade":          atividade_nome,
+                    "nivel":              "micro",
+                    "status_atividade":   "Pendente Aprovação",
+                    "conclusao_pct":      0,
+                    "exec_qty":           float(at.get("quantidade") or 0),
+                    "unidade":            _norm(at.get("unidade")),
+                    "fase":               "Extra",
+                    "fase_macro":         "Não Mapeada",
+                    "last_rdo_date":      today_str,
+                    "observacoes":        f"Registrada via RDO {rdo_id} — aguarda aprovação do gestor",
+                    "client_id":          client_id,
+                })
+            except Exception:
+                pass
 
         # ── Rollup % para macros afetadas ────────────────────────────────────
         try:
@@ -572,99 +610,21 @@ async def submit_rdo(
 
 
 def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
-    """Gera e persiste insights de IA para o contrato após submit de RDO."""
+    """Gera e persiste insights de IA (LLM + velocity + anomalias + delta) após submit de RDO."""
     try:
         from datetime import date
-        today = date.today()
+        from backend.routers.hub import _build_insights_llm
+        from backend.integrations.supabase import sb_select as _sb
 
-        atividades = sb_select(
-            "hub_atividades",
-            filters={"contrato": contrato},
-            client_id=client_id,
-            limit=500,
-        ) or []
+        today        = date.today()
+        atividades   = sb_select("hub_atividades",          filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+        rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=7) or []
+        historico    = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=300) or []
 
-        insights: List[Dict] = []
+        existing     = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+        insights_ant = (existing[0].get("insights") or []) if existing else []
 
-        if atividades:
-            total = len(atividades)
-            atrasadas = []
-            criticas_baixo_pct = []
-            prazo_7dias = []
-
-            for a in atividades:
-                pct  = int(a.get("conclusao_pct") or 0)
-                ter  = a.get("termino_previsto", "")
-                ini  = a.get("inicio_previsto", "")
-                nome = a.get("atividade", "Atividade")
-                critico = bool(a.get("critico"))
-
-                if pct >= 100 or not ter:
-                    continue
-
-                try:
-                    d_ter = date.fromisoformat(ter[:10])
-                    d_ini = date.fromisoformat(ini[:10]) if ini else today
-                except Exception:
-                    continue
-
-                dias_total = max(1, (d_ter - d_ini).days)
-                dias_dec   = max(0, (today - d_ini).days)
-                pct_esperado = min(100, int(dias_dec / dias_total * 100))
-                spi = pct / pct_esperado if pct_esperado > 0 else 1.0
-
-                if d_ter < today and pct < 100:
-                    atrasadas.append({"nome": nome, "ter": ter, "pct": pct, "critico": critico})
-
-                if critico and pct < 80 and pct_esperado > 70:
-                    criticas_baixo_pct.append({"nome": nome, "pct": pct, "esperado": pct_esperado})
-
-                dias_restantes = (d_ter - today).days
-                if 0 <= dias_restantes <= 7 and pct < 90:
-                    prazo_7dias.append({"nome": nome, "dias": dias_restantes, "pct": pct})
-
-            # Insight 1: Atividades atrasadas
-            if atrasadas:
-                mais_critica = next((a for a in atrasadas if a["critico"]), atrasadas[0])
-                insights.append({
-                    "priority": "High",
-                    "title":    f"{len(atrasadas)} atividade(s) com prazo vencido",
-                    "body":     f"'{mais_critica['nome'][:50]}' deveria ter sido concluída em {mais_critica['ter'][:10]} e está em {mais_critica['pct']}%. Prioridade máxima de ação."
-                })
-
-            # Insight 2: Atividades críticas com baixo SPI
-            if criticas_baixo_pct:
-                a = criticas_baixo_pct[0]
-                insights.append({
-                    "priority": "High",
-                    "title":    "Atividade crítica com progresso insuficiente",
-                    "body":     f"'{a['nome'][:50]}' está em {a['pct']}% quando o esperado é {a['esperado']}%. Risco de desvio no caminho crítico."
-                })
-
-            # Insight 3: Prazo 7 dias
-            if prazo_7dias:
-                a = prazo_7dias[0]
-                insights.append({
-                    "priority": "Medium",
-                    "title":    f"{len(prazo_7dias)} atividade(s) vencem em até 7 dias",
-                    "body":     f"'{a['nome'][:50]}' vence em {a['dias']} dia(s) com {a['pct']}% de conclusão. Requer atenção imediata."
-                })
-
-            # Insight 4: Status geral
-            concluidas = sum(1 for a in atividades if int(a.get("conclusao_pct") or 0) >= 100)
-            pct_medio  = int(sum(int(a.get("conclusao_pct") or 0) for a in atividades) / max(1, total))
-            if pct_medio >= 80:
-                insights.append({
-                    "priority": "Low",
-                    "title":    f"Projeto em fase avançada — {pct_medio}% de progresso médio",
-                    "body":     f"{concluidas} de {total} atividades concluídas. Mantenha o ritmo para entrega dentro do prazo."
-                })
-            elif not insights:
-                insights.append({
-                    "priority": "Low",
-                    "title":    f"Cronograma em andamento — {pct_medio}% progresso médio",
-                    "body":     f"{concluidas} de {total} atividades concluídas. Acompanhe as atividades previstas para os próximos dias."
-                })
+        insights = _build_insights_llm(atividades, rdo_recentes, contrato, today, historico, insights_ant)
 
         # Persiste no agente_insights (upsert por contrato)
         existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []

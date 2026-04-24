@@ -242,11 +242,12 @@ export default function RDOForm() {
     }
   }, [form.checkout_timestamp])
 
-  // Compute previstas para hoje
+  // Compute previstas para hoje — apenas micros/subs (macros são fruto das filhas)
   useEffect(() => {
     if (!atividadesCronograma.length) { setPrevistasHoje([]); return }
     const today = new Date().toISOString().slice(0, 10)
     const previstas = atividadesCronograma.filter((a: any) => {
+      if (a.nivel === 'macro') return false  // macros não são preenchidas pelo user
       const ini  = a.inicio_previsto?.slice(0, 10)
       const ter  = a.termino_previsto?.slice(0, 10)
       const pct  = Number(a.conclusao_pct || 0)
@@ -376,16 +377,21 @@ export default function RDOForm() {
 
   async function addAtividade() {
     if (!newAt.descricao.trim()) return
-    const pct = newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : Number(newAt.pct)
+
+    // Para atividades vinculadas ao cronograma: qtd_executada é a produção DO DIA
+    // O backend fará append ao exec_qty acumulado e recalculará o % automaticamente
+    const pct = newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : 0  // pct nunca editável pelo user
     const payload = {
       descricao:      newAt.descricao,
       pct,
       status:         statusFromPct(pct),
       ordem:          atividadesRDO.length,
-      qtd_executada:  newAt.qtd_executada || null,
+      qtd_executada:  newAt.qtd_executada || null,  // produção do dia — backend soma ao acumulado
       unidade:        newAt.unidade || null,
       efetivo:        Number(newAt.efetivo) || 0,
       is_marco:       newAt.is_marco,
+      atividade_id:   newAt.atividade_id || null,   // link ao hub_atividades
+      is_extra:       !newAt.atividade_id,           // não mapeada = precisa aprovação do gestor
     }
 
     let currentDraftId = draftId
@@ -416,14 +422,14 @@ export default function RDOForm() {
   }
 
   function preencherDoCronograma(at: any) {
-    const isMarco = !!at.is_marco
+    const isMarco = !!at.is_marco || at.unidade === 'marco' || at.tipo_medicao === 'marco'
     setSelectedCronAt(at)
     setNewAt({
       atividade_id: at.id,
       descricao: at.atividade,
-      pct: Number(at.conclusao_pct || 0),
-      qtd_executada: at.exec_qty || '',
-      unidade: at.unidade || '',
+      pct: 0,               // não editável pelo user — calculado pelo backend
+      qtd_executada: '',    // user preenche apenas o que fez HOJE
+      unidade: at.unidade || 'un',
       efetivo: '',
       is_marco: isMarco,
       marco_concluido: false,
@@ -897,40 +903,80 @@ export default function RDOForm() {
           </div>
         )}
 
-        {/* Previstas para hoje — placed just above the input form */}
-        {previstasHoje.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            style={{ background: `${COPPER}10`, border: `1px solid ${COPPER}40`, borderRadius: 10 }}
-            className="p-3 mb-4"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Zap size={13} style={{ color: COPPER }} />
-              <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: COPPER }}>
-                Previstas para Hoje — {previstasHoje.length} atividade{previstasHoje.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {previstasHoje.slice(0, 8).map((a: any) => {
-                const today = new Date().toISOString().slice(0, 10)
-                const isLate = (a.termino_previsto?.slice(0, 10) ?? '') < today
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => preencherDoCronograma(a)}
-                    style={{ background: isLate ? `${RED}10` : `${COPPER}15`, border: `1px solid ${isLate ? RED : COPPER}30`, color: '#e2c87a', borderRadius: 5, padding: '3px 9px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    {isLate && '⚠ '}{a.fase ? `[${a.fase}] ` : ''}{a.atividade?.slice(0, 30)}
-                  </button>
-                )
-              })}
-              {previstasHoje.length > 8 && (
-                <span style={{ fontSize: 11, color: 'rgba(226,200,122,0.4)', padding: '3px 9px' }}>+{previstasHoje.length - 8} mais</span>
-              )}
-            </div>
-          </motion.div>
-        )}
+        {/* Previstas para hoje — micros/subs agrupadas por macro pai */}
+        {previstasHoje.length > 0 && (() => {
+          const today = new Date().toISOString().slice(0, 10)
+          // Agrupar por macro pai
+          const grupos: Record<string, { macroLabel: string; items: any[] }> = {}
+          for (const a of previstasHoje) {
+            const macroId = a.parent_id || '__sem_macro__'
+            if (!grupos[macroId]) {
+              const macro = atividadesCronograma.find((m: any) => m.id === macroId)
+              grupos[macroId] = {
+                macroLabel: macro ? `${macro.fase ? `[${macro.fase}] ` : ''}${macro.atividade}` : 'Sem macro',
+                items: [],
+              }
+            }
+            grupos[macroId].items.push(a)
+          }
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              style={{ background: `${COPPER}08`, border: `1px solid ${COPPER}35`, borderRadius: 10 }}
+              className="p-3 mb-4"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Zap size={13} style={{ color: COPPER }} />
+                <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: COPPER }}>
+                  Previstas para Hoje — {previstasHoje.length} atividade{previstasHoje.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="flex flex-col gap-3">
+                {Object.entries(grupos).map(([macroId, grupo]) => (
+                  <div key={macroId}>
+                    {/* Header da macro — não clicável, apenas informativo */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div style={{ width: 3, height: 12, background: COPPER, borderRadius: 2, opacity: 0.5 }} />
+                      <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(201,139,42,0.6)' }}>
+                        {grupo.macroLabel}
+                      </span>
+                    </div>
+                    {/* Micros/subs clicáveis */}
+                    <div className="flex flex-wrap gap-1.5 pl-3">
+                      {grupo.items.map((a: any) => {
+                        const isLate = (a.termino_previsto?.slice(0, 10) ?? '') < today
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => preencherDoCronograma(a)}
+                            style={{
+                              background: isLate ? `${RED}12` : `${COPPER}18`,
+                              border: `1px solid ${isLate ? RED : COPPER}35`,
+                              color: isLate ? '#f87171' : '#e2c87a',
+                              borderRadius: 6, padding: '4px 10px',
+                              fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                              display: 'flex', alignItems: 'center', gap: 4,
+                            }}
+                          >
+                            {isLate && <span style={{ fontSize: 9 }}>⚠</span>}
+                            {a.fase ? <span style={{ fontSize: 9, opacity: 0.6 }}>[{a.fase}]</span> : null}
+                            {a.atividade?.slice(0, 35)}
+                            {a.total_qty > 0 && (
+                              <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 2 }}>
+                                · {a.exec_qty || 0}/{a.total_qty} {a.unidade || ''}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )
+        })()}
 
         {/* Painel informativo da atividade selecionada do cronograma */}
         {selectedCronAt && (() => {
@@ -992,87 +1038,155 @@ export default function RDOForm() {
 
         {/* Form adicionar atividade */}
         <div style={{ background: 'rgba(13,17,23,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }} className="p-3 mb-3">
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div className="col-span-2">
+          {newAt.atividade_id ? (
+            /* ── Atividade vinculada ao cronograma: interface simplificada ── */
+            <div className="flex flex-col gap-3">
+              {/* Header: nome da atividade vinculada */}
+              <div style={{ background: `${TEAL}10`, border: `1px solid ${TEAL}25`, borderRadius: 8, padding: '8px 12px' }} className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold" style={{ color: TEAL }}>{newAt.descricao}</div>
+                  {newAt.is_marco && (
+                    <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>MARCO</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setSelectedCronAt(null); setNewAt(a => ({ ...a, atividade_id: '', descricao: '', qtd_executada: '', unidade: '', is_marco: false, marco_concluido: false })) }}
+                  style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}
+                >✕</button>
+              </div>
+
+              {newAt.is_marco ? (
+                /* Marco: só toggle de conclusão */
+                <div className="flex items-center gap-3 py-1">
+                  <input
+                    type="checkbox"
+                    id="marco-concluido"
+                    checked={newAt.marco_concluido}
+                    onChange={e => setNewAt(a => ({ ...a, marco_concluido: e.target.checked }))}
+                    style={{ width: 18, height: 18, accentColor: COPPER }}
+                  />
+                  <label htmlFor="marco-concluido" className="text-sm cursor-pointer font-semibold" style={{ color: COPPER }}>
+                    Concluído neste RDO
+                  </label>
+                </div>
+              ) : (
+                /* Quantidade: user informa apenas o que fez HOJE */
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      Quantidade feita hoje
+                    </label>
+                    <input
+                      type="number" min={0}
+                      placeholder="Ex: 80"
+                      value={newAt.qtd_executada}
+                      onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
+                      style={{ ...inputStyle, fontSize: 14, fontWeight: 700 }}
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      Unidade
+                    </label>
+                    {/* Unidade travada — pré-cadastrada na atividade */}
+                    <div style={{ ...inputStyle, opacity: 0.7, cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      <span style={{ color: COPPER, fontSize: 10 }}>🔒</span>
+                      {newAt.unidade || 'un'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Barra de progresso — calculada, não editável */}
+              {!newAt.is_marco && selectedCronAt && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Progresso acumulado (calculado)</span>
+                    <span className="text-[10px] font-bold font-mono" style={{ color: COPPER }}>
+                      {(() => {
+                        const acum = Number(selectedCronAt.exec_qty || 0) + Number(newAt.qtd_executada || 0)
+                        const total = Number(selectedCronAt.total_qty || 0)
+                        return total > 0 ? `${acum}/${total} ${newAt.unidade || ''} · ${Math.min(100, Math.round(acum / total * 100))}%` : `${selectedCronAt.conclusao_pct || 0}%`
+                      })()}
+                    </span>
+                  </div>
+                  <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 99 }}>
+                    <div style={{
+                      width: `${(() => {
+                        const acum = Number(selectedCronAt.exec_qty || 0) + Number(newAt.qtd_executada || 0)
+                        const total = Number(selectedCronAt.total_qty || 0)
+                        return total > 0 ? Math.min(100, Math.round(acum / total * 100)) : Number(selectedCronAt.conclusao_pct || 0)
+                      })()}%`,
+                      height: '100%', background: COPPER, borderRadius: 99, transition: 'width 0.3s'
+                    }} />
+                  </div>
+                  <div className="text-[9px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                    Acumulado anterior: {selectedCronAt.exec_qty || 0} {newAt.unidade || ''} · A barra é atualizada automaticamente após envio
+                  </div>
+                </div>
+              )}
+
+              {/* Pessoas alocadas */}
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  Pessoas alocadas nesta atividade
+                </label>
+                <input
+                  type="number" min={0}
+                  placeholder="Nº de pessoas"
+                  value={newAt.efetivo}
+                  onChange={e => setNewAt(a => ({ ...a, efetivo: e.target.value }))}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+          ) : (
+            /* ── Atividade não mapeada (digitada manualmente) ── */
+            <div className="flex flex-col gap-2">
               <input
-                placeholder="Descrição da atividade executada..."
+                placeholder="Descreva a atividade executada não mapeada no cronograma..."
                 value={newAt.descricao}
                 onChange={e => setNewAt(a => ({ ...a, descricao: e.target.value }))}
                 style={{ ...inputStyle, fontSize: 13 }}
               />
-            </div>
-
-            {/* Marco: checkbox instead of % input */}
-            {newAt.is_marco ? (
-              <div className="col-span-2 flex items-center gap-3 py-2">
+              <div style={{ background: `rgba(239,68,68,0.06)`, border: `1px solid rgba(239,68,68,0.2)`, borderRadius: 6, padding: '6px 10px' }} className="flex items-center gap-2">
+                <AlertTriangle size={11} style={{ color: RED }} />
+                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  Atividade não mapeada. Aparecerá para aprovação e preenchimento do gestor no Hub.
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 <input
-                  type="checkbox"
-                  id="marco-concluido"
-                  checked={newAt.marco_concluido}
-                  onChange={e => setNewAt(a => ({ ...a, marco_concluido: e.target.checked }))}
-                  style={{ width: 16, height: 16, accentColor: COPPER }}
+                  type="number" min={0}
+                  placeholder="Qtd. executada"
+                  value={newAt.qtd_executada}
+                  onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
+                  style={inputStyle}
                 />
-                <label htmlFor="marco-concluido" className="text-sm cursor-pointer" style={{ color: COPPER }}>
-                  Marco concluído neste RDO
-                </label>
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(226,200,122,0.4)', border: `1px solid ${COPPER}30`, borderRadius: 4, padding: '2px 6px' }}>MARCO</span>
+                <input
+                  placeholder="Unidade (m², und, km...)"
+                  value={newAt.unidade}
+                  onChange={e => setNewAt(a => ({ ...a, unidade: e.target.value }))}
+                  style={inputStyle}
+                />
               </div>
-            ) : (
-              <div className="col-span-2">
-                {/* % slider + status automático */}
-                <div className="flex items-center gap-3">
-                  <input
-                    type="range" min={0} max={100} step={5}
-                    value={newAt.pct}
-                    onChange={e => setNewAt(a => ({ ...a, pct: Number(e.target.value) }))}
-                    style={{ flex: 1, accentColor: COPPER }}
-                  />
-                  <div style={{ minWidth: 90, textAlign: 'right' }}>
-                    <span style={{ color: statusColor(statusFromPct(newAt.pct)), fontWeight: 700, fontSize: 12 }}>
-                      {newAt.pct}% · {statusFromPct(newAt.pct)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <input
-              type="number" min={0}
-              placeholder="Qtd. executada hoje"
-              value={newAt.qtd_executada}
-              onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
-              style={inputStyle}
-            />
-            <input
-              placeholder="Unidade (m², und, km...)"
-              value={newAt.unidade}
-              onChange={e => setNewAt(a => ({ ...a, unidade: e.target.value }))}
-              style={inputStyle}
-            />
-            <div className="col-span-2">
               <input
                 type="number" min={0}
-                placeholder="Pessoas alocadas nesta atividade"
+                placeholder="Pessoas alocadas"
                 value={newAt.efetivo}
                 onChange={e => setNewAt(a => ({ ...a, efetivo: e.target.value }))}
                 style={inputStyle}
               />
-            </div>
-          </div>
-
-          {newAt.atividade_id && (
-            <div className="text-[10px] mb-2 flex items-center gap-2" style={{ color: COPPER }}>
-              ✓ Vinculada ao cronograma: {newAt.descricao.slice(0, 30)}
-              {newAt.is_marco && <span style={{ background: `${COPPER}20`, border: `1px solid ${COPPER}40`, borderRadius: 3, padding: '1px 5px', fontSize: 9, fontWeight: 700 }}>MARCO</span>}
             </div>
           )}
 
           <button
             onClick={addAtividade}
             disabled={!newAt.descricao.trim()}
-            style={{ background: newAt.descricao ? COPPER : 'rgba(201,139,42,0.2)', color: newAt.descricao ? '#0d1117' : '#888', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: newAt.descricao ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ background: newAt.descricao ? COPPER : 'rgba(201,139,42,0.2)', color: newAt.descricao ? '#0d1117' : '#888', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: newAt.descricao ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}
           >
-            <Plus size={13} /> Adicionar Atividade
+            <Plus size={13} /> {newAt.atividade_id ? 'Registrar no RDO' : 'Adicionar Atividade Não Mapeada'}
           </button>
         </div>
 

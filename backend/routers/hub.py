@@ -17,9 +17,12 @@ from backend.integrations.supabase import (
     sb_select,
     sb_update,
 )
+from backend.core.logging import get_logger
 from backend.middleware.auth import get_current_user
 from backend.middleware.tenant import get_current_tenant
 from backend.services.data_loader import DataLoader
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/hub", tags=["hub"])
 
@@ -61,6 +64,56 @@ def _iso_to_br(v: str) -> str:
     except Exception:
         pass
     return str(v)[:10]
+
+
+def _calc_progress_spi(atividades: list, today: date) -> dict:
+    """Calcula progresso físico e SPI usando apenas atividades-folha (sem filhos).
+    Isso evita dupla contagem entre macro/micro/sub.
+    Retorna: progress_pct, prazo_decorrido_pct, spi, desvio_pct"""
+    ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
+    folhas = [a for a in atividades if a["id"] not in ids_com_filhos]
+    if not folhas:
+        folhas = atividades  # fallback se não há hierarquia
+
+    peso_total = 0.0
+    pct_real_pond = 0.0
+    pct_esp_pond = 0.0
+
+    for a in folhas:
+        ini_s = str(a.get("inicio_previsto") or "")[:10]
+        ter_s = str(a.get("termino_previsto") or "")[:10]
+        pct_real = float(a.get("conclusao_pct") or 0)
+        peso = float(a.get("peso_pct") or 1)
+
+        pct_esp = 0.0
+        if ini_s and ter_s:
+            try:
+                d_ini = date.fromisoformat(ini_s)
+                d_ter = date.fromisoformat(ter_s)
+                if today < d_ini:
+                    # Antecipação: se já tem progresso, esperado ainda é 0
+                    pct_esp = 0.0
+                elif today >= d_ter:
+                    pct_esp = 100.0
+                else:
+                    total_dias = max((d_ter - d_ini).days, 1)
+                    decorridos = (today - d_ini).days
+                    pct_esp = min(100.0, decorridos / total_dias * 100)
+            except ValueError:
+                pass
+
+        peso_total += peso
+        pct_real_pond += pct_real * peso
+        pct_esp_pond += pct_esp * peso
+
+    if peso_total == 0:
+        return {"progress_pct": 0.0, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
+
+    progress_pct = round(pct_real_pond / peso_total, 1)
+    prazo_decorrido_pct = round(pct_esp_pond / peso_total, 1)
+    spi = round(progress_pct / prazo_decorrido_pct, 2) if prazo_decorrido_pct > 0 else 1.0
+    desvio_pct = round(progress_pct - prazo_decorrido_pct, 1)
+    return {"progress_pct": progress_pct, "prazo_decorrido_pct": prazo_decorrido_pct, "spi": spi, "desvio_pct": desvio_pct}
 
 
 def _working_days_between(d_start: date, d_end: date) -> int:
@@ -129,19 +182,11 @@ def _count_working_days(start_iso: str, end_iso: str, working_days: set = None) 
 
 
 def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
-    """Atualiza datas e % do pai com base nos filhos (min/max, média ponderada)."""
+    """Atualiza APENAS o % do pai com base nos filhos (média ponderada).
+    NÃO altera datas baseline — datas são imutáveis após criação para não distorcer o Gantt."""
     children = sb_select("hub_atividades", filters={"parent_id": parent_id, "contrato": contrato}, client_id=client_id)
     if not children:
         return
-
-    starts = [r["inicio_previsto"] for r in children if r.get("inicio_previsto")]
-    ends   = [r["termino_previsto"] for r in children if r.get("termino_previsto")]
-
-    update_data: Dict[str, Any] = {}
-
-    if starts and ends:
-        update_data["inicio_previsto"]  = min(starts)
-        update_data["termino_previsto"] = max(ends)
 
     # Rollup % — weighted average by peso_pct, fallback to simple average
     pesos = [float(c.get("peso_pct") or 0) for c in children]
@@ -150,10 +195,8 @@ def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
         pct_macro = round(sum(p * w for p, w in zip(pcts, pesos)) / sum(pesos), 1)
     else:
         pct_macro = round(sum(pcts) / len(pcts), 1) if pcts else 0.0
-    update_data["conclusao_pct"] = int(min(100, pct_macro))
 
-    if update_data:
-        sb_update("hub_atividades", filters={"id": parent_id}, data=update_data, client_id=client_id)
+    sb_update("hub_atividades", filters={"id": parent_id}, data={"conclusao_pct": int(min(100, pct_macro))}, client_id=client_id)
 
     # Cascade up
     parent_rows = sb_select("hub_atividades", filters={"id": parent_id}, limit=1, client_id=client_id)
@@ -181,9 +224,12 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str
     if not d_inicio or not d_termino:
         return r
 
-    dias_uteis_decorridos = _working_days_between(d_inicio, today)
+    # Se a atividade foi iniciada antes do previsto (antecipação), usar a data real de início
+    # do progresso para não gerar falsos atrasos. A referência é hoje vs prazo planejado.
+    effective_start = min(d_inicio, today) if pct > 0 and today < d_inicio else d_inicio
+    dias_uteis_decorridos = _working_days_between(effective_start, today)
     dia_atual = min(dias_uteis_decorridos, dias_plan)
-    
+
     prod_plan = total_qty / dias_plan if total_qty > 0 and dias_plan > 0 else 0.0
     prod_real = exec_qty / max(1, dias_uteis_decorridos) if exec_qty > 0 else 0.0
     desvio_pct = ((prod_real - prod_plan) / prod_plan * 100) if prod_plan > 0 else 0.0
@@ -210,13 +256,21 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str
             else:
                 desvio_dias = -_working_days_between(fim_prev, d_termino)
 
-    # Tendency Logic
+    # Tendency Logic — atividades antecipadas (iniciadas antes do previsto) são "acima"
     prazo_estourado = desvio_dias > 0
-    if exec_qty == 0: tendencia = "sem_dados"
+    antecipada = today < d_inicio and pct > 0
+    if exec_qty == 0 and not antecipada: tendencia = "sem_dados"
     elif pct >= 100: tendencia = "concluida"
+    elif antecipada: tendencia = "acima"  # iniciou antes — sempre positivo
     elif desvio_pct >= 10.0 and not prazo_estourado: tendencia = "acima"
     elif desvio_pct <= -10.0 or prazo_estourado: tendencia = "abaixo"
     else: tendencia = "dentro"
+
+    # pct_esperado: se hoje ainda está antes do início previsto, esperado = 0 (é adiantamento)
+    if today < d_inicio:
+        pct_esperado_calc = 0.0
+    else:
+        pct_esperado_calc = round(min(100.0, dia_atual / dias_plan * 100), 1) if dias_plan > 0 else 0.0
 
     return {
         **r,
@@ -225,7 +279,8 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str
         "_desvio_dias": desvio_dias,
         "_prod_plan": round(prod_plan, 2),
         "_prod_real": round(prod_real, 2),
-        "_pct_esperado": round(min(100.0, dia_atual / dias_plan * 100), 1) if dias_plan > 0 else 0
+        "_pct_esperado": pct_esperado_calc,
+        "_antecipada": today < d_inicio and pct > 0,  # flag para o frontend
     }
 
 
@@ -302,140 +357,546 @@ def _calculate_risk_score(df_proj: Any, financeiro_df: Any, contrato_info: Dict[
     return {"nota": str(nota), "label": label, "color": color, "criterios": criterios}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MOTOR DE INTELIGÊNCIA — Velocity, Anomalias, Risk Score, Caminho Crítico, Delta
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _calc_velocity(atividade: dict, historico: list) -> dict:
+    """Calcula produtividade real por DIA TRABALHADO (não por dia corrido).
+    Retorna velocity_real, dias_trabalhados, saldo, dias_restantes_projetados, eac_date."""
+    aid = str(atividade.get("id", ""))
+    total_qty = float(atividade.get("total_qty") or 0)
+    exec_qty  = float(atividade.get("exec_qty") or 0)
+
+    # Filtra histórico desta atividade, com produção > 0
+    registros = sorted(
+        [h for h in historico if str(h.get("atividade_id", "")) == aid
+         and float(h.get("producao_dia") or 0) > 0],
+        key=lambda h: str(h.get("data") or "")
+    )
+
+    dias_trabalhados = len(registros)
+    producao_acum    = sum(float(h.get("producao_dia") or 0) for h in registros)
+    velocity_real    = round(producao_acum / dias_trabalhados, 2) if dias_trabalhados > 0 else 0.0
+
+    saldo = max(0.0, total_qty - exec_qty)
+    dias_restantes = round(saldo / velocity_real) if velocity_real > 0 else None
+
+    eac_date = None
+    if dias_restantes is not None:
+        current = date.today()
+        added = 0
+        while added < dias_restantes:
+            current += timedelta(days=1)
+            if current.weekday() < 5:
+                added += 1
+        eac_date = current.isoformat()
+
+    # Aceleração: últimos 3 dias vs todos os outros
+    trend = "estavel"
+    if len(registros) >= 4:
+        recentes = [float(h.get("producao_dia") or 0) for h in registros[-3:]]
+        anteriores = [float(h.get("producao_dia") or 0) for h in registros[:-3]]
+        v_rec = sum(recentes) / len(recentes)
+        v_ant = sum(anteriores) / len(anteriores)
+        if v_ant > 0:
+            delta = (v_rec - v_ant) / v_ant
+            if delta > 0.15:
+                trend = "acelerando"
+            elif delta < -0.15:
+                trend = "desacelerando"
+
+    return {
+        "velocity_real":           velocity_real,
+        "dias_trabalhados":        dias_trabalhados,
+        "saldo":                   saldo,
+        "dias_restantes_proj":     dias_restantes,
+        "eac_date":                eac_date,
+        "trend":                   trend,
+        "producao_planejada_dia":  round(total_qty / max(1, int(atividade.get("dias_planejados") or 1)), 2),
+    }
+
+
+def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> list:
+    """Detecta anomalias factuais nos dados — sem LLM, sem margem para erro.
+    Retorna lista de dicts {tipo, title, body, priority, atividade_id?}."""
+    anomalies = []
+    today = date.today()
+
+    # Índice de efetivo por atividade nos RDOs recentes
+    from backend.integrations.supabase import sb_select as _sb
+
+    # 1. exec_qty > total_qty (produção impossível)
+    for a in atividades:
+        exec_q = float(a.get("exec_qty") or 0)
+        total_q = float(a.get("total_qty") or 0)
+        if total_q > 0 and exec_q > total_q * 1.05:
+            anomalies.append({
+                "tipo": "dados_invalidos",
+                "title": f"Produção acima do total: {a.get('atividade','?')[:40]}",
+                "body": f"exec_qty={exec_q} > total_qty={total_q} {a.get('unidade','')}. Dado inconsistente — revise o cadastro.",
+                "priority": "High",
+                "atividade_id": str(a.get("id", "")),
+            })
+
+    # 2. Atividade crítica sem nenhum movimento por 3+ dias úteis
+    for a in atividades:
+        if not str(a.get("critico", "")).lower() == "sim":
+            continue
+        pct = float(a.get("conclusao_pct") or 0)
+        if pct >= 100:
+            continue
+        last_rdo = str(a.get("last_rdo_date") or "")[:10]
+        ini = str(a.get("inicio_previsto") or "")[:10]
+        if not last_rdo and ini and ini <= today.isoformat():
+            anomalies.append({
+                "tipo": "critica_parada",
+                "title": f"Atividade crítica sem registro há 3+ dias",
+                "body": f"'{a.get('atividade','?')[:45]}' está em {pct}% e não tem RDO registrado. Verificar imediatamente.",
+                "priority": "High",
+                "atividade_id": str(a.get("id", "")),
+            })
+        elif last_rdo:
+            try:
+                d_last = date.fromisoformat(last_rdo)
+                dias_sem_rdo = _working_days_between(d_last, today)
+                if dias_sem_rdo >= 3 and pct < 100:
+                    anomalies.append({
+                        "tipo": "critica_parada",
+                        "title": f"Atividade crítica parada há {dias_sem_rdo} dias úteis",
+                        "body": f"'{a.get('atividade','?')[:45]}' em {pct}%. Último registro: {last_rdo}. Risco de atraso em cascata.",
+                        "priority": "High",
+                        "atividade_id": str(a.get("id", "")),
+                    })
+            except ValueError:
+                pass
+
+    # 3. Dias sem RDO (projeto iniciado e sem registro há 2+ dias úteis)
+    if rdo_recentes:
+        try:
+            ultimo = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
+            gap = _working_days_between(ultimo, today)
+            if gap >= 2:
+                anomalies.append({
+                    "tipo": "sem_rdo",
+                    "title": f"{gap} dias úteis sem RDO registrado",
+                    "body": f"Último RDO em {ultimo.isoformat()}. Sem registros diários, o controle de avanço e a memória de obra ficam comprometidos.",
+                    "priority": "Medium",
+                })
+        except (ValueError, TypeError):
+            pass
+
+    # 4. Interrupções recorrentes no mesmo motivo
+    motivos: dict = {}
+    for r in rdo_recentes:
+        obs = str(r.get("observacoes") or "").lower()
+        for kw in ["acesso", "energia", "chuva", "material", "equipamento", "andaime"]:
+            if kw in obs:
+                motivos[kw] = motivos.get(kw, 0) + 1
+    for kw, cnt in motivos.items():
+        if cnt >= 2:
+            anomalies.append({
+                "tipo": "recorrencia",
+                "title": f"Causa recorrente de interrupção: {kw}",
+                "body": f"Mencionado em {cnt} RDOs recentes. Ação preventiva recomendada para eliminar bloqueio sistêmico.",
+                "priority": "Medium",
+            })
+            break  # 1 anomalia de recorrência é suficiente
+
+    return anomalies
+
+
+def _build_dependency_chain(atividade_id: str, atividades: list, depth: int = 0) -> list:
+    """Monta cadeia de sucessores a partir de dependencia_id. Máximo 5 níveis."""
+    if depth >= 5:
+        return []
+    chain = []
+    for a in atividades:
+        if str(a.get("dependencia_id") or "") == atividade_id:
+            chain.append(a)
+            chain.extend(_build_dependency_chain(str(a["id"]), atividades, depth + 1))
+    return chain
+
+
+def _calc_risk_score(atividade: dict, velocity: dict, today: date) -> float:
+    """Score de risco 0-10 por atividade.
+    Fatores: desvio de progresso (40%), dias até prazo (30%), caminho crítico (20%), trend (10%)."""
+    score = 0.0
+
+    pct_real = float(atividade.get("conclusao_pct") or 0)
+    if pct_real >= 100:
+        return 0.0
+
+    ini_s = str(atividade.get("inicio_previsto") or "")[:10]
+    ter_s = str(atividade.get("termino_previsto") or "")[:10]
+    if not ini_s or not ter_s:
+        return 2.0  # sem datas = risco base
+
+    try:
+        d_ini = date.fromisoformat(ini_s)
+        d_ter = date.fromisoformat(ter_s)
+    except ValueError:
+        return 2.0
+
+    # Fator 1: desvio de progresso vs esperado (40%)
+    total_dias = max((d_ter - d_ini).days, 1)
+    decorridos = max((today - d_ini).days, 0)
+    pct_esp = min(100.0, decorridos / total_dias * 100) if today >= d_ini else 0.0
+    desvio = pct_esp - pct_real  # positivo = atrasado
+    f1 = min(10.0, max(0.0, desvio / 10.0))
+    score += f1 * 0.40
+
+    # Fator 2: urgência de prazo (30%)
+    dias_ate_prazo = (d_ter - today).days
+    if dias_ate_prazo < 0:
+        f2 = 10.0  # já venceu
+    elif dias_ate_prazo <= 2:
+        f2 = 8.0
+    elif dias_ate_prazo <= 5:
+        f2 = 5.0
+    elif dias_ate_prazo <= 10:
+        f2 = 2.0
+    else:
+        f2 = 0.0
+    score += f2 * 0.30
+
+    # Fator 3: caminho crítico (20%)
+    f3 = 8.0 if str(atividade.get("critico", "")).lower() == "sim" else 0.0
+    score += f3 * 0.20
+
+    # Fator 4: trend de produtividade (10%)
+    trend = velocity.get("trend", "estavel")
+    if trend == "desacelerando":
+        f4 = 6.0
+    elif trend == "acelerando":
+        f4 = 0.0
+    else:
+        f4 = 2.0
+    score += f4 * 0.10
+
+    return round(min(10.0, score), 1)
+
+
+def _build_insights_llm(
+    atividades: list,
+    rdo_recentes: list,
+    contrato: str,
+    today: date,
+    historico: list | None = None,
+    insights_anteriores: list | None = None,
+) -> list:
+    """Gera insights via LLM com contexto completo:
+    velocity por dia trabalhado, anomalias, caminho crítico, delta vs anterior."""
+    import json
+
+    historico = historico or []
+    insights_anteriores = insights_anteriores or []
+
+    # ── #1 Velocity Engine ─────────────────────────────────────────────────────
+    velocities: dict = {}
+    for a in atividades:
+        if float(a.get("total_qty") or 0) > 0:
+            velocities[str(a["id"])] = _calc_velocity(a, historico)
+
+    # ── #2 Anomaly Detection ───────────────────────────────────────────────────
+    anomalias = _detect_anomalies(atividades, rdo_recentes, historico)
+
+    # ── #3 Risk Score ──────────────────────────────────────────────────────────
+    for a in atividades:
+        vel = velocities.get(str(a.get("id", "")), {})
+        a["_risk_score"] = _calc_risk_score(a, vel, today)
+
+    # ── #5 Caminho Crítico ─────────────────────────────────────────────────────
+    kpis = _calc_progress_spi(atividades, today)
+    em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
+    atrasadas    = [a for a in atividades if a.get("termino_previsto")
+                    and str(a["termino_previsto"])[:10] < today.isoformat()
+                    and float(a.get("conclusao_pct") or 0) < 100]
+    proximos_7d  = [a for a in atividades if a.get("termino_previsto")
+                    and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7
+                    and float(a.get("conclusao_pct") or 0) < 100]
+    antecipadas  = [a for a in atividades if a.get("inicio_previsto")
+                    and str(a["inicio_previsto"])[:10] > today.isoformat()
+                    and float(a.get("conclusao_pct") or 0) > 0]
+    concluidas   = [a for a in atividades if float(a.get("conclusao_pct") or 0) >= 100]
+
+    # Atividades por risk score (mais críticas primeiro)
+    top_risco = sorted(
+        [a for a in atividades if float(a.get("conclusao_pct") or 0) < 100],
+        key=lambda a: a.get("_risk_score", 0), reverse=True
+    )[:6]
+
+    ativ_ctx = []
+    for a in top_risco:
+        aid = str(a.get("id", ""))
+        vel = velocities.get(aid, {})
+        cadeia = _build_dependency_chain(aid, atividades)
+        cadeia_txt = " → ".join([c.get("atividade", "?")[:25] for c in cadeia[:3]]) if cadeia else ""
+
+        vel_txt = ""
+        if vel.get("velocity_real", 0) > 0:
+            vel_txt = (
+                f" | vel={vel['velocity_real']}/dia"
+                f"({vel['trend']})"
+                f" | EAC={vel.get('eac_date','?')}"
+                f" | saldo={vel.get('saldo',0):.0f}"
+            )
+
+        ativ_ctx.append(
+            f"  - [RISCO={a.get('_risk_score',0)}] {a.get('atividade','?')[:45]}: "
+            f"{a.get('conclusao_pct',0)}% | prazo={str(a.get('termino_previsto','?'))[:10]}"
+            f"{vel_txt}"
+            + (f" | BLOQUEIA: {cadeia_txt}" if cadeia_txt else "")
+        )
+
+    # RDO context rico
+    rdo_ctx = []
+    for r in rdo_recentes[:5]:
+        rdo_ctx.append(
+            f"  - {str(r.get('data',''))[:10]}: clima={r.get('condicao_climatica','?')},"
+            f" equipe={r.get('equipe_alocada','?')}p,"
+            f" chuva={r.get('houve_chuva',False)},"
+            f" interr={r.get('houve_interrupcao',False)},"
+            f" acid={r.get('houve_acidente',False)},"
+            f" obs='{str(r.get('observacoes',''))[:80]}'"
+        )
+
+    # Anomalias detectadas
+    anom_ctx = [f"  - [ANOMALIA/{a['tipo'].upper()}] {a['title']}: {a['body']}" for a in anomalias]
+
+    # ── #4 Delta vs insights anteriores ───────────────────────────────────────
+    delta_ctx = ""
+    if insights_anteriores:
+        titulos_ant = [i.get("title", "") for i in insights_anteriores]
+        delta_ctx = f"\nINSIGHTS ANTERIORES (para gerar continuidade e delta):\n"
+        delta_ctx += "\n".join(f"  - {t}" for t in titulos_ant)
+        delta_ctx += "\nGere insights que EVOLUEM em relação aos anteriores — mostre o que mudou.\n"
+
+    # Dia livre próximo
+    dia_livre = ""
+    if rdo_recentes:
+        try:
+            d_prox = date.fromisoformat(str(rdo_recentes[0].get("data",""))[:10]) + timedelta(days=1)
+            atv_amanha = [a for a in atividades
+                if str(a.get("inicio_previsto",""))[:10] <= d_prox.isoformat() <= str(a.get("termino_previsto",""))[:10]
+                and float(a.get("conclusao_pct") or 0) < 100]
+            if not atv_amanha:
+                dia_livre = f"\nATENÇÃO: {d_prox.isoformat()} não tem atividades programadas — oportunidade de antecipação.\n"
+        except Exception:
+            pass
+
+    context = f"""CONTRATO: {contrato} | DATA: {today.isoformat()}
+
+PROGRESSO FÍSICO:
+  Realizado={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}% | SPI={kpis['spi']}
+  Total={len(atividades)} ativs | Concluídas={len(concluidas)} | Em andamento={len(em_andamento)} | Atrasadas={len(atrasadas)} | Vencendo 7d={len(proximos_7d)}
+
+ATIVIDADES POR RISCO (score 0-10, velocity real, caminho crítico):
+{chr(10).join(ativ_ctx) if ativ_ctx else '  Nenhuma atividade pendente'}
+
+ANOMALIAS DETECTADAS AUTOMATICAMENTE:
+{chr(10).join(anom_ctx) if anom_ctx else '  Nenhuma anomalia detectada'}
+
+RDOs RECENTES:
+{chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
+{dia_livre}{delta_ctx}"""
+
+    system_prompt = """Você é o Agente de Inteligência Artificial da plataforma Bomtempo — especialista em gestão de obras de infraestrutura.
+
+Analise os dados fornecidos e gere EXATAMENTE 4 insights em JSON. Cada insight:
+- "title": título direto, max 55 chars
+- "body": análise COM NÚMEROS REAIS — cite atividades, datas, quantidades, velocity, EAC. Max 180 chars.
+- "priority": "High" | "Medium" | "Low"
+- "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta"
+
+HIERARQUIA DE PRIORIZAÇÃO:
+1. Anomalias detectadas (dados impossíveis, atividades críticas paradas)
+2. Velocity abaixo do necessário + caminho crítico bloqueado
+3. EAC mostra atraso real vs prazo contratual
+4. Oportunidade de antecipação (dias livres, ritmo acima)
+5. Padrão de interrupções → ação preventiva
+
+DIRETRIZES DE QUALIDADE:
+- Se velocity_real existe: calcule dias necessários vs disponíveis e informe o gap
+- Se cadeia de bloqueio existe: mencione quais atividades são impactadas
+- Se há delta vs insights anteriores: diga o que MUDOU (piorou/melhorou)
+- Seja cirúrgico: "Perfuração: 80/dia, precisa 728/dia, gap de 648 furos/dia" é melhor que "produção insuficiente"
+- Nunca invente dados. Se não tiver info, diga explicitamente.
+
+Responda SOMENTE com JSON array:
+[{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
+
+    try:
+        from backend.integrations.ai import query as ai_query
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": context},
+        ]
+        response_text = ai_query(messages, max_tokens=1000, temperature=0.3)
+        if not response_text:
+            raise ValueError("empty response")
+
+        start = response_text.find("[")
+        end   = response_text.rfind("]") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(response_text[start:end])
+            valid = [
+                {
+                    "title":    i.get("title", "Insight"),
+                    "body":     i.get("body", ""),
+                    "priority": i.get("priority", "Medium"),
+                    "tipo":     i.get("tipo", "risco"),
+                }
+                for i in parsed if isinstance(i, dict)
+            ]
+            if valid:
+                return valid
+
+    except Exception as e:
+        logger.warning(f"LLM insights failed for {contrato}: {e}")
+
+    return _rule_based_insights(atividades, rdo_recentes, today, anomalias, velocities)
+
+
+def _rule_based_insights(
+    atividades: list,
+    rdo_recentes: list,
+    today: date,
+    anomalias: list | None = None,
+    velocities: dict | None = None,
+) -> list:
+    """Fallback rule-based enriquecido com velocity e anomalias."""
+    kpis     = _calc_progress_spi(atividades, today)
+    anomalias  = anomalias or []
+    velocities = velocities or {}
+    insights: list = []
+
+    # Anomalias primeiro — são factuais
+    for a in anomalias[:2]:
+        insights.append({"title": a["title"], "body": a["body"], "priority": a["priority"], "tipo": "anomalia"})
+
+    atrasadas = [a for a in atividades
+                 if a.get("termino_previsto")
+                 and str(a["termino_previsto"])[:10] < today.isoformat()
+                 and float(a.get("conclusao_pct") or 0) < 100]
+    proximos_7d = []
+    antecipadas = []
+    for a in atividades:
+        try:
+            ter = str(a.get("termino_previsto", ""))[:10]
+            ini = str(a.get("inicio_previsto", ""))[:10]
+            pct = float(a.get("conclusao_pct") or 0)
+            if ter and 0 <= (date.fromisoformat(ter) - today).days <= 7 and pct < 80:
+                proximos_7d.append(a)
+            if ini and ini > today.isoformat() and pct > 0:
+                antecipadas.append(a)
+        except Exception:
+            pass
+
+    if atrasadas and len(insights) < 4:
+        critica = next((a for a in atrasadas if str(a.get("critico","")).lower() == "sim"), atrasadas[0])
+        vel = velocities.get(str(critica.get("id","")), {})
+        eac_txt = f" EAC={vel['eac_date']}." if vel.get("eac_date") else ""
+        insights.append({
+            "title": f"{len(atrasadas)} atividade(s) com prazo vencido",
+            "body": f"'{critica.get('atividade','?')[:40]}' em {critica.get('conclusao_pct',0)}% após prazo.{eac_txt} SPI={kpis['spi']:.2f}.",
+            "priority": "High", "tipo": "risco",
+        })
+
+    # Velocity insight para atividades com quantidade e velocity calculada
+    vel_insights = []
+    for a in atividades:
+        vel = velocities.get(str(a.get("id","")), {})
+        if not vel or vel.get("velocity_real", 0) == 0:
+            continue
+        plan = vel.get("producao_planejada_dia", 0)
+        real = vel["velocity_real"]
+        if plan > 0 and real < plan * 0.5:  # produzindo menos de 50% do planejado
+            gap = round(plan - real, 1)
+            vel_insights.append({
+                "title": f"Ritmo insuficiente: {a.get('atividade','?')[:35]}",
+                "body": f"Produz {real}/dia vs {plan}/dia planejado (gap={gap}/dia). Saldo: {vel.get('saldo',0):.0f} {a.get('unidade','')}. EAC: {vel.get('eac_date','?')}.",
+                "priority": "High", "tipo": "producao",
+            })
+    if vel_insights and len(insights) < 4:
+        insights.append(vel_insights[0])
+
+    if kpis["spi"] < 0.85 and len(insights) < 4:
+        insights.append({
+            "title": "Produtividade abaixo do planejado",
+            "body": f"SPI={kpis['spi']:.2f}. Realizado {kpis['progress_pct']}% vs esperado {kpis['prazo_decorrido_pct']}%. Revise alocação.",
+            "priority": "High" if kpis["spi"] < 0.70 else "Medium", "tipo": "risco",
+        })
+    elif kpis["spi"] > 1.10 and len(insights) < 4:
+        insights.append({
+            "title": "Projeto adiantado — oportunidade",
+            "body": f"SPI={kpis['spi']:.2f}. Antecipe marcos ou realoque equipe para frentes críticas.",
+            "priority": "Low", "tipo": "oportunidade",
+        })
+
+    if proximos_7d and len(insights) < 4:
+        nomes = ", ".join([f"'{a.get('atividade','?')[:20]}'" for a in proximos_7d[:2]])
+        insights.append({
+            "title": f"{len(proximos_7d)} atividade(s) vencendo em 7 dias",
+            "body": f"{nomes} com menos de 80% de conclusão. Ação imediata.",
+            "priority": "Medium", "tipo": "risco",
+        })
+
+    if rdo_recentes and len(insights) < 4:
+        chuva_d = sum(1 for r in rdo_recentes if r.get("houve_chuva") or str(r.get("condicao_climatica","")).lower() in ("chuvoso","tempestade"))
+        inter_d = sum(1 for r in rdo_recentes if r.get("houve_interrupcao"))
+        if chuva_d >= 2 or inter_d >= 2:
+            insights.append({
+                "title": "Impacto recorrente de interrupções",
+                "body": f"{chuva_d} dia(s) chuva, {inter_d} interrupção(ões) em {len(rdo_recentes)} RDOs. Buffer de prazo recomendado.",
+                "priority": "Medium", "tipo": "clima",
+            })
+
+    if not insights:
+        insights.append({
+            "title": "Operação dentro do planejado",
+            "body": f"SPI={kpis['spi']:.2f}. Desvio={kpis['desvio_pct']:+.1f}%. Ritmo nominal.",
+            "priority": "Low", "tipo": "oportunidade",
+        })
+
+    return insights[:4]
+
+
+def _persist_insights(contrato: str, insights: list, client_id: str | None, last_rdo_id: str = "") -> None:
+    """Upsert em agente_insights."""
+    payload = {
+        "contrato":    contrato,
+        "insights":    insights,
+        "last_rdo_id": last_rdo_id,
+        "updated_at":  datetime.utcnow().isoformat(),
+        "client_id":   client_id,
+    }
+    existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+    if existing:
+        sb_update("agente_insights", filters={"id": existing[0]["id"]}, data=payload)
+    else:
+        sb_insert("agente_insights", payload)
+
+
 @router.get("/agente/insights")
 async def get_agente_insights(
     contrato: str = Query(...),
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Análise real do cronograma: SPI, EAC, caminho crítico, risco meteorológico."""
-    atividades = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    rdo_recentes = sb_select("rdo_master", filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=7) or []
+    """Retorna insights persistidos. Se não houver, gera ao vivo."""
+    existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+    if existing and existing[0].get("insights"):
+        raw = existing[0]["insights"]
+        insights = raw if isinstance(raw, list) else []
+        if insights:
+            kpis = _calc_progress_spi(
+                sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or [],
+                date.today()
+            )
+            return {"insights": insights, "spi": kpis["spi"], "pct_geral": kpis["progress_pct"]}
 
-    insights = []
-    today = date.today()
-
-    # ── 1. Calcular SPI real (Schedule Performance Index) ──────────────────────
-    # SPI = % realizado / % planejado (baseado em dias decorridos vs total planejado)
-    em_andamento = [
-        a for a in atividades
-        if a.get("inicio_previsto") and a.get("termino_previsto") and float(a.get("conclusao_pct") or 0) < 100
-    ]
-    spi_values = []
-    atrasadas_criticas = []
-    quase_vencendo = []
-
-    for a in em_andamento:
-        try:
-            ini = date.fromisoformat(str(a["inicio_previsto"])[:10])
-            ter = date.fromisoformat(str(a["termino_previsto"])[:10])
-            total_dias = max((ter - ini).days, 1)
-            decorridos = max((today - ini).days, 0)
-            pct_planejado = min(decorridos / total_dias, 1.0) * 100
-            pct_real = float(a.get("conclusao_pct") or 0)
-
-            if pct_planejado > 5:  # só calcula se passou da fase inicial
-                spi = pct_real / pct_planejado if pct_planejado > 0 else 1.0
-                spi_values.append(spi)
-
-            # Atraso em atividade crítica
-            if ter < today and float(a.get("conclusao_pct") or 0) < 100:
-                dias_atraso = (today - ter).days
-                if str(a.get("critico", "")).lower() == "sim":
-                    atrasadas_criticas.append((a, dias_atraso))
-
-            # Termina nos próximos 7 dias e está abaixo de 80%
-            if 0 <= (ter - today).days <= 7 and float(a.get("conclusao_pct") or 0) < 80:
-                quase_vencendo.append(a)
-
-        except (ValueError, TypeError):
-            continue
-
-    spi_medio = sum(spi_values) / len(spi_values) if spi_values else 1.0
-
-    # ── 2. Caminho crítico desviando ──────────────────────────────────────────
-    if atrasadas_criticas:
-        atrasadas_criticas.sort(key=lambda x: x[1], reverse=True)
-        nomes = ", ".join([f'"{a["atividade"][:20]}" ({d}d)' for a, d in atrasadas_criticas[:3]])
-        insights.append({
-            "title": "⚠️ Caminho Crítico em Risco",
-            "body": f"{len(atrasadas_criticas)} atividade(s) crítica(s) atrasada(s): {nomes}. "
-                    f"SPI médio do contrato: {spi_medio:.2f}. Recomendo reforço de equipe e revisão de sequência.",
-            "priority": "High"
-        })
-
-    # ── 3. SPI global abaixo do limiar ────────────────────────────────────────
-    if spi_medio < 0.85 and not atrasadas_criticas:
-        insights.append({
-            "title": "📉 Produtividade Abaixo do Planejado",
-            "body": f"SPI médio do contrato é {spi_medio:.2f} (abaixo de 0.85). "
-                    f"O ritmo atual sugere que o término real pode ser {int((1 - spi_medio) * 100)}% além do prazo baseline. "
-                    f"Revise alocação de recursos.",
-            "priority": "High" if spi_medio < 0.70 else "Medium"
-        })
-    elif spi_medio > 1.10:
-        insights.append({
-            "title": "✅ Projeto Adiantado",
-            "body": f"SPI = {spi_medio:.2f}. O ritmo atual está acima do planejado. "
-                    f"Oportunidade para antecipar marcos ou realocar equipe para frentes críticas.",
-            "priority": "Low"
-        })
-
-    # ── 4. Atividades quase vencendo com baixo progresso ─────────────────────
-    if quase_vencendo:
-        nomes_qv = ", ".join([f'"{a["atividade"][:20]}"' for a in quase_vencendo[:3]])
-        insights.append({
-            "title": "🔔 Prazo Crítico nos Próximos 7 Dias",
-            "body": f"{len(quase_vencendo)} atividade(s) vencem em até 7 dias e têm menos de 80% de avanço: {nomes_qv}. "
-                    f"Ação imediata necessária.",
-            "priority": "Medium"
-        })
-
-    # ── 5. Risco meteorológico baseado em RDOs recentes ───────────────────────
-    if rdo_recentes:
-        # condicao_climatica é o campo real
-        chuva_dias = sum(1 for r in rdo_recentes if r.get("houve_chuva")
-                         or "chuva" in str(r.get("observacoes", "")).lower()
-                         or str(r.get("condicao_climatica", "")).lower() in ("chuvoso", "chuva", "tempestade"))
-        interrupcoes = sum(1 for r in rdo_recentes if r.get("houve_interrupcao"))
-        if chuva_dias >= 2 or interrupcoes >= 2:
-            insights.append({
-                "title": "🌧️ Impacto Meteorológico Identificado",
-                "body": f"{chuva_dias} dia(s) com chuva e {interrupcoes} interrupção(ões) nos últimos {len(rdo_recentes)} RDOs. "
-                        f"Considere buffer de prazo nas atividades externas e notifique o contratante.",
-                "priority": "Medium"
-            })
-
-    # ── 6. Progresso geral ────────────────────────────────────────────────────
-    total = len(atividades)
-    concluidas = sum(1 for a in atividades if float(a.get("conclusao_pct") or 0) >= 100)
-    pct_geral = round(concluidas / total * 100, 1) if total else 0
-
-    if not insights:
-        insights.append({
-            "title": "✅ Estabilidade Operacional",
-            "body": f"SPI = {spi_medio:.2f}. {concluidas}/{total} atividades concluídas ({pct_geral}%). "
-                    f"Ritmo nominal. Continue monitorando as frentes de infraestrutura e caminho crítico.",
-            "priority": "Low"
-        })
-
-    # Persiste no agente_insights para uso em visao-geral e RDO view
-    try:
-        existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
-        payload_ins = {
-            "contrato":   contrato,
-            "insights":   insights,
-            "updated_at": datetime.utcnow().isoformat(),
-            "client_id":  client_id,
-        }
-        if existing:
-            sb_update("agente_insights", filters={"id": existing[0]["id"]}, data=payload_ins)
-        else:
-            sb_insert("agente_insights", payload_ins)
-    except Exception:
-        pass
-
-    return {"insights": insights, "spi": round(spi_medio, 2), "pct_geral": pct_geral}
+    return await trigger_insights_generation(body={"contrato": contrato}, _user=_user, client_id=client_id)
 
 
 @router.post("/agente/insights/generate")
@@ -444,14 +905,150 @@ async def trigger_insights_generation(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Gera insights ao vivo para o contrato e persiste. Retorna inline (sem esperar Celery)."""
+    """Gera insights via LLM (velocity + anomalias + caminho crítico + delta), persiste e retorna."""
     contrato = body.get("contrato", "")
     if not contrato:
         return {"ok": False, "error": "contrato obrigatório"}
 
-    # Reutiliza a lógica do GET — gera inline e persiste
-    result = await get_agente_insights(contrato=contrato, _user=_user, client_id=client_id)
-    return {"ok": True, **result}
+    today      = date.today()
+    atividades = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    rdos       = sb_select("rdo_master",     filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=7) or []
+    historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=300) or []
+
+    # Carrega insights anteriores para o delta
+    existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+    insights_ant = (existing[0].get("insights") or []) if existing else []
+
+    insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant)
+    kpis     = _calc_progress_spi(atividades, today)
+
+    try:
+        _persist_insights(contrato, insights, client_id)
+    except Exception:
+        pass
+
+    return {"ok": True, "insights": insights, "spi": kpis["spi"], "pct_geral": kpis["progress_pct"]}
+
+
+# ── Agente: Chat Contextual sobre a Obra ──────────────────────────────────────
+
+@router.post("/agente/chat")
+async def agente_chat(
+    body: Dict[str, Any] = Body(...),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Chat com o Agente IA sobre o cronograma da obra.
+    Mantém sessão por contrato. Contexto completo injetado no system prompt."""
+    import json as _json
+
+    contrato   = body.get("contrato", "")
+    mensagem   = body.get("mensagem", "").strip()
+    session_id = body.get("session_id")  # None = nova sessão
+
+    if not contrato or not mensagem:
+        return {"ok": False, "error": "contrato e mensagem obrigatórios"}
+
+    today      = date.today()
+    atividades = sb_select("hub_atividades",          filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    rdos       = sb_select("rdo_master",              filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=5) or []
+    historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=200) or []
+    kpis       = _calc_progress_spi(atividades, today)
+
+    # Velocity para todas as atividades com qty
+    velocities = {}
+    for a in atividades:
+        if float(a.get("total_qty") or 0) > 0:
+            velocities[str(a["id"])] = _calc_velocity(a, historico)
+
+    # Anomalias
+    anomalias = _detect_anomalies(atividades, rdos, historico)
+
+    # Contexto da obra para o system prompt
+    atrasadas   = [a for a in atividades if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < today.isoformat() and float(a.get("conclusao_pct") or 0) < 100]
+    proximos_7d = [a for a in atividades if a.get("termino_previsto") and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7 and float(a.get("conclusao_pct") or 0) < 100]
+
+    ativ_resumo = []
+    for a in sorted(atividades, key=lambda x: float(x.get("_risk_score") or 0), reverse=True)[:15]:
+        vel = velocities.get(str(a.get("id","")), {})
+        vel_txt = f", vel={vel['velocity_real']}/dia, EAC={vel.get('eac_date','?')}" if vel.get("velocity_real",0) > 0 else ""
+        ativ_resumo.append(
+            f"  {a.get('atividade','?')[:45]}: {a.get('conclusao_pct',0)}%"
+            f", prazo={str(a.get('termino_previsto','?'))[:10]}"
+            f", exec={a.get('exec_qty',0)}/{a.get('total_qty',0)} {a.get('unidade','')}"
+            f"{vel_txt}"
+        )
+
+    system_ctx = f"""Você é o Agente de IA da obra {contrato} na plataforma Bomtempo.
+Responda perguntas do gestor com base nos dados reais abaixo. Seja direto, cite números reais.
+
+ESTADO DA OBRA (hoje: {today.isoformat()}):
+  SPI={kpis['spi']} | Progresso={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}%
+  Atrasadas={len(atrasadas)} | Vencendo 7d={len(proximos_7d)}
+
+ATIVIDADES (top 15 por risco):
+{chr(10).join(ativ_resumo)}
+
+ANOMALIAS: {'; '.join(a['title'] for a in anomalias) if anomalias else 'Nenhuma'}
+
+RDOs RECENTES: {'; '.join(f"{str(r.get('data',''))[:10]}(equipe={r.get('equipe_alocada','?')}p)" for r in rdos[:3])}
+
+Quando te perguntarem "se adicionar X pessoas", calcule: saldo / (velocity_atual * (1 + X/equipe_atual)) = dias_necessários.
+Quando te perguntarem "o que antecipar", liste atividades com inicio_previsto > hoje que têm predecessores concluídos."""
+
+    # Gerencia sessão
+    if not session_id:
+        sess = sb_insert("chat_sessions", {
+            "title":     f"Obra {contrato} — {today.isoformat()}",
+            "username":  str(user.get("email") or user.get("login") or "gestor"),
+            "client_id": client_id,
+            "metadata":  {"contrato": contrato},
+        })
+        session_id = sess["id"] if sess else None
+
+    # Carrega histórico da sessão (últimas 10 trocas)
+    historico_chat: list = []
+    if session_id:
+        msgs = sb_select("chat_messages", filters={"session_id": session_id}, limit=20) or []
+        msgs_sorted = sorted(msgs, key=lambda m: str(m.get("created_at") or ""))
+        for m in msgs_sorted[-20:]:
+            if m.get("role") in ("user", "assistant"):
+                historico_chat.append({"role": m["role"], "content": m.get("content", "")})
+
+    # Monta mensagens para o LLM
+    messages_llm = [{"role": "system", "content": system_ctx}]
+    messages_llm.extend(historico_chat)
+    messages_llm.append({"role": "user", "content": mensagem})
+
+    # Persiste mensagem do usuário
+    if session_id:
+        sb_insert("chat_messages", {
+            "session_id": session_id,
+            "role":       "user",
+            "content":    mensagem,
+            "client_id":  client_id,
+        })
+
+    try:
+        from backend.integrations.ai import query as ai_query
+        resposta = ai_query(messages_llm, max_tokens=600, temperature=0.4)
+    except Exception as e:
+        resposta = f"Erro ao consultar o agente: {e}"
+
+    # Persiste resposta
+    if session_id:
+        sb_insert("chat_messages", {
+            "session_id": session_id,
+            "role":       "assistant",
+            "content":    resposta,
+            "client_id":  client_id,
+        })
+
+    return {
+        "ok":        True,
+        "resposta":  resposta,
+        "session_id": session_id,
+    }
 
 
 # ── Aba: Visão Geral ──────────────────────────────────────────────────────────
@@ -484,75 +1081,21 @@ async def get_visao_geral(
                 elif str(v) in ("NaT", "nan", "None"):
                     contrato_info[k] = None
 
-    # Progresso físico
-    progress_pct = 0.0
-    total_ativ = 0
-    ativ_concluidas = 0
-    criticas_pendentes = 0
-
-    if not projetos_df.empty and "contrato" in projetos_df.columns:
-        df_c = projetos_df[projetos_df["contrato"] == contrato]
-        total_ativ = len(df_c)
-        if "conclusao_pct" in df_c.columns:
-            pct = pd.to_numeric(df_c["conclusao_pct"], errors="coerce").fillna(0)
-            ativ_concluidas = int((pct >= 100).sum())
-            if "peso_pct" in df_c.columns:
-                peso = pd.to_numeric(df_c["peso_pct"], errors="coerce").fillna(1)
-                total_peso = peso.sum()
-                progress_pct = float((pct * peso).sum() / total_peso) if total_peso > 0 else 0.0
-            else:
-                progress_pct = float(pct.mean()) if len(pct) > 0 else 0.0
-        if "critico" in df_c.columns:
-            critico_mask = df_c["critico"].astype(str).str.lower().isin(["sim", "1", "true"])
-            if "conclusao_pct" in df_c.columns:
-                pct2 = pd.to_numeric(df_c["conclusao_pct"], errors="coerce").fillna(0)
-                criticas_pendentes = int((critico_mask & (pct2 < 100)).sum())
-
-    # SPI + Desvio — calculado por atividade (não por datas do contrato)
-    # pct_esperado por atividade = fração do período já decorrido * 100
-    # weighted pelo peso_pct de cada atividade
-    spi = 0.0
-    prazo_decorrido_pct = 0.0  # = % esperado ponderado das atividades em andamento
     today = date.today()
-    if not projetos_df.empty and "contrato" in projetos_df.columns:
-        df_c2 = projetos_df[projetos_df["contrato"] == contrato].copy()
-        if not df_c2.empty:
-            peso_total = 0.0
-            pct_esp_pond = 0.0
-            pct_real_pond = 0.0
-            for _, row in df_c2.iterrows():
-                ini_s = str(row.get("inicio_previsto") or "")[:10]
-                ter_s = str(row.get("termino_previsto") or "")[:10]
-                if not ini_s or not ter_s:
-                    continue
-                try:
-                    d_ini = date.fromisoformat(ini_s)
-                    d_ter = date.fromisoformat(ter_s)
-                except ValueError:
-                    continue
-                # Atividade ainda não começou: pct esperado = 0
-                if today < d_ini:
-                    pct_esp = 0.0
-                # Atividade já encerrou: pct esperado = 100
-                elif today >= d_ter:
-                    pct_esp = 100.0
-                else:
-                    # Fração linear de dias corridos (hoje exclusive — hoje não encerrou)
-                    total_dias = max((d_ter - d_ini).days, 1)
-                    decorridos = (today - d_ini).days  # hoje exclusive
-                    pct_esp = min(100.0, decorridos / total_dias * 100)
-                peso = float(row.get("peso_pct") or 1)
-                pct_real = float(row.get("conclusao_pct") or 0)
-                peso_total += peso
-                pct_esp_pond += pct_esp * peso
-                pct_real_pond += pct_real * peso
-            if peso_total > 0:
-                prazo_decorrido_pct = round(pct_esp_pond / peso_total, 1)
-                progress_pct_pond = round(pct_real_pond / peso_total, 1)
-                # Recalcula progress_pct com o mesmo peso usado no esperado
-                progress_pct = progress_pct_pond
-                if prazo_decorrido_pct > 0:
-                    spi = round(progress_pct / prazo_decorrido_pct, 2)
+
+    # Progresso + SPI — usando atividades-folha para evitar dupla contagem
+    ativ_para_calc = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    kpis = _calc_progress_spi(ativ_para_calc, today)
+    progress_pct = kpis["progress_pct"]
+    prazo_decorrido_pct = kpis["prazo_decorrido_pct"]
+    spi = kpis["spi"]
+
+    total_ativ = len(ativ_para_calc)
+    ativ_concluidas = sum(1 for a in ativ_para_calc if float(a.get("conclusao_pct") or 0) >= 100)
+    criticas_pendentes = sum(
+        1 for a in ativ_para_calc
+        if str(a.get("critico", "")).lower() == "sim" and float(a.get("conclusao_pct") or 0) < 100
+    )
 
     # Budget
     budget_planejado = 0.0
@@ -570,8 +1113,8 @@ async def get_visao_geral(
         rdo_filters2["client_id"] = client_id
     rdos = sb_select("rdo_master", filters=rdo_filters2, order="data.desc", limit=7) or []
 
-    # Desvio em % (realizado - planejado baseado em prazo decorrido)
-    desvio_pct = round(progress_pct - prazo_decorrido_pct, 1)
+    # Desvio em % (realizado - planejado) — já calculado em kpis
+    desvio_pct = kpis["desvio_pct"]
 
     # Telemetria: clima e temperatura do RDO mais recente
     # condicao_climatica é o campo real na tabela rdo_master
@@ -587,63 +1130,20 @@ async def get_visao_geral(
             except (ValueError, TypeError):
                 pass
 
-    # Insights: preferência para cache do agente_insights (gerado no submit do RDO)
+    # Insights: usa cache persistido (gerado no submit do RDO ou via botão)
+    # Fallback: rule-based rápido para primeira carga
     insight_rows = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
-    persisted_insights: list = []
+    final_insights: list = []
     if insight_rows:
         raw = insight_rows[0].get("insights") or []
-        if isinstance(raw, list):
-            persisted_insights = raw
+        if isinstance(raw, list) and raw:
+            final_insights = raw
+    if not final_insights:
+        final_insights = _rule_based_insights(ativ_para_calc, rdos, today)
 
-    # Insights da IA para o contrato (geração ao vivo + enriquecimento do cache)
-    ativ_para_insight = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=200) or []
-    insights_data: list = []
-    today_d = date.today()
-    spi_vals: list = []
-    atrasadas_crit: list = []
-    quase_vencem: list = []
-    for a in ativ_para_insight:
-        try:
-            ini = date.fromisoformat(str(a.get("inicio_previsto", ""))[:10])
-            ter = date.fromisoformat(str(a.get("termino_previsto", ""))[:10])
-            total_d = max((ter - ini).days, 1)
-            dec_d = max((today_d - ini).days, 0)
-            pct_plan = min(dec_d / total_d, 1.0) * 100
-            pct_real = float(a.get("conclusao_pct") or 0)
-            if pct_plan > 5:
-                spi_vals.append(pct_real / pct_plan if pct_plan > 0 else 1.0)
-            if ter < today_d and pct_real < 100 and str(a.get("critico", "")).lower() == "sim":
-                atrasadas_crit.append((a, (today_d - ter).days))
-            if 0 <= (ter - today_d).days <= 7 and pct_real < 80:
-                quase_vencem.append(a)
-        except Exception:
-            continue
-    spi_m = sum(spi_vals) / len(spi_vals) if spi_vals else 1.0
-    if atrasadas_crit:
-        atrasadas_crit.sort(key=lambda x: x[1], reverse=True)
-        nomes = ", ".join([f'"{a["atividade"][:18]}" ({d}d)' for a, d in atrasadas_crit[:3]])
-        insights_data.append({"title": "⚠️ Caminho Crítico em Risco", "body": f"{len(atrasadas_crit)} atividade(s) crítica(s) atrasada(s): {nomes}. SPI={spi_m:.2f}. Reforce equipe.", "priority": "High"})
-    if spi_m < 0.85 and not atrasadas_crit:
-        insights_data.append({"title": "📉 Produtividade Abaixo do Planejado", "body": f"SPI={spi_m:.2f}. Ritmo {int((1-spi_m)*100)}% abaixo do baseline. Revise alocação.", "priority": "High" if spi_m < 0.70 else "Medium"})
-    elif spi_m > 1.10:
-        insights_data.append({"title": "✅ Projeto Adiantado", "body": f"SPI={spi_m:.2f}. Ritmo acima do planejado. Oportunidade de adiantar marcos.", "priority": "Low"})
-    if quase_vencem:
-        nomes_qv = ", ".join([f'"{a["atividade"][:18]}"' for a in quase_vencem[:3]])
-        insights_data.append({"title": "🔔 Prazos Críticos (7 dias)", "body": f"{len(quase_vencem)} atividade(s) vencem em até 7 dias com menos de 80%: {nomes_qv}.", "priority": "Medium"})
-    # condicao_climatica é o campo real na tabela rdo_master
-    chuva_d = sum(1 for r in rdos if r.get("houve_chuva") or "chuva" in str(r.get("observacoes", "")).lower()
-                  or str(r.get("condicao_climatica", "")).lower() in ("chuvoso", "chuva", "tempestade"))
-    interrupcoes_d = sum(1 for r in rdos if r.get("houve_interrupcao"))
-    if chuva_d >= 2 or interrupcoes_d >= 2:
-        insights_data.append({"title": "🌧️ Impacto Meteorológico", "body": f"{chuva_d} dia(s) com chuva, {interrupcoes_d} interrupção(ões) nos últimos {len(rdos)} RDOs. Considere buffer de prazo.", "priority": "Medium"})
-    if not insights_data:
-        insights_data.append({"title": "✅ Estabilidade Operacional", "body": f"SPI={spi_m:.2f}. Ritmo nominal. {ativ_concluidas}/{total_ativ} atividades concluídas.", "priority": "Low"})
-
-    # Usa cache se existir; senão usa ao vivo
-    final_insights = persisted_insights if persisted_insights else insights_data
-
-    # Nota de risco simples (0-10) baseada em atrasadas + SPI
-    risco_nota = round(min(10, max(0, (1 - spi_m) * 5 + len(atrasadas_crit) * 1.5)), 1)
+    # Nota de risco baseada em SPI e atividades atrasadas
+    atrasadas_count = sum(1 for a in ativ_para_calc if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < today.isoformat() and float(a.get("conclusao_pct") or 0) < 100)
+    risco_nota = round(min(10, max(0, (1 - kpis["spi"]) * 5 + atrasadas_count * 1.5)), 1)
     if risco_nota >= 7:
         risco_label, risco_color = "CRÍTICO", "#EF4444"
     elif risco_nota >= 4:
@@ -700,11 +1200,15 @@ async def get_cronograma(
 
     rows = sb_select("hub_atividades", filters=filters, limit=1000) or []
 
+    # Historico de produção para velocity e risk score
+    hist_rows = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    today_d = date.today()
+
     # Map to list and apply forecast
     atividades = []
     for r in rows:
         # Apply parity forecast
-        f = _compute_forecast(r, today=date.today())
+        f = _compute_forecast(r, today=today_d)
         
         # Format for display
         f["inicio_br"] = _iso_to_br(str(r.get("inicio_previsto", ""))[:10])
@@ -719,12 +1223,31 @@ async def get_cronograma(
         if pct >= 100: st = "concluida"
         elif ini_s:
             try:
-                if date.fromisoformat(ini_s) <= date.today():
-                    st = "em_andamento"
-                    if ter_s and date.fromisoformat(ter_s) < date.today() and pct < 100:
+                today_d = date.today()
+                ini_d = date.fromisoformat(ini_s)
+                ter_d = date.fromisoformat(ter_s) if ter_s else None
+                if pct > 0:
+                    st = "em_execucao"
+                    if ter_d and ter_d < today_d and pct < 100:
+                        if ini_d <= today_d:
+                            st = "atrasada"
+                elif ini_d <= today_d:
+                    st = "em_execucao"
+                    if ter_d and ter_d < today_d:
                         st = "atrasada"
             except: pass
         f["status"] = st
+
+        # Risk score e velocity por atividade
+        vel = {}
+        if float(r.get("total_qty") or 0) > 0:
+            vel = _calc_velocity(r, hist_rows)
+        f["_risk_score"]    = _calc_risk_score(r, vel, today_d)
+        f["_velocity"]      = vel.get("velocity_real", 0)
+        f["_eac_date"]      = vel.get("eac_date")
+        f["_trend"]         = vel.get("trend", "estavel")
+        f["_dias_trabalhados"] = vel.get("dias_trabalhados", 0)
+
         atividades.append(f)
 
     # Gantt rows — sort by fase code then start date, always macro before children
@@ -786,6 +1309,7 @@ async def update_atividade(
     if not data:
         return {"ok": False, "error": "Nenhum campo válido para atualizar"}
 
+    _normalize_atividade_payload(data)
     updated = sb_update("hub_atividades", filters={"id": atividade_id}, data=data, client_id=client_id)
     
     updated_dict = updated if isinstance(updated, dict) else {}
@@ -817,6 +1341,25 @@ async def update_atividade(
     return {"ok": True, "row": updated_dict}
 
 
+def _normalize_atividade_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza valores de enum antes de persistir no banco."""
+    # Frontend envia 'porcentagem', banco aceita 'percentual'
+    if data.get("tipo_medicao") == "porcentagem":
+        data["tipo_medicao"] = "percentual"
+    # Frontend envia status com espaço, banco usa underscore
+    _status_map = {
+        "em andamento": "em_execucao",
+        "em_andamento": "em_execucao",
+        "nao iniciada": "nao_iniciada",
+        "pendente":     "nao_iniciada",
+    }
+    if data.get("status_atividade"):
+        data["status_atividade"] = _status_map.get(
+            str(data["status_atividade"]).lower(), data["status_atividade"]
+        )
+    return data
+
+
 @router.post("/cronograma")
 async def create_atividade(
     body: Dict[str, Any] = Body(...),
@@ -824,6 +1367,7 @@ async def create_atividade(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     body["client_id"] = client_id
+    _normalize_atividade_payload(body)
     row = sb_insert("hub_atividades", body, client_id=client_id)
     if row and row.get("parent_id"):
         _recalc_parent_dates(row["parent_id"], row.get("contrato", ""), client_id or "")
@@ -1312,14 +1856,10 @@ async def list_contratos(
     result = []
     for _, row in contratos_df.iterrows():
         cod = str(row.get("contrato", ""))
-        prog = 0.0
-        if not projetos_df.empty and "contrato" in projetos_df.columns:
-            df_c = projetos_df[projetos_df["contrato"] == cod]
-            if not df_c.empty and "conclusao_pct" in df_c.columns:
-                pct = pd.to_numeric(df_c["conclusao_pct"], errors="coerce").fillna(0)
-                peso = pd.to_numeric(df_c.get("peso_pct", pd.Series([1] * len(df_c))), errors="coerce").fillna(1)
-                total_peso = peso.sum()
-                prog = float((pct * peso).sum() / total_peso) if total_peso > 0 else 0.0
+        # Usa _calc_progress_spi para consistência com visao-geral
+        ativ_contrato = sb_select("hub_atividades", filters={"contrato": cod}, client_id=client_id, limit=500) or []
+        kpis_c = _calc_progress_spi(ativ_contrato, date.today())
+        prog = kpis_c["progress_pct"]
 
         item: Dict[str, Any] = {}
         for k, v in row.items():
@@ -1340,42 +1880,8 @@ async def list_contratos(
         if not item.get("localizacao"):
             item["localizacao"] = None
 
-        # Saúde calculada: desvio baseado nas atividades do cronograma
-        hoje = date.today()
-        desvio_pct_v = 0.0
-        if not projetos_df.empty and "contrato" in projetos_df.columns:
-            df_cc = projetos_df[projetos_df["contrato"] == cod]
-            if not df_cc.empty:
-                peso_t = 0.0
-                esp_pond = 0.0
-                real_pond = 0.0
-                for _, ar in df_cc.iterrows():
-                    ini_s = str(ar.get("inicio_previsto") or "")[:10]
-                    ter_s = str(ar.get("termino_previsto") or "")[:10]
-                    if not ini_s or not ter_s:
-                        continue
-                    try:
-                        d_ai = date.fromisoformat(ini_s)
-                        d_at = date.fromisoformat(ter_s)
-                    except ValueError:
-                        continue
-                    if hoje < d_ai:
-                        pct_e = 0.0
-                    elif hoje >= d_at:
-                        pct_e = 100.0
-                    else:
-                        total_d = max((d_at - d_ai).days, 1)
-                        dec_d = (hoje - d_ai).days
-                        pct_e = min(100.0, dec_d / total_d * 100)
-                    pw = float(ar.get("peso_pct") or 1)
-                    pr = float(ar.get("conclusao_pct") or 0)
-                    peso_t += pw
-                    esp_pond += pct_e * pw
-                    real_pond += pr * pw
-                if peso_t > 0:
-                    pct_esp_contrato = esp_pond / peso_t
-                    pct_real_contrato = real_pond / peso_t
-                    desvio_pct_v = round(pct_real_contrato - pct_esp_contrato, 1)
+        # Saúde calculada: desvio já vem do _calc_progress_spi (mesma lógica em todas as páginas)
+        desvio_pct_v = kpis_c["desvio_pct"]
 
         item["desvio_pct"] = desvio_pct_v
         if desvio_pct_v >= -5:

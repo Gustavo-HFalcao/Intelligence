@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -177,20 +177,34 @@ function SCurveFinTip({ active, payload, label }: any) {
 
 // ── Components ──────────────────────────────────────────────────────────────
 
+const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
+  risco:       { icon: '⚠', color: '#EF4444' },
+  anomalia:    { icon: '🔴', color: '#dc2626' },
+  producao:    { icon: '⚡', color: '#C98B2A' },
+  oportunidade:{ icon: '✦', color: '#22c55e' },
+  equipe:      { icon: '👥', color: '#3B82F6' },
+  clima:       { icon: '🌧', color: '#2A9D8F' },
+  delta:       { icon: '↗', color: '#A855F7' },
+}
+
 function InsightCard({ insight, idx }: { insight: any; idx: number }) {
-  const priorityCfg: Record<string, { label: string; border: string; badge: string; badgeText: string }> = {
-    High:   { label: 'CRÍTICO', border: 'border-red-500/40',   badge: 'bg-red-500/15 text-red-400 border border-red-500/30',   badgeText: 'CRÍTICO' },
-    Medium: { label: 'MÉDIO',   border: 'border-copper/40',    badge: 'bg-copper/15 text-copper border border-copper/30',       badgeText: 'MÉDIO' },
-    Low:    { label: 'BAIXO',   border: 'border-teal-500/30',  badge: 'bg-teal-500/10 text-teal-400 border border-teal-500/20', badgeText: 'BAIXO' },
+  const priorityCfg: Record<string, { border: string; badge: string; badgeText: string }> = {
+    High:   { border: 'border-red-500/40',   badge: 'bg-red-500/15 text-red-400 border border-red-500/30',   badgeText: 'CRÍTICO' },
+    Medium: { border: 'border-copper/40',    badge: 'bg-copper/15 text-copper border border-copper/30',       badgeText: 'MÉDIO' },
+    Low:    { border: 'border-teal-500/30',  badge: 'bg-teal-500/10 text-teal-400 border border-teal-500/20', badgeText: 'BAIXO' },
   }
-  const cfg = priorityCfg[insight.priority] || priorityCfg.Low
+  const cfg     = priorityCfg[insight.priority] || priorityCfg.Low
+  const tipoCfg = TIPO_CONFIG[insight.tipo] || TIPO_CONFIG.risco
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.07 }}
       className={`bg-white/[0.03] border ${cfg.border} rounded-xl p-4 flex flex-col gap-2`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-black uppercase text-white leading-tight flex-1">{insight.title}</span>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span style={{ color: tipoCfg.color, fontSize: 12, lineHeight: 1 }}>{tipoCfg.icon}</span>
+          <span className="text-[11px] font-black uppercase text-white leading-tight truncate">{insight.title}</span>
+        </div>
         <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${cfg.badge}`}>{cfg.badgeText}</span>
       </div>
       <p className="text-[11px] text-white/50 leading-relaxed">{insight.body}</p>
@@ -217,6 +231,34 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
   const [alertaOpen, setAlertaOpen] = useState(false)
   const [generatingInsights, setGeneratingInsights] = useState(false)
   const [liveInsights, setLiveInsights] = useState<any[] | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMsgs, setChatMsgs] = useState<{role:'user'|'assistant'; content:string}[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatSessionId, setChatSessionId] = useState<string|null>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  async function handleChatSend() {
+    const msg = chatInput.trim()
+    if (!msg || chatLoading) return
+    setChatInput('')
+    setChatMsgs(prev => [...prev, { role: 'user', content: msg }])
+    setChatLoading(true)
+    try {
+      const res = await api.post('/hub/agente/chat', { contrato, mensagem: msg, session_id: chatSessionId })
+      const { resposta, session_id } = res.data
+      if (session_id && !chatSessionId) setChatSessionId(session_id)
+      setChatMsgs(prev => [...prev, { role: 'assistant', content: resposta }])
+    } catch {
+      setChatMsgs(prev => [...prev, { role: 'assistant', content: 'Erro ao consultar o agente. Tente novamente.' }])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMsgs])
 
   async function handleGerarInsights() {
     setGeneratingInsights(true)
@@ -316,6 +358,82 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
                 </div>
               )
             )}
+          </div>
+        </div>
+
+        {/* Chat com o Agente IA */}
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(42,157,143,0.2)', borderRadius: 16, minHeight: 400 }} className="flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-teal-500/15 border border-teal-500/25 text-teal-400"><Sparkles size={16}/></div>
+              <div>
+                <h3 className="text-[11px] font-black uppercase tracking-widest text-white">Pergunte ao Agente</h3>
+                <p className="text-[9px] text-white/30 font-bold uppercase tracking-widest">Análise contextual da obra</p>
+              </div>
+            </div>
+            {chatMsgs.length > 0 && (
+              <button onClick={() => { setChatMsgs([]); setChatSessionId(null) }}
+                style={{ fontSize: 9, color: '#888', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, padding: '3px 8px' }}>
+                Limpar
+              </button>
+            )}
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: 260 }}>
+            {chatMsgs.length === 0 && (
+              <div className="flex flex-col gap-2 pt-2">
+                <p className="text-[10px] text-white/20 text-center pb-1">Exemplos de perguntas:</p>
+                {[
+                  'Se eu adicionar 2 pessoas na perfuração, quando termino?',
+                  'Quais atividades posso antecipar essa semana?',
+                  'Qual o impacto do atraso atual no prazo final?',
+                ].map((q, i) => (
+                  <button key={i} onClick={() => { setChatInput(q) }}
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '7px 10px', textAlign: 'left', color: 'rgba(255,255,255,0.4)', fontSize: 10, cursor: 'pointer' }}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+            {chatMsgs.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div style={{
+                  maxWidth: '85%', padding: '8px 12px', borderRadius: m.role === 'user' ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+                  background: m.role === 'user' ? 'rgba(201,139,42,0.15)' : 'rgba(42,157,143,0.1)',
+                  border: `1px solid ${m.role === 'user' ? 'rgba(201,139,42,0.25)' : 'rgba(42,157,143,0.2)'}`,
+                  fontSize: 11, color: m.role === 'user' ? '#e2c87a' : 'rgba(255,255,255,0.75)',
+                  lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                }}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex justify-start">
+                <div style={{ padding: '8px 14px', borderRadius: '12px 12px 12px 4px', background: 'rgba(42,157,143,0.08)', border: '1px solid rgba(42,157,143,0.15)' }}>
+                  <div className="flex gap-1">
+                    {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-teal-400/50 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="p-3 border-t border-white/5 flex gap-2">
+            <input
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+              placeholder="Pergunte sobre o cronograma, equipe, prazos..."
+              style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '7px 10px', color: '#e2e8f0', fontSize: 11, outline: 'none' }}
+            />
+            <button onClick={handleChatSend} disabled={chatLoading || !chatInput.trim()}
+              style={{ background: chatLoading || !chatInput.trim() ? 'rgba(42,157,143,0.3)' : '#2A9D8F', border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: chatLoading || !chatInput.trim() ? 'not-allowed' : 'pointer' }}>
+              ↑
+            </button>
           </div>
         </div>
 
@@ -523,18 +641,20 @@ function DashboardTab({ contrato }: { contrato: string }) {
 // ── Cronograma Helpers ────────────────────────────────────────────────────────
 
 const TENDENCIA_CONFIG: Record<string, { color: string; label: string; dot: string }> = {
-  acima:    { color: '#22c55e', label: 'Acima',    dot: 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' },
-  dentro:   { color: COPPER,   label: 'No Ritmo', dot: 'bg-copper shadow-[0_0_8px_rgba(201,139,42,0.5)]' },
-  abaixo:   { color: RED,      label: 'Abaixo',   dot: 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' },
-  concluida:{ color: TEAL,     label: 'Concluída',dot: 'bg-teal-500 shadow-[0_0_8px_rgba(42,157,143,0.5)]' },
-  sem_dados:{ color: '#888',   label: 'Sem dados',dot: 'bg-white/20' },
+  acima:    { color: '#22c55e', label: 'Adiantado', dot: 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' },
+  dentro:   { color: COPPER,   label: 'No Ritmo',  dot: 'bg-copper shadow-[0_0_8px_rgba(201,139,42,0.5)]' },
+  abaixo:   { color: RED,      label: 'Abaixo',    dot: 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' },
+  concluida:{ color: TEAL,     label: 'Concluída', dot: 'bg-teal-500 shadow-[0_0_8px_rgba(42,157,143,0.5)]' },
+  sem_dados:{ color: '#888',   label: 'Sem dados', dot: 'bg-white/20' },
 }
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   concluida:    { color: TEAL,   label: 'Concluída' },
-  em_andamento: { color: COPPER, label: 'Em andamento' },
+  em_execucao:  { color: COPPER, label: 'Em andamento' },
+  em_andamento: { color: COPPER, label: 'Em andamento' },  // alias legado
   atrasada:     { color: RED,    label: 'Atrasada' },
   pendente:     { color: '#888', label: 'Pendente' },
+  nao_iniciada: { color: '#888', label: 'Pendente' },
 }
 
 function TendenciaDot({ tendencia }: { tendencia: string }) {
@@ -727,7 +847,17 @@ function AtivRow({
             {String(row.critico).toLowerCase() === 'sim' && (
               <span style={{ color: RED, fontSize: 9, fontWeight: 800, background: `${RED}15`, borderRadius: 3, padding: '0 4px' }}>CRÍTICO</span>
             )}
+            {row.status_atividade === 'Pendente Aprovação' && (
+              <span style={{ color: '#F59E0B', fontSize: 9, fontWeight: 800, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 3, padding: '0 5px' }}>
+                ⏳ APROVAÇÃO PENDENTE
+              </span>
+            )}
           </div>
+          {row.status_atividade === 'Pendente Aprovação' && (
+            <div style={{ fontSize: 9, color: 'rgba(245,158,11,0.7)' }}>
+              Registrada via RDO — preencha macro, fase e datas para incluir no cronograma
+            </div>
+          )}
           {depName && (
             <div style={{ fontSize: 9, color: '#888' }} className="flex items-center gap-1">
               <MinusCircle size={8} />
@@ -766,6 +896,19 @@ function AtivRow({
           {statusCfg.label}
         </div>
 
+        {/* Risk Score */}
+        {row._risk_score > 0 && (
+          <div title={`Risco: ${row._risk_score}/10${row._velocity > 0 ? ` | Vel: ${row._velocity}/dia` : ''}${row._eac_date ? ` | EAC: ${row._eac_date}` : ''}`}
+            style={{
+              fontSize: 9, fontWeight: 800, borderRadius: 4, padding: '2px 5px', flexShrink: 0,
+              color: row._risk_score >= 7 ? '#EF4444' : row._risk_score >= 4 ? '#C98B2A' : '#22c55e',
+              background: row._risk_score >= 7 ? 'rgba(239,68,68,0.12)' : row._risk_score >= 4 ? 'rgba(201,139,42,0.12)' : 'rgba(34,197,94,0.08)',
+              border: `1px solid ${row._risk_score >= 7 ? 'rgba(239,68,68,0.3)' : row._risk_score >= 4 ? 'rgba(201,139,42,0.3)' : 'rgba(34,197,94,0.2)'}`,
+            }}>
+            R{row._risk_score}
+          </div>
+        )}
+
         {/* Actions — always visible */}
         <div className="flex items-center gap-1 shrink-0">
           {level < 2 && (
@@ -793,21 +936,30 @@ function PrevistoRealizadoSection({ allRows, onKpiClick }: { allRows: any[]; onK
   const today = new Date().toISOString().slice(0, 10)
 
   const { programadasHoje, realizadasHoje, atrasadas, emRisco, adiantadas } = useMemo(() => {
-    const prog = allRows.filter((a: any) => {
+    // Apenas micros/subs na listagem do dia (macros são fruto das filhas)
+    const folhas = allRows.filter((a: any) => !allRows.some((b: any) => b.parent_id === a.id))
+    const prog = folhas.filter((a: any) => {
       const ini = a.inicio_previsto?.slice(0, 10)
       const ter = a.termino_previsto?.slice(0, 10)
       return ini && ter && ini <= today && ter >= today
     })
-    const real = prog.filter((a: any) => Number(a.conclusao_pct || 0) >= 100)
-    const atras = allRows.filter((a: any) => {
+    // Realizadas: 100% E a atividade estava programada para hoje ou anteriores
+    const real = folhas.filter((a: any) => {
+      const ter = a.termino_previsto?.slice(0, 10)
+      return Number(a.conclusao_pct || 0) >= 100 && ter && ter <= today
+    })
+    // Atrasadas: prazo vencido ANTES de hoje com pct < 100 (hoje não é atraso — ainda está no dia)
+    const atras = folhas.filter((a: any) => {
       const ter = a.termino_previsto?.slice(0, 10)
       return ter && ter < today && Number(a.conclusao_pct || 0) < 100
     })
-    const risco = allRows.filter((a: any) => a._tendencia === 'abaixo')
-    const adiant = allRows.filter((a: any) => a._tendencia === 'acima')
+    const risco = folhas.filter((a: any) => a._tendencia === 'abaixo')
+    const adiant = folhas.filter((a: any) => a._tendencia === 'acima')
     return { programadasHoje: prog, realizadasHoje: real, atrasadas: atras, emRisco: risco, adiantadas: adiant }
   }, [allRows, today])
 
+  // Desvio do dia: diferença entre o que foi realizado e o que era esperado para hoje
+  // (atividades programadas para hoje que já concluíram - as que deveriam ter concluído hoje)
   const desvio = realizadasHoje.length - programadasHoje.length
 
   const cards = [
@@ -1114,7 +1266,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
           onChange={e => setFilterStatus(e.target.value)}
           style={{ background: 'rgba(13,17,23,0.6)', border: '1px solid rgba(255,255,255,0.07)', color: '#e2c87a', borderRadius: 8, padding: '7px 10px', fontSize: 12, outline: 'none' }}
         >
-          {[['todas','Todos os Status'],['em_andamento','Em Andamento'],['concluida','Concluída'],['atrasada','Atrasada'],['pendente','Pendente'],['criticas','Críticas']].map(([v, l]) => (
+          {[['todas','Todos os Status'],['em_execucao','Em Andamento'],['concluida','Concluída'],['atrasada','Atrasada'],['nao_iniciada','Pendente'],['criticas','Críticas']].map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
         </select>
