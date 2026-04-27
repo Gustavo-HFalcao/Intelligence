@@ -187,6 +187,12 @@ const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
   delta:       { icon: '↗', color: '#A855F7' },
 }
 
+// Converte todas as datas ISO (YYYY-MM-DD) encontradas numa string para DD/MM/AAAA
+function fmtDatasTexto(texto: string): string {
+  if (!texto) return texto
+  return texto.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')
+}
+
 function InsightCard({ insight, idx }: { insight: any; idx: number }) {
   const priorityCfg: Record<string, { border: string; badge: string; badgeText: string }> = {
     High:   { border: 'border-red-500/40',   badge: 'bg-red-500/15 text-red-400 border border-red-500/30',   badgeText: 'CRÍTICO' },
@@ -203,11 +209,11 @@ function InsightCard({ insight, idx }: { insight: any; idx: number }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <span style={{ color: tipoCfg.color, fontSize: 12, lineHeight: 1 }}>{tipoCfg.icon}</span>
-          <span className="text-[11px] font-black uppercase text-white leading-tight truncate">{insight.title}</span>
+          <span className="text-[11px] font-black uppercase text-white leading-tight truncate">{fmtDatasTexto(insight.title)}</span>
         </div>
         <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${cfg.badge}`}>{cfg.badgeText}</span>
       </div>
-      <p className="text-[11px] text-white/50 leading-relaxed">{insight.body}</p>
+      <p className="text-[11px] text-white/50 leading-relaxed">{fmtDatasTexto(insight.body)}</p>
     </motion.div>
   )
 }
@@ -943,12 +949,12 @@ function PrevistoRealizadoSection({ allRows, onKpiClick }: { allRows: any[]; onK
       const ter = a.termino_previsto?.slice(0, 10)
       return ini && ter && ini <= today && ter >= today
     })
-    // Realizadas: 100% E a atividade estava programada para hoje ou anteriores
+    // Realizadas HOJE: concluídas cujo last_rdo_date é hoje — evita contar atividades de dias anteriores
     const real = folhas.filter((a: any) => {
-      const ter = a.termino_previsto?.slice(0, 10)
-      return Number(a.conclusao_pct || 0) >= 100 && ter && ter <= today
+      const rdoDate = a.last_rdo_date?.slice(0, 10)
+      return rdoDate === today && Number(a.conclusao_pct || 0) >= 100
     })
-    // Atrasadas: prazo vencido ANTES de hoje com pct < 100 (hoje não é atraso — ainda está no dia)
+    // Atrasadas: prazo vencido ANTES de hoje com pct < 100
     const atras = folhas.filter((a: any) => {
       const ter = a.termino_previsto?.slice(0, 10)
       return ter && ter < today && Number(a.conclusao_pct || 0) < 100

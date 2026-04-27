@@ -66,14 +66,17 @@ def _iso_to_br(v: str) -> str:
     return str(v)[:10]
 
 
-def _calc_progress_spi(atividades: list, today: date) -> dict:
+def _calc_progress_spi(atividades: list, today: date, working_days: set = None) -> dict:
     """Calcula progresso físico e SPI usando apenas atividades-folha (sem filhos).
-    Isso evita dupla contagem entre macro/micro/sub.
+    Usa dias úteis (working_days) para o previsto, evitando distorção por fins de semana.
     Retorna: progress_pct, prazo_decorrido_pct, spi, desvio_pct"""
+    if working_days is None:
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default (contrato padrão)
+
     ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
     folhas = [a for a in atividades if a["id"] not in ids_com_filhos]
     if not folhas:
-        folhas = atividades  # fallback se não há hierarquia
+        folhas = atividades
 
     peso_total = 0.0
     pct_real_pond = 0.0
@@ -91,14 +94,14 @@ def _calc_progress_spi(atividades: list, today: date) -> dict:
                 d_ini = date.fromisoformat(ini_s)
                 d_ter = date.fromisoformat(ter_s)
                 if today < d_ini:
-                    # Antecipação: se já tem progresso, esperado ainda é 0
                     pct_esp = 0.0
                 elif today >= d_ter:
                     pct_esp = 100.0
                 else:
-                    total_dias = max((d_ter - d_ini).days, 1)
-                    decorridos = (today - d_ini).days
-                    pct_esp = min(100.0, decorridos / total_dias * 100)
+                    # Usa dias úteis para refletir o cronograma real do contrato
+                    total_du = max(_count_working_days(ini_s, ter_s, working_days), 1)
+                    decorridos_du = _count_working_days(ini_s, today.isoformat(), working_days)
+                    pct_esp = min(100.0, decorridos_du / total_du * 100)
             except ValueError:
                 pass
 
@@ -1083,9 +1086,13 @@ async def get_visao_geral(
 
     today = date.today()
 
+    # Dias úteis do contrato para cálculo de progresso correto
+    _wd_str = contrato_info.get("dias_uteis_semana", "") if contrato_info else ""
+    _wd_set = _parse_dias_uteis(_wd_str) if _wd_str else None
+
     # Progresso + SPI — usando atividades-folha para evitar dupla contagem
     ativ_para_calc = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    kpis = _calc_progress_spi(ativ_para_calc, today)
+    kpis = _calc_progress_spi(ativ_para_calc, today, _wd_set)
     progress_pct = kpis["progress_pct"]
     prazo_decorrido_pct = kpis["prazo_decorrido_pct"]
     spi = kpis["spi"]
@@ -1633,14 +1640,22 @@ async def get_hub_dashboard(
     total_peso = valid["peso_pct"].sum() if "peso_pct" in valid.columns else len(valid)
     if total_peso == 0: total_peso = 1
 
-    # History map for Realizado
+    # History map for Realizado — ignora entradas com data NULL (dados mock inválidos)
     hist_map = {}
     if not df_hist.empty and "atividade_id" in df_hist.columns:
         df_h = df_hist[df_hist["contrato"] == contrato] if "contrato" in df_hist.columns else df_hist
+        # Filtra: usa coluna "data" (date do RDO) quando disponível e não nula
+        if "data" in df_h.columns:
+            df_h = df_h[df_h["data"].notna()]
         if not df_h.empty:
             for aid, grp in df_h.groupby("atividade_id"):
-                sorted_grp = grp.sort_values("created_at")
-                hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["created_at"]).dt.normalize(), sorted_grp["conclusao_pct_novo"]))
+                # Usa "data" (date do RDO) como referência temporal, fallback para created_at
+                if "data" in grp.columns:
+                    sorted_grp = grp.sort_values("data")
+                    hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["data"]), sorted_grp["conclusao_pct_novo"]))
+                else:
+                    sorted_grp = grp.sort_values("created_at")
+                    hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["created_at"]).dt.normalize(), sorted_grp["conclusao_pct_novo"]))
 
     for d in dates:
         d_end = d if freq == "D" else (d + pd.Timedelta(days=6)) if freq == "W-MON" else (d + pd.DateOffset(months=1) - pd.Timedelta(days=1))
