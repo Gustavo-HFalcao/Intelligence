@@ -66,6 +66,14 @@ def _iso_to_br(v: str) -> str:
     return str(v)[:10]
 
 
+def _get_working_days(contrato: str, client_id: str = None) -> set:
+    """Retorna o set de dias úteis do contrato. Default seg–sab."""
+    rows = sb_select("contratos", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+    if rows:
+        return _parse_dias_uteis(rows[0].get("dias_uteis_semana", "") or "")
+    return {0, 1, 2, 3, 4, 5}
+
+
 def _calc_progress_spi(atividades: list, today: date, working_days: set = None) -> dict:
     """Calcula progresso físico e SPI usando apenas atividades-folha (sem filhos).
     Usa dias úteis (working_days) para o previsto, evitando distorção por fins de semana.
@@ -154,7 +162,7 @@ def _parse_dias_uteis(dias_str: str) -> set:
 def _add_working_days(start_iso: str, days: int, working_days: set = None) -> str:
     from datetime import date, timedelta
     if working_days is None:
-        working_days = {0, 1, 2, 3, 4}
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab
     try:
         current = date.fromisoformat(start_iso[:10])
         if days <= 1:
@@ -172,7 +180,7 @@ def _add_working_days(start_iso: str, days: int, working_days: set = None) -> st
 def _count_working_days(start_iso: str, end_iso: str, working_days: set = None) -> int:
     from datetime import date, timedelta
     if working_days is None:
-        working_days = {0, 1, 2, 3, 4}
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab
     try:
         d0 = date.fromisoformat(start_iso[:10])
         d1 = date.fromisoformat(end_iso[:10])
@@ -907,7 +915,8 @@ async def get_agente_insights(
         if insights:
             kpis = _calc_progress_spi(
                 sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or [],
-                date.today()
+                date.today(),
+                _get_working_days(contrato, client_id),
             )
             return {"insights": insights, "spi": kpis["spi"], "pct_geral": kpis["progress_pct"]}
 
@@ -935,7 +944,7 @@ async def trigger_insights_generation(
     insights_ant = (existing[0].get("insights") or []) if existing else []
 
     insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant)
-    kpis     = _calc_progress_spi(atividades, today)
+    kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id))
 
     try:
         _persist_insights(contrato, insights, client_id)
@@ -968,7 +977,7 @@ async def agente_chat(
     atividades = sb_select("hub_atividades",          filters={"contrato": contrato}, client_id=client_id, limit=500) or []
     rdos       = sb_select("rdo_master",              filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=5) or []
     historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=200) or []
-    kpis       = _calc_progress_spi(atividades, today)
+    kpis       = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id))
 
     # Velocity para todas as atividades com qty
     velocities = {}
@@ -1707,35 +1716,45 @@ async def get_hub_dashboard(
             pt["realizado"] = round(real_acc, 1)
         scurve.append(pt)
 
-    # 2. Daily Productivity — quantidade executada por dia (fonte: rdo_master + rdo_atividades via equipe_alocada)
+    # 2. Daily Productivity — produção física real por dia (fonte: hub_atividade_historico)
+    #    Usa producao_dia acumulada por dia de RDO. Fallback: efetivo se não houver histórico.
     prod_data = []
-    rdos_recentes = sb_select(
-        "rdo_master",
+    hist_prod = sb_select(
+        "hub_atividade_historico",
         filters={"contrato": contrato},
         client_id=client_id or None,
-        order="data.desc",
-        limit=30,
+        order="data.asc",
+        limit=200,
     ) or []
-    if rdos_recentes:
+
+    if hist_prod:
         from collections import defaultdict
-        by_day: Dict[str, Dict[str, float]] = defaultdict(lambda: {"realizado": 0.0, "previsto": 0.0})
-        for rdo in rdos_recentes:
-            d_key = str(rdo.get("data", "") or "")[:10]
-            if not d_key:
-                continue
-            equipe = float(rdo.get("equipe_alocada") or 0)
-            atividades_count = float(rdo.get("atividades_count") or 0)
-            by_day[d_key]["realizado"] += equipe if equipe > 0 else atividades_count
-            by_day[d_key]["previsto"] += equipe if equipe > 0 else max(atividades_count, 1)
-        for d_key in sorted(by_day.keys())[-14:]:
+        # Agrupa por data: soma producao_dia de todas as atividades naquele dia
+        by_day_hist: Dict[str, float] = defaultdict(float)
+        for h in hist_prod:
+            d_key = str(h.get("data") or "")[:10]
+            if d_key and d_key >= "2026-04-22":  # apenas a partir do início do contrato
+                by_day_hist[d_key] += float(h.get("producao_dia") or 0)
+
+        # Previsto por dia: média da produção planejada das atividades ativas naquele período
+        # Simplificado: usamos a meta diária do cronograma (total_qty / dias_planejados)
+        ativ_com_qty = [a for a in valid.to_dict("records") if float(a.get("total_qty", 0) or 0) > 0 and int(a.get("dias_planejados", 0) or 0) > 0]
+
+        for d_key in sorted(by_day_hist.keys())[-14:]:
             try:
                 d_label = date.fromisoformat(d_key).strftime("%d/%m")
             except Exception:
                 d_label = d_key
+            # Previsto: soma das metas diárias de atividades ativas nessa data
+            previsto_dia = sum(
+                float(a.get("total_qty", 0)) / int(a.get("dias_planejados", 1))
+                for a in ativ_com_qty
+                if str(a.get("inicio_previsto", ""))[:10] <= d_key <= str(a.get("termino_previsto", ""))[:10]
+            )
             prod_data.append({
                 "data": d_label,
-                "realizado": round(by_day[d_key]["realizado"], 1),
-                "previsto": round(by_day[d_key]["previsto"], 1),
+                "realizado": round(by_day_hist[d_key], 1),
+                "previsto": round(previsto_dia, 1),
             })
     else:
         # Fallback: S-curve incremental deltas
@@ -1886,7 +1905,7 @@ async def list_contratos(
         cod = str(row.get("contrato", ""))
         # Usa _calc_progress_spi para consistência com visao-geral
         ativ_contrato = sb_select("hub_atividades", filters={"contrato": cod}, client_id=client_id, limit=500) or []
-        kpis_c = _calc_progress_spi(ativ_contrato, date.today())
+        kpis_c = _calc_progress_spi(ativ_contrato, date.today(), _get_working_days(cod, client_id))
         prog = kpis_c["progress_pct"]
 
         item: Dict[str, Any] = {}
