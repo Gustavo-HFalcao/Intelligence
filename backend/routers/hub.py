@@ -74,9 +74,13 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None) 
         working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default (contrato padrão)
 
     ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
-    folhas = [a for a in atividades if a["id"] not in ids_com_filhos]
+    folhas = [
+        a for a in atividades
+        if a["id"] not in ids_com_filhos
+        and a.get("fase") is not None  # exclui macros sem fase (ex: limpeza, serviços avulsos)
+    ]
     if not folhas:
-        folhas = atividades
+        folhas = [a for a in atividades if a.get("fase") is not None] or atividades
 
     peso_total = 0.0
     pct_real_pond = 0.0
@@ -119,17 +123,18 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None) 
     return {"progress_pct": progress_pct, "prazo_decorrido_pct": prazo_decorrido_pct, "spi": spi, "desvio_pct": desvio_pct}
 
 
-def _working_days_between(d_start: date, d_end: date) -> int:
+def _working_days_between(d_start: date, d_end: date, working_days: set = None) -> int:
+    if working_days is None:
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab (padrão do contrato)
     if d_end <= d_start:
         return 0
-    total = (d_end - d_start).days
-    weeks, rem = divmod(total, 7)
-    wd = weeks * 5
-    start_wd = d_start.weekday()
-    for i in range(rem):
-        if (start_wd + i) % 7 < 5:
-            wd += 1
-    return max(0, wd)
+    count = 0
+    cur = d_start
+    while cur < d_end:
+        if cur.weekday() in working_days:
+            count += 1
+        cur += timedelta(days=1)
+    return count
 
 
 # ── Core Engineering Logic (1:1 Legacy Port) ──────────────────────────────────
@@ -207,8 +212,10 @@ def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
         _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id)
 
 
-def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str, Any]:
-    """Cálculo de EAC e Tendência (1:1 Parity)."""
+def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_days: set = None) -> Dict[str, Any]:
+    """Cálculo de EAC e Tendência."""
+    if working_days is None:
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab
     total_qty = float(r.get("total_qty", 0) or 0)
     exec_qty = float(r.get("exec_qty", 0) or 0)
     dias_plan = int(r.get("dias_planejados", 0) or 0)
@@ -243,13 +250,12 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today()) -> Dict[str
     if prod_real > 0 and total_qty > 0 and pct < 100:
         saldo = max(0.0, total_qty - exec_qty)
         dias_restantes = max(1, round(saldo / prod_real))
-        
-        # Simple working day estimation for end date
+
         current = today
         added = 0
         while added < dias_restantes:
             current += timedelta(days=1)
-            if current.weekday() < 5:
+            if current.weekday() in working_days:
                 added += 1
         fim_prev = current
         data_fim_prevista = fim_prev.isoformat()
@@ -385,13 +391,14 @@ def _calc_velocity(atividade: dict, historico: list) -> dict:
     saldo = max(0.0, total_qty - exec_qty)
     dias_restantes = round(saldo / velocity_real) if velocity_real > 0 else None
 
+    _wd = {0, 1, 2, 3, 4, 5}  # seg–sab (padrão do contrato)
     eac_date = None
     if dias_restantes is not None:
         current = date.today()
         added = 0
         while added < dias_restantes:
             current += timedelta(days=1)
-            if current.weekday() < 5:
+            if current.weekday() in _wd:
                 added += 1
         eac_date = current.isoformat()
 
@@ -444,7 +451,8 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
 
     # 2. Atividade crítica sem nenhum movimento por 3+ dias úteis
     for a in atividades:
-        if not str(a.get("critico", "")).lower() == "sim":
+        critico_val = a.get("critico")
+        if not (critico_val is True or str(critico_val).lower() in ("true", "sim", "1")):
             continue
         pct = float(a.get("conclusao_pct") or 0)
         if pct >= 100:
@@ -541,17 +549,19 @@ def _calc_risk_score(atividade: dict, velocity: dict, today: date) -> float:
     except ValueError:
         return 2.0
 
-    # Fator 1: desvio de progresso vs esperado (40%)
-    total_dias = max((d_ter - d_ini).days, 1)
-    decorridos = max((today - d_ini).days, 0)
-    pct_esp = min(100.0, decorridos / total_dias * 100) if today >= d_ini else 0.0
+    _wd = {0, 1, 2, 3, 4, 5}  # seg–sab
+
+    # Fator 1: desvio de progresso vs esperado (40%) — usa dias úteis
+    total_du = max(_count_working_days(ini_s, ter_s, _wd), 1)
+    decorridos_du = max(_count_working_days(ini_s, today.isoformat(), _wd), 0) if today >= d_ini else 0
+    pct_esp = min(100.0, decorridos_du / total_du * 100)
     desvio = pct_esp - pct_real  # positivo = atrasado
     f1 = min(10.0, max(0.0, desvio / 10.0))
     score += f1 * 0.40
 
-    # Fator 2: urgência de prazo (30%)
-    dias_ate_prazo = (d_ter - today).days
-    if dias_ate_prazo < 0:
+    # Fator 2: urgência de prazo (30%) — em dias úteis
+    dias_ate_prazo = _working_days_between(today, d_ter, _wd)
+    if today > d_ter:
         f2 = 10.0  # já venceu
     elif dias_ate_prazo <= 2:
         f2 = 8.0
@@ -563,8 +573,10 @@ def _calc_risk_score(atividade: dict, velocity: dict, today: date) -> float:
         f2 = 0.0
     score += f2 * 0.30
 
-    # Fator 3: caminho crítico (20%)
-    f3 = 8.0 if str(atividade.get("critico", "")).lower() == "sim" else 0.0
+    # Fator 3: caminho crítico (20%) — campo booleano no DB
+    critico_val = atividade.get("critico")
+    is_critico = critico_val is True or str(critico_val).lower() in ("true", "sim", "1")
+    f3 = 8.0 if is_critico else 0.0
     score += f3 * 0.20
 
     # Fator 4: trend de produtividade (10%)
@@ -797,7 +809,7 @@ def _rule_based_insights(
             pass
 
     if atrasadas and len(insights) < 4:
-        critica = next((a for a in atrasadas if str(a.get("critico","")).lower() == "sim"), atrasadas[0])
+        critica = next((a for a in atrasadas if a.get("critico") is True or str(a.get("critico","")).lower() in ("true","sim","1")), atrasadas[0])
         vel = velocities.get(str(critica.get("id","")), {})
         eac_txt = f" EAC={vel['eac_date']}." if vel.get("eac_date") else ""
         insights.append({
@@ -1101,7 +1113,8 @@ async def get_visao_geral(
     ativ_concluidas = sum(1 for a in ativ_para_calc if float(a.get("conclusao_pct") or 0) >= 100)
     criticas_pendentes = sum(
         1 for a in ativ_para_calc
-        if str(a.get("critico", "")).lower() == "sim" and float(a.get("conclusao_pct") or 0) < 100
+        if (a.get("critico") is True or str(a.get("critico","")).lower() in ("true","sim","1"))
+        and float(a.get("conclusao_pct") or 0) < 100
     )
 
     # Budget
@@ -1289,7 +1302,7 @@ async def get_cronograma(
             "responsavel":    r.get("responsavel", ""),
             "nivel":          r.get("nivel", "macro"),
             "fase":           r.get("fase", ""),
-            "color":          "#EF4444" if str(r.get("critico", "")).lower() == "sim" else r.get("fase_color", "#C98B2A"),
+            "color":          "#EF4444" if (r.get("critico") is True or str(r.get("critico","")).lower() in ("true","sim","1")) else r.get("fase_color", "#C98B2A"),
         })
 
     result = {"atividades": sorted_atividades, "gantt": gantt, "total": len(atividades)}
