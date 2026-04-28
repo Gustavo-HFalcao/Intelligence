@@ -37,9 +37,9 @@ export default function Login() {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#030504] overflow-hidden flex flex-col lg:flex-row">
+    <div className="fixed inset-0 bg-[#030504] overflow-hidden flex flex-col xl:flex-row">
       {/* ── PAINEL DE BRANDING (Desktop 1:1) ───────────────────────────────── */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden bg-[#081210] border-r border-white/5">
+      <div className="hidden xl:flex xl:w-1/2 flex-col justify-between p-12 relative overflow-hidden bg-[#081210] border-r border-white/5">
         {/* Grid Background */}
         <div 
           className="absolute inset-0 opacity-[0.04] pointer-events-none"
