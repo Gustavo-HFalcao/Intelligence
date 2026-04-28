@@ -83,7 +83,13 @@
       "Bash(xargs -I {} basename {} .py)",
       "Bash(xargs -I {} basename {} .tsx)",
       "Bash(git add *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "mcp__supabase__list_migrations",
+      "Bash(npx --no-install tsc --noEmit)",
+      "Bash(echo \"SERVER_PID=$!\")",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s \"http://localhost:8000/openapi.json\")",
+      "Bash(curl -sv \"http://localhost:8000/api/hub/agente/chat\")"
     ]
   },
   "mcpServers": {
