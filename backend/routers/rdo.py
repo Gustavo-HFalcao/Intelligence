@@ -842,12 +842,14 @@ async def add_subscriber(
     if not contrato:
         return JSONResponse(status_code=400, content={"error": "Selecione um contrato antes de adicionar o e-mail"})
 
-    # A constraint real é UNIQUE(module, email) — checa por esse par
-    existing = sb_select("email_sender", filters={"module": "rdo", "email": email}, limit=1) or []
+    # Constraint real: UNIQUE(module, email, contract) — mesmo email pode ter contratos diferentes
+    existing = sb_select(
+        "email_sender",
+        filters={"module": "rdo", "email": email, "contract": contrato},
+        limit=1,
+    ) or []
     if existing:
-        # Já existe — atualiza o contrato se mudou e retorna ok
-        row = existing[0]
-        return {"ok": True, "id": row["id"], "info": "já cadastrado"}
+        return {"ok": True, "id": existing[0]["id"], "info": "já cadastrado para este contrato"}
 
     try:
         row = sb_insert("email_sender", {
@@ -861,8 +863,8 @@ async def add_subscriber(
     except ValueError as exc:
         err_str = str(exc)
         if "23505" in err_str or "already exists" in err_str:
-            # Race condition — outro worker inseriu entre o check e o insert
-            dup = sb_select("email_sender", filters={"module": "rdo", "email": email}, limit=1) or []
+            # Race condition — busca o existente e retorna ok
+            dup = sb_select("email_sender", filters={"module": "rdo", "email": email, "contract": contrato}, limit=1) or []
             return {"ok": True, "id": dup[0]["id"] if dup else None, "info": "já cadastrado"}
         return JSONResponse(status_code=400, content={"error": f"Erro ao salvar: {err_str[:200]}"})
     except Exception as exc:
