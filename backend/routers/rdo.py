@@ -599,22 +599,37 @@ async def submit_rdo(
             pass
 
 
-        # ── Insights assíncronos — fire-and-forget via Celery ────────────────
+        # ── Insights + AI Summary + PDF — fire-and-forget via Celery ──────────
         try:
             from backend.workers.tasks.insight_tasks import generate_insights, generate_rdo_ai_analysis
+            from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
             generate_insights.delay(
                 contrato=contrato,
                 rdo_id=rdo_id,
                 client_id=client_id or "",
             )
-            # Análise de IA do RDO do dia — persiste em rdo_master.ai_summary
+            # Análise de IA do RDO — persiste em rdo_master.ai_summary
             generate_rdo_ai_analysis.delay(
+                rdo_id=rdo_id,
+                client_id=client_id or "",
+            )
+            # PDF gerado após insights para ter ai_summary no documento
+            _pdf_task.delay(
                 rdo_id=rdo_id,
                 client_id=client_id or "",
             )
         except Exception:
             # Fallback síncrono se Celery não disponível
             _trigger_insights(contrato, rdo_id, client_id)
+            # PDF fallback inline (bloqueante mas garante que seja gerado)
+            try:
+                from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_sync
+                import asyncio as _asyncio
+                loop = _asyncio.get_event_loop()
+                loop.run_in_executor(None, lambda: _pdf_sync.run(rdo_id=rdo_id, client_id=client_id or ""))
+            except Exception:
+                pass  # PDF é melhor esforço — não bloqueia submit
+
 
         # ── Email para subscribers ────────────────────────────────────────────
         try:
