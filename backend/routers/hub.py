@@ -1631,8 +1631,15 @@ async def get_hub_dashboard(
 
     df_proj = data.get("projeto", pd.DataFrame())
     df_hist = data.get("hub_historico", pd.DataFrame())
-    df_fin = data.get("financeiro", pd.DataFrame())
     df_contr = data.get("contratos", pd.DataFrame())
+
+    # Carrega financeiro direto do Supabase (bypassa cache DataLoader que pode estar stale)
+    from backend.integrations.supabase import sb_select as _sb_select
+    _fin_filters: Dict[str, Any] = {"contrato": contrato}
+    if client_id:
+        _fin_filters["client_id"] = client_id
+    _fin_rows = _sb_select("fin_custos", filters=_fin_filters, limit=2000) or []
+    df_fin = pd.DataFrame(_fin_rows) if _fin_rows else pd.DataFrame()
 
     if df_proj.empty or "contrato" not in df_proj.columns:
         return {"scurve": [], "spi_trend": [], "productivity": [], "disciplinas": [], "kpis": {}}
@@ -1830,45 +1837,62 @@ async def get_hub_financeira(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Resumo financeiro do contrato (S-curve simplificada)."""
-    loader = DataLoader(client_id=client_id or "")
-    data = loader.load_all()
+    """Resumo financeiro do contrato — consulta fin_custos diretamente (sem cache DataLoader)."""
+    from backend.integrations.supabase import sb_select
+    import re as _re
+    from collections import defaultdict
 
-    import pandas as pd
+    def _pf(v) -> float:
+        if v is None:
+            return 0.0
+        s = str(v).strip()
+        if not s or s in ("None", "nan", ""):
+            return 0.0
+        if "," in s and "." in s:
+            s = s.replace(".", "").replace(",", ".")
+        elif "," in s:
+            s = s.replace(",", ".")
+        s = _re.sub(r"[^\d.\-]", "", s)
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
 
-    fin_df = data.get("financeiro", pd.DataFrame())
-    if not fin_df.empty and "contrato" in fin_df.columns:
-        fin_df = fin_df[fin_df["contrato"] == contrato]
+    filters: Dict[str, Any] = {"contrato": contrato}
+    if client_id:
+        filters["client_id"] = client_id
+    rows = sb_select("fin_custos", filters=filters, order="data.asc", limit=2000) or []
 
-    rows: List[Dict[str, Any]] = []
     budget_planejado = 0.0
     budget_realizado = 0.0
+    prev_by_mes: Dict[str, float] = defaultdict(float)
+    exec_by_mes: Dict[str, float] = defaultdict(float)
 
-    if not fin_df.empty:
-        if "valor_previsto" in fin_df.columns:
-            budget_planejado = float(pd.to_numeric(fin_df["valor_previsto"], errors="coerce").fillna(0).sum())
-        if "valor_executado" in fin_df.columns:
-            budget_realizado = float(pd.to_numeric(fin_df["valor_executado"], errors="coerce").fillna(0).sum())
+    for r in rows:
+        prev = _pf(r.get("valor_previsto", 0))
+        exec_ = _pf(r.get("valor_executado", 0))
+        budget_planejado += prev
+        budget_realizado += exec_
+        d = str(r.get("data") or "")[:10]
+        if len(d) >= 7:
+            mes = f"{d[5:7]}/{d[:4]}"
+            prev_by_mes[mes] += prev
+            exec_by_mes[mes] += exec_
 
-        # Monthly series
-        if "data" in fin_df.columns:
-            fin_df["data"] = pd.to_datetime(fin_df["data"], errors="coerce")
-            fin_df["mes"] = fin_df["data"].dt.strftime("%m/%Y")
-            grp = fin_df.groupby("mes").agg(
-                planejado=("valor_previsto", "sum"),
-                realizado=("valor_executado", "sum"),
-            ).reset_index()
-            rows = grp.to_dict("records")
+    all_mes = sorted(set(list(prev_by_mes) + list(exec_by_mes)),
+                     key=lambda m: (m[3:], m[:2]))
+    series = [{"mes": m, "planejado": round(prev_by_mes.get(m, 0), 2),
+               "realizado": round(exec_by_mes.get(m, 0), 2)} for m in all_mes]
 
     saldo = budget_planejado - budget_realizado
-    cpi = budget_realizado / budget_planejado if budget_planejado > 0 else 0.0
+    cpi = round(budget_realizado / budget_planejado, 3) if budget_planejado > 0 else 0.0
 
     return {
         "budget_planejado": budget_planejado,
         "budget_realizado": budget_realizado,
         "saldo": saldo,
-        "cpi": round(cpi, 3),
-        "series": rows,
+        "cpi": cpi,
+        "series": series,
     }
 
 

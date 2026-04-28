@@ -99,8 +99,10 @@ class DataLoader:
         success = False
 
         def _fetch(table: str, key: str):
-            filters = {"client_id": self.client_id} if self.client_id else {}
-            rows = sb_select(table, filters=filters)
+            # Só filtra por client_id se for UUID válido (não vazio, não "")
+            cid = self.client_id.strip() if self.client_id else ""
+            filters = {"client_id": cid} if cid else {}
+            rows = sb_select(table, filters=filters, limit=5000)
             return key, rows
 
         with ThreadPoolExecutor(max_workers=5) as pool:

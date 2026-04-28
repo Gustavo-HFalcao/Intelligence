@@ -527,7 +527,8 @@ function DashboardTab({ contrato }: { contrato: string }) {
     queryKey: ['hub-dashboard', contrato],
     queryFn:  () => api.get(`/hub/dashboard?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: Infinity,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   })
   if (isLoading) return <Skeleton />
@@ -1787,7 +1788,8 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['hub-financeiro', contrato],
     queryFn:  () => api.get(`/hub/financeira?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
-    staleTime: Infinity,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
     enabled:  !!contrato,
   })
@@ -1903,11 +1905,13 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
       { key: ['hub-financeiro', cod],   url: `/hub/financeira?contrato=${encodeURIComponent(cod)}` },
       { key: ['hub-agente-insights', cod], url: `/hub/agente/insights?contrato=${encodeURIComponent(cod)}` },
     ]
+    const FINANCIAL_KEYS = ['hub-dashboard', 'hub-financeiro']
     tabs.forEach(({ key, url }) => {
+      const isFinancial = FINANCIAL_KEYS.includes(key[0] as string)
       queryClient.prefetchQuery({
         queryKey: key,
         queryFn:  () => api.get(url).then(r => r.data),
-        staleTime: Infinity,
+        staleTime: isFinancial ? 5 * 60_000 : Infinity,
       })
     })
   }, [queryClient])
