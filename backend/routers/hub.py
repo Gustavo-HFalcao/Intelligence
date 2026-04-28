@@ -2196,21 +2196,41 @@ async def update_contrato(
     }
     data = {k: v for k, v in body.items() if k in ALLOWED}
 
-    if not data:
-        # Nenhum campo válido enviado — retorna ok silencioso
-        return {"ok": True}
+    import logging as _log
+    _log.getLogger("hub").info(
+        f"update_contrato | code={contrato_code!r} | fields={list(data.keys())} | client_id={client_id!r}"
+    )
 
-    # IMPORTANT: filtro APENAS pelo código do contrato (chave natural da tabela).
-    # Não incluir client_id no filtro de UPDATE — se o registro tiver client_id=NULL
-    # o Supabase retorna 404 (0 rows matched) e a operação falha silenciosamente.
-    # O client_id é usado para autorização de leitura, não como filtro de escrita aqui.
+    if not data:
+        _log.getLogger("hub").warning(f"update_contrato | code={contrato_code!r} | nenhum campo valido enviado")
+        return {"ok": True, "note": "no updatable fields"}
+
+    # Usa HTTP direto com Prefer=return=minimal para evitar comportamento inconsistente
+    # do PostgREST com return=representation quando 0 rows são afetadas.
+    from backend.integrations.supabase import SUPABASE_URL, SUPABASE_KEY, _WRITE_TIMEOUT, _request_with_retry
+    REST_BASE_LOCAL = f"{SUPABASE_URL}/rest/v1"
+    h = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",  # retorna 204 sempre, sem body
+    }
+    params = {"contrato": f"eq.{contrato_code}"}
     try:
-        sb_update("contratos", filters={"contrato": contrato_code}, data=data)
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+        resp = _request_with_retry(
+            "patch", f"{REST_BASE_LOCAL}/contratos",
+            headers=h, params=params, json=data, timeout=_WRITE_TIMEOUT,
+        )
+        _log.getLogger("hub").info(
+            f"update_contrato | code={contrato_code!r} | supabase_status={resp.status_code} | body={resp.text[:200]!r}"
+        )
+        if resp.status_code not in (200, 204):
+            return {"ok": False, "error": f"Supabase {resp.status_code}: {resp.text[:300]}"}
+    except Exception as exc:
+        _log.getLogger("hub").error(f"update_contrato | code={contrato_code!r} | exception={exc}")
+        return {"ok": False, "error": str(exc)}
 
     DataLoader.invalidate_cache(client_id or "")
-
     return {"ok": True}
 
 

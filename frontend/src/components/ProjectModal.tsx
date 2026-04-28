@@ -132,25 +132,31 @@ export default function ProjectModal({ isOpen, onClose, editingProject }: Projec
   }
 
   const mutation = useMutation({
-    mutationFn: (data: any) => {
-      // Map frontend field names to backend expected names
+    mutationFn: async (data: any) => {
       const payload = {
         ...data,
         data_inicio: data.inicio,
         data_termino: data.termino,
       }
       const url = editingProject
-        ? `/api/hub/contratos/${editingProject.contrato}`
+        ? `/api/hub/contratos/${encodeURIComponent(editingProject.contrato)}`
         : '/api/hub/contratos'
-      if (editingProject) return api.patch(url, payload).then(r => r.data)
+      if (editingProject) {
+        const result = await api.patch(url, payload).then(r => r.data)
+        // Backend pode retornar 200 com {ok:false, error:"..."} — trata como erro
+        if (result?.ok === false) throw new Error(result.error || 'Erro ao salvar projeto')
+        return result
+      }
       return api.post(url, payload).then(r => r.data)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hub-contratos'] })
       queryClient.invalidateQueries({ queryKey: ['contratos-list'] })
+      queryClient.invalidateQueries({ queryKey: ['hub-contratos-list'] })
       onClose()
     }
   })
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
