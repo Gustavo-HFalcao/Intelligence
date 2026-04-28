@@ -2086,6 +2086,14 @@ async def create_contrato(
         body["latitude"] = lat
         body["longitude"] = lon
 
+    # Campos permitidos na tabela contratos
+    ALLOWED_CREATE = {
+        "contrato", "projeto", "cliente", "gestor", "localizacao", "valor_contratado",
+        "data_inicio", "data_termino", "status", "latitude", "longitude",
+        "potencia_kwp", "prioridade", "terceirizado", "dias_uteis_semana", "obs", "client_id",
+    }
+    body = {k: v for k, v in body.items() if k in ALLOWED_CREATE}
+
     row = sb_insert("contratos", body)
     DataLoader.invalidate_cache(client_id or "")
     return {"ok": True, "row": row}
@@ -2102,14 +2110,30 @@ async def update_contrato(
     filters = {"contrato": contrato_code}
     if client_id:
         filters["client_id"] = client_id
-    
+
+    # Normaliza aliases de datas
+    if body.get("inicio") and not body.get("data_inicio"):
+        body["data_inicio"] = body["inicio"]
+    if body.get("termino") and not body.get("data_termino"):
+        body["data_termino"] = body["termino"]
+    if body.get("potencia_kwp_contratada") and not body.get("potencia_kwp"):
+        body["potencia_kwp"] = body["potencia_kwp_contratada"]
+
     # Se mudar localização e não tiver lat/long, re-geocodificar
     if body.get("localizacao") and not body.get("latitude"):
         lat, lon = await _get_coords(body["localizacao"])
         body["latitude"] = lat
         body["longitude"] = lon
 
-    sb_update("contratos", filters=filters, data=body)
+    # Campos permitidos na tabela contratos (evita erro de coluna desconhecida)
+    ALLOWED = {
+        "projeto", "cliente", "gestor", "localizacao", "valor_contratado",
+        "data_inicio", "data_termino", "status", "latitude", "longitude",
+        "potencia_kwp", "prioridade", "terceirizado", "dias_uteis_semana", "obs",
+    }
+    data = {k: v for k, v in body.items() if k in ALLOWED}
+
+    sb_update("contratos", filters=filters, data=data)
     DataLoader.invalidate_cache(client_id or "")
     return {"ok": True}
 

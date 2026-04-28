@@ -9,7 +9,7 @@ import {
   MapPin, Camera, PenLine, Send, Trash2, Plus, Save, CheckCircle,
   Clock, CloudRain, Users, AlertTriangle, ChevronDown, ChevronUp,
   ExternalLink, RefreshCw, Navigation, LogOut, Image as ImageIcon,
-  Zap, FileText, ArrowLeft, Download, X, ChevronLeft, ChevronRight,
+  Zap, FileText, ArrowLeft, Download, X, ChevronLeft, ChevronRight, Edit2,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/services/api'
@@ -123,9 +123,11 @@ export default function RDOForm() {
   const [checkinLoading, setCheckinLoading]   = useState(false)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [evidencias, setEvidencias]     = useState<any[]>([])
-  const [showAtividades, setShowAtividades] = useState(true)
+  const [showAtividades, setShowAtividades] = useState(false)
+  const [showNaoMapeada, setShowNaoMapeada] = useState(false)
   const [previstasHoje, setPrevistasHoje]   = useState<any[]>([])
   const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const [draftWarning, setDraftWarning]     = useState(false)
 
   // Lightbox state for evidências
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
@@ -170,6 +172,7 @@ export default function RDOForm() {
   const [atividadesRDO, setAtividadesRDO] = useState<any[]>([])
   const [selectedCronAt, setSelectedCronAt] = useState<any>(null)
   const [uploadingCat, setUploadingCat] = useState<FotoCat | null>(null)
+  const [editingAtId, setEditingAtId] = useState<string | null>(null)
 
   const [newAt, setNewAt] = useState({
     atividade_id: '',
@@ -218,6 +221,8 @@ export default function RDOForm() {
           setForm(f => ({ ...f, ...draft }))
           setAtividadesRDO(ats || [])
           setEvidencias(evs || [])
+          // Só mostra o warning se não veio de um link direto (urlDraftId vazio)
+          if (!urlDraftId) setDraftWarning(true)
         } else if (!urlDraftId) {
           // Sem rascunho: busca último RDO submetido e calcula próximo dia útil
           api.get(`/rdo/historico?contrato=${encodeURIComponent(form.contrato)}&page_size=1`)
@@ -430,15 +435,42 @@ export default function RDOForm() {
 
     if (!currentDraftId) return
 
+    // Validação de efetivo — soma de todos ≤ equipe_alocada
+    const equipeTotal = Number(form.equipe_alocada || 0)
+    if (equipeTotal > 0 && newAt.efetivo) {
+      const efetivoExistente = atividadesRDO.reduce((sum, a) => sum + Number(a.efetivo || 0), 0)
+      const novoEfetivo = Number(newAt.efetivo || 0)
+      if (efetivoExistente + novoEfetivo > equipeTotal) {
+        setValidationErrors([`Efetivo total (${efetivoExistente + novoEfetivo}) excede a equipe alocada (${equipeTotal}). Ajuste os valores.`])
+        return
+      }
+    }
+
     const r = await api.post(`/rdo/${currentDraftId}/atividades`, payload)
-    setAtividadesRDO(a => [...a, r.data.row || { ...payload, id: Date.now().toString() }])
+    const novaAt = r.data.row || { ...payload, id: Date.now().toString() }
+    setAtividadesRDO(a => [...a, novaAt])
+
+    // Remove da lista de previstas após adicionar
+    if (newAt.atividade_id) {
+      setPrevistasHoje(p => p.filter(a => a.id !== newAt.atividade_id))
+    }
+
     setSelectedCronAt(null)
+    setValidationErrors([])
     setNewAt({ atividade_id: '', descricao: '', pct: 0, qtd_executada: '', unidade: '', efetivo: '', is_marco: false, marco_concluido: false })
   }
 
   async function removeAtividade(id: string) {
     if (draftId) await api.delete(`/rdo/${draftId}/atividades/${id}`)
     setAtividadesRDO(a => a.filter(x => x.id !== id))
+  }
+
+  async function updateAtividade(id: string, patch: Record<string, any>) {
+    if (draftId) {
+      await api.patch(`/rdo/${draftId}/atividades/${id}`, patch)
+    }
+    setAtividadesRDO(a => a.map(x => x.id === id ? { ...x, ...patch } : x))
+    setEditingAtId(null)
   }
 
   function preencherDoCronograma(at: any) {
@@ -691,6 +723,36 @@ export default function RDOForm() {
           </ul>
         </motion.div>
       )}
+
+      {/* Banner: rascunho existente encontrado */}
+      <AnimatePresence>
+        {draftWarning && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            style={{ background: `${COPPER}10`, border: `1px solid ${COPPER}35`, borderRadius: 10 }}
+            className="p-4 flex items-start gap-3"
+          >
+            <AlertTriangle size={16} style={{ color: COPPER, flexShrink: 0, marginTop: 1 }} />
+            <div className="flex-1">
+              <div className="text-xs font-black uppercase tracking-widest mb-1" style={{ color: COPPER }}>
+                Rascunho encontrado
+              </div>
+              <div className="text-xs text-white/60">
+                Encontramos um rascunho em aberto para este contrato. Você está continuando de onde parou.
+                Para começar um novo RDO, descarte o rascunho.
+              </div>
+            </div>
+            <button
+              onClick={() => setDraftWarning(false)}
+              style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CABEÇALHO */}
       <Section title="Cabeçalho do RDO" icon={FileText}>
@@ -1162,42 +1224,64 @@ export default function RDOForm() {
               </div>
             </div>
           ) : (
-            /* ── Atividade não mapeada (digitada manualmente) ── */
+            /* ── Atividade não mapeada (colapsável por padrão) ── */
             <div className="flex flex-col gap-2">
-              <input
-                placeholder="Descreva a atividade executada não mapeada no cronograma..."
-                value={newAt.descricao}
-                onChange={e => setNewAt(a => ({ ...a, descricao: e.target.value }))}
-                style={{ ...inputStyle, fontSize: 13 }}
-              />
-              <div style={{ background: `rgba(239,68,68,0.06)`, border: `1px solid rgba(239,68,68,0.2)`, borderRadius: 6, padding: '6px 10px' }} className="flex items-center gap-2">
-                <AlertTriangle size={11} style={{ color: RED }} />
-                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                  Atividade não mapeada. Aparecerá para aprovação e preenchimento do gestor no Hub.
+              <button
+                type="button"
+                onClick={() => setShowNaoMapeada(s => !s)}
+                style={{ background: 'rgba(239,68,68,0.06)', border: `1px solid rgba(239,68,68,0.2)`, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}
+              >
+                <span className="flex items-center gap-2">
+                  <AlertTriangle size={12} style={{ color: RED }} />
+                  Atividade não mapeada no cronograma
                 </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="number" min={0}
-                  placeholder="Qtd. executada"
-                  value={newAt.qtd_executada}
-                  onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
-                  style={inputStyle}
-                />
-                <input
-                  placeholder="Unidade (m², und, km...)"
-                  value={newAt.unidade}
-                  onChange={e => setNewAt(a => ({ ...a, unidade: e.target.value }))}
-                  style={inputStyle}
-                />
-              </div>
-              <input
-                type="number" min={0}
-                placeholder="Pessoas alocadas"
-                value={newAt.efetivo}
-                onChange={e => setNewAt(a => ({ ...a, efetivo: e.target.value }))}
-                style={inputStyle}
-              />
+                {showNaoMapeada ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              <AnimatePresence>
+                {showNaoMapeada && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="flex flex-col gap-2 overflow-hidden"
+                  >
+                    <div style={{ background: `rgba(239,68,68,0.06)`, border: `1px solid rgba(239,68,68,0.2)`, borderRadius: 6, padding: '6px 10px' }} className="flex items-center gap-2">
+                      <AlertTriangle size={11} style={{ color: RED }} />
+                      <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                        Aparecerá para aprovação e preenchimento do gestor no Hub.
+                      </span>
+                    </div>
+                    <input
+                      placeholder="Descreva a atividade executada..."
+                      value={newAt.descricao}
+                      onChange={e => setNewAt(a => ({ ...a, descricao: e.target.value }))}
+                      style={{ ...inputStyle, fontSize: 13 }}
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number" min={0}
+                        placeholder="Qtd. executada"
+                        value={newAt.qtd_executada}
+                        onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
+                        style={inputStyle}
+                      />
+                      <input
+                        placeholder="Unidade (m², und, km...)"
+                        value={newAt.unidade}
+                        onChange={e => setNewAt(a => ({ ...a, unidade: e.target.value }))}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <input
+                      type="number" min={0}
+                      placeholder="Pessoas alocadas"
+                      value={newAt.efetivo}
+                      onChange={e => setNewAt(a => ({ ...a, efetivo: e.target.value }))}
+                      style={inputStyle}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
 
@@ -1216,38 +1300,104 @@ export default function RDOForm() {
         )}
         {atividadesRDO.map((a, i) => {
           const status = a.status || statusFromPct(a.pct || 0)
+          const isEditing = editingAtId === a.id
           return (
             <div
               key={a.id || i}
-              className="flex items-center gap-3 mb-2 rounded-lg p-3"
-              style={{ background: 'rgba(13,17,23,0.4)', border: '1px solid rgba(255,255,255,0.04)' }}
+              className="mb-2 rounded-lg"
+              style={{ background: 'rgba(13,17,23,0.4)', border: `1px solid ${isEditing ? `${COPPER}40` : 'rgba(255,255,255,0.04)'}` }}
             >
-              {/* Status dot */}
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(status), flexShrink: 0 }} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className="text-sm text-text-primary font-semibold truncate">{a.descricao}</div>
-                  {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>MARCO</span>}
+              {/* Summary row */}
+              <div className="flex items-center gap-3 p-3">
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(status), flexShrink: 0 }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm text-text-primary font-semibold truncate">{a.descricao}</div>
+                    {a.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>MARCO</span>}
+                    {a.is_extra && <span style={{ fontSize: 9, color: RED, border: `1px solid ${RED}30`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, flexShrink: 0 }}>NÃO MAPEADA</span>}
+                  </div>
+                  <div className="text-[10px] text-text-muted flex items-center gap-2">
+                    <span style={{ color: statusColor(status) }}>{status}</span>
+                    {a.quantidade > 0 && a.unidade !== '%' ? <span>· {a.quantidade} {a.unidade || ''}</span> : null}
+                    {a.efetivo ? <span>· <Users size={9} className="inline" /> {a.efetivo} pessoas</span> : null}
+                  </div>
                 </div>
-                <div className="text-[10px] text-text-muted flex items-center gap-2">
-                  <span style={{ color: statusColor(status) }}>{status}</span>
-                  {a.qtd_executada ? <span>· {a.qtd_executada} {a.unidade || ''}</span> : null}
-                  {a.efetivo ? <span>· <Users size={9} className="inline" /> {a.efetivo} pessoas</span> : null}
+                <div className="shrink-0 text-center">
+                  {a.is_marco ? (
+                    <span style={{ fontSize: 11, color: a.marco_concluido ? GREEN : COPPER }}>{a.marco_concluido ? '✓ Concluído' : 'Pendente'}</span>
+                  ) : (
+                    <div style={{ color: statusColor(status), fontWeight: 700, fontSize: 14 }}>{a.pct}%</div>
+                  )}
                 </div>
+                <button
+                  onClick={() => setEditingAtId(isEditing ? null : a.id)}
+                  style={{ color: isEditing ? COPPER : 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+                  title="Editar"
+                >
+                  <Edit2 size={13} />
+                </button>
+                <button
+                  onClick={() => removeAtividade(a.id)}
+                  style={{ color: RED, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+                >
+                  <Trash2 size={13} />
+                </button>
               </div>
-              <div className="shrink-0 text-center">
-                {a.is_marco ? (
-                  <span style={{ fontSize: 11, color: a.pct >= 100 ? GREEN : COPPER }}>{a.pct >= 100 ? '✓ Concluído' : 'Pendente'}</span>
-                ) : (
-                  <div style={{ color: statusColor(status), fontWeight: 700, fontSize: 14 }}>{a.pct}%</div>
+
+              {/* Inline edit panel */}
+              <AnimatePresence>
+                {isEditing && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    style={{ borderTop: `1px solid ${COPPER}20`, overflow: 'hidden' }}
+                  >
+                    <div className="p-3 flex gap-2 flex-wrap">
+                      {!a.is_marco && (
+                        <div className="flex gap-2 flex-1">
+                          <input
+                            type="number" min={0}
+                            placeholder="Qtd hoje"
+                            defaultValue={a.quantidade || ''}
+                            onBlur={e => {
+                              const val = e.target.value
+                              if (val !== String(a.quantidade || ''))
+                                updateAtividade(a.id, { qtd_executada: val, quantidade: parseFloat(val) || 0 })
+                            }}
+                            style={{ ...inputStyle, fontSize: 12, flex: 1 }}
+                          />
+                          <div style={{ ...inputStyle, flex: 1, opacity: 0.6, fontSize: 12, display: 'flex', alignItems: 'center' }}>
+                            {a.unidade || 'un'}
+                          </div>
+                        </div>
+                      )}
+                      {a.is_marco && (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            defaultChecked={a.marco_concluido}
+                            onChange={e => updateAtividade(a.id, { marco_concluido: e.target.checked, pct: e.target.checked ? 100 : 0 })}
+                            style={{ width: 16, height: 16, accentColor: COPPER }}
+                          />
+                          <span className="text-xs" style={{ color: COPPER }}>Marco concluído</span>
+                        </label>
+                      )}
+                      <input
+                        type="number" min={0}
+                        placeholder="Pessoas"
+                        defaultValue={a.efetivo || ''}
+                        onBlur={e => {
+                          const val = Number(e.target.value)
+                          if (val !== a.efetivo)
+                            updateAtividade(a.id, { efetivo: val })
+                        }}
+                        style={{ ...inputStyle, fontSize: 12, width: 90 }}
+                      />
+                    </div>
+                  </motion.div>
                 )}
-              </div>
-              <button
-                onClick={() => removeAtividade(a.id)}
-                style={{ color: RED, background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
-              >
-                <Trash2 size={13} />
-              </button>
+              </AnimatePresence>
             </div>
           )
         })}
