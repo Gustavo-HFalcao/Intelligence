@@ -69,17 +69,17 @@ export default function RDOHistorico() {
   const drafts: any[] = (draftData?.rdos ?? []).filter((r: any) => r.status === 'Rascunho')
 
   // ── Lista de contratos para dropdown de notificações ────────────────────────
-  // Usa todos os RDOs carregados + a lista de contratos do hub
+  // Busca direta na tabela contratos por tenant — sem cache, sempre fresco
   const { data: contratosData } = useQuery({
-    queryKey: ['hub-contratos-list'],
-    queryFn: () => api.get('/api/hub/contratos').then(r => r.data),
-    staleTime: 60_000,
+    queryKey: ['rdo-contratos-list'],
+    queryFn: () => api.get('/rdo/contratos').then(r => r.data),
+    staleTime: 30_000,
   })
-  // Combina contratos do hub + contratos dos RDOs carregados
+  // Combina contratos do tenant + contratos dos RDOs carregados (fallback)
   const allRdos: any[] = data?.rdos ?? []
-  const hubContratos: string[] = (contratosData?.contratos ?? []).map((c: any) => c.contrato).filter(Boolean)
+  const tenantContratos: string[] = contratosData?.contratos ?? []
   const rdoContratos: string[] = allRdos.map((r: any) => r.contrato).filter(Boolean)
-  const contratos = Array.from(new Set([...hubContratos, ...rdoContratos])).sort()
+  const contratos = Array.from(new Set([...tenantContratos, ...rdoContratos])).sort()
 
   // ── Notificações ─────────────────────────────────────────────────────────────
   const { data: subData, refetch: refetchSubs } = useQuery({

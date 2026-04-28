@@ -789,6 +789,25 @@ async def list_historico(
     }
 
 
+# ── Contratos do tenant (para dropdowns) ──────────────────────────────────────
+
+@router.get("/contratos")
+async def list_rdo_contratos(
+    _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Lista todos os contratos do tenant — busca direta, sem cache, para dropdowns."""
+    filters: Dict[str, Any] = {}
+    if client_id:
+        filters["client_id"] = client_id
+    rows = sb_select("contratos", filters=filters, limit=500) or []
+    contratos = sorted({
+        str(r.get("contrato") or "").strip()
+        for r in rows
+        if r.get("contrato")
+    })
+    return {"contratos": contratos}
+
 
 # ── Subscribers (notificações por e-mail) ─────────────────────────────────────
 
@@ -831,7 +850,8 @@ async def add_subscriber(
         "contract":    contrato,
         "module":      "rdo",
         "email":       email,
-        "created_by":  str(user.get("id", "")),
+        "created_by":  str(user.get("email") or user.get("username") or user.get("id") or "sistema"),
+        "updated_date": __import__('datetime').datetime.now().isoformat(),
         "client_id":   client_id or None,
     })
     if row is None:
