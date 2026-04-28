@@ -2196,6 +2196,11 @@ async def update_contrato(
     }
     data = {k: v for k, v in body.items() if k in ALLOWED}
 
+    if not data:
+        # Nenhum campo válido enviado (ex: frontend mandou só 'contrato' que é chave,
+        # não campo editável). Retorna sucesso silencioso para não travar o modal.
+        return {"ok": True}
+
     sb_update("contratos", filters=filters, data=data)
     DataLoader.invalidate_cache(client_id or "")
     return {"ok": True}
