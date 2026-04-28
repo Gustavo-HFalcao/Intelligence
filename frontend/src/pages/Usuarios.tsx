@@ -62,16 +62,15 @@ export default function Usuarios() {
   const users = userData?.users ?? []
   const roles = rolesData?.roles ?? []
   const availableModules = rolesData?.modules ?? []
+  const landingOptions = rolesData?.landing_options ?? []
 
   const toggleModule = (slug: string) => {
     setRoleForm(prev => {
-      const current = prev.modulos || []
-      return {
-        ...prev,
-        modulos: current.includes(slug) 
-          ? current.filter((s: string) => s !== slug) 
-          : [...current, slug]
-      }
+      const current = prev.modulos || prev.modules || []
+      const next = current.includes(slug)
+        ? current.filter((s: string) => s !== slug)
+        : [...current, slug]
+      return { ...prev, modulos: next, modules: next }
     })
   }
 
@@ -125,19 +124,25 @@ export default function Usuarios() {
               <div className="absolute top-0 right-0 p-4 opacity-5">
                  <Shield size={64} className="text-copper" />
               </div>
-              <h3 className="text-[10px] font-black text-copper uppercase tracking-widest mb-4 border-b border-copper/10 pb-2">Parâmetros de Provisionamento</h3>
+              <h3 className="text-[10px] font-black text-copper uppercase tracking-widest mb-4 border-b border-copper/10 pb-2">
+                {editUser ? `Editar: ${editUser.login}` : 'Parâmetros de Provisionamento'}
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {!editUser && (
+                  <div className="flex flex-col gap-1.5">
+                     <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Login de Acesso *</label>
+                     <input
+                      value={userForm.login || ''}
+                      onChange={e => setUserForm(prev => ({...prev, login: e.target.value}))}
+                      className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
+                     />
+                  </div>
+                )}
                 <div className="flex flex-col gap-1.5">
-                   <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Login de Acesso *</label>
-                   <input 
-                    value={userForm.login || ''}
-                    onChange={e => setUserForm(prev => ({...prev, login: e.target.value}))}
-                    className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
-                   />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                   <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Senha Temporária *</label>
-                   <input 
+                   <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">
+                     {editUser ? 'Nova Senha (deixe em branco para não alterar)' : 'Senha Temporária *'}
+                   </label>
+                   <input
                     type="password"
                     value={userForm.password || ''}
                     onChange={e => setUserForm(prev => ({...prev, password: e.target.value}))}
@@ -184,16 +189,19 @@ export default function Usuarios() {
               </div>
 
               <div className="flex items-center gap-2 mt-6 pt-6 border-t border-white/5">
-                 <Button 
-                    onClick={() => createUserMut.mutate(userForm)}
-                    disabled={createUserMut.isPending}
+                 <Button
+                    onClick={() => editUser
+                      ? updateUserMut.mutate({ id: editUser.id, body: userForm })
+                      : createUserMut.mutate(userForm)
+                    }
+                    disabled={createUserMut.isPending || updateUserMut.isPending}
                     className="bg-teal-500 hover:bg-teal-600 text-void font-black text-[10px] uppercase tracking-widest px-8"
                  >
-                    {createUserMut.isPending ? 'Provisionando...' : 'Efetivar Usuário'}
+                    {(createUserMut.isPending || updateUserMut.isPending) ? 'Salvando...' : editUser ? 'Salvar Alterações' : 'Efetivar Usuário'}
                  </Button>
-                 <Button 
+                 <Button
                     variant="link"
-                    onClick={() => { setShowUserForm(false); setUserForm({ is_active: true }); }}
+                    onClick={() => { setShowUserForm(false); setEditUser(null); setUserForm({ is_active: true }); }}
                     className="text-text-muted hover:text-white text-[10px] font-bold uppercase tracking-widest"
                  >
                     Cancelar Operação
@@ -236,7 +244,14 @@ export default function Usuarios() {
                      </td>
                      <td className="px-5 py-4">
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                           <button className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"><Edit2 size={13} /></button>
+                           <button
+                             onClick={() => {
+                               setEditUser(u)
+                               setUserForm({ role: u.role, email: u.email, contrato: u.contrato, avatar_icon: u.avatar_icon })
+                               setShowUserForm(true)
+                             }}
+                             className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"
+                           ><Edit2 size={13} /></button>
                            <button onClick={() => { if(confirm('Excluir usuário?')) deleteUserMut.mutate(u.id); }} className="p-1.5 hover:bg-red-500/10 rounded-lg text-red-500/40 hover:text-red-500 transition-all"><Trash2 size={13} /></button>
                         </div>
                      </td>
@@ -287,20 +302,33 @@ export default function Usuarios() {
                       <div className="grid grid-cols-2 gap-4">
                          <div className="flex flex-col gap-1.5">
                             <label className="text-[9px] font-black text-copper uppercase tracking-widest">Nome do Perfil</label>
-                            <input 
-                              value={roleForm.nome || ''}
-                              onChange={e => setRoleForm(prev => ({...prev, nome: e.target.value}))}
+                            <input
+                              value={roleForm.nome || roleForm.name || ''}
+                              onChange={e => setRoleForm(prev => ({...prev, nome: e.target.value, name: e.target.value}))}
                               className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
                             />
                          </div>
                          <div className="flex flex-col gap-1.5">
-                            <label className="text-[9px] font-black text-copper uppercase tracking-widest">Identificador Corporativo</label>
-                            <input 
-                              value={roleForm.descricao || ''}
-                              onChange={e => setRoleForm(prev => ({...prev, descricao: e.target.value}))}
+                            <label className="text-[9px] font-black text-copper uppercase tracking-widest">Descrição</label>
+                            <input
+                              value={roleForm.descricao || roleForm.icon || ''}
+                              onChange={e => setRoleForm(prev => ({...prev, descricao: e.target.value, icon: e.target.value}))}
                               placeholder="Ex: Engenharia de Campo"
                               className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
                             />
+                         </div>
+                         <div className="flex flex-col gap-1.5 col-span-2">
+                            <label className="text-[9px] font-black text-copper uppercase tracking-widest">Página Inicial (após login)</label>
+                            <select
+                              value={roleForm.landing_page || ''}
+                              onChange={e => setRoleForm(prev => ({...prev, landing_page: e.target.value}))}
+                              className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all appearance-none"
+                            >
+                              <option value="">Padrão (primeira rota permitida)</option>
+                              {landingOptions.map((o: any) => (
+                                <option key={o.path} value={o.path}>{o.label} — {o.path}</option>
+                              ))}
+                            </select>
                          </div>
                       </div>
 
@@ -313,10 +341,10 @@ export default function Usuarios() {
                               <div 
                                 key={m.slug}
                                 onClick={() => toggleModule(m.slug)}
-                                className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-all ${roleForm.modulos?.includes(m.slug) ? 'bg-copper/20 border-copper/50 text-white' : 'bg-void/40 border-white/5 text-white/40'}`}
+                                className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-all ${(roleForm.modulos || roleForm.modules || []).includes(m.slug) ? 'bg-copper/20 border-copper/50 text-white' : 'bg-void/40 border-white/5 text-white/40'}`}
                               >
-                                 <div className={`w-3 h-3 rounded border flex items-center justify-center ${roleForm.modulos?.includes(m.slug) ? 'bg-copper border-copper' : 'border-white/20'}`}>
-                                    {roleForm.modulos?.includes(m.slug) && <div className="w-1.5 h-1.5 bg-void rounded-sm" />}
+                                 <div className={`w-3 h-3 rounded border flex items-center justify-center ${(roleForm.modulos || roleForm.modules || []).includes(m.slug) ? 'bg-copper border-copper' : 'border-white/20'}`}>
+                                    {(roleForm.modulos || roleForm.modules || []).includes(m.slug) && <div className="w-1.5 h-1.5 bg-void rounded-sm" />}
                                  </div>
                                  <span className="text-[10px] font-bold uppercase tracking-tight">{m.label}</span>
                               </div>

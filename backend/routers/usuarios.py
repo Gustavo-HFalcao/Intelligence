@@ -1,7 +1,8 @@
 """
 Usuarios router — /api/usuarios
 CRUD de usuários (login table) + perfis de acesso (roles table).
-Tables: login, roles
+Schema real: login(id, username, password, user_role, avatar_icon, email, client_id, project, pw_hash)
+             roles(id, name, modules, icon, client_id, landing_page)
 """
 
 import hashlib
@@ -37,7 +38,16 @@ MODULES: List[tuple] = [
     ("gerenciar_usuarios","Gerenciar Usuários","users"),
 ]
 
-ROLES = ["Administrador","Engenheiro","Gestão-Mobile","Operário"]
+LANDING_OPTIONS: List[tuple] = [
+    ("/hub",              "Hub de Operações"),
+    ("/rdo-form",         "Novo RDO"),
+    ("/rdo-historico",    "Histórico de RDOs"),
+    ("/financeiro",       "Financeiro"),
+    ("/relatorios",       "Relatórios"),
+    ("/om",               "O&M"),
+    ("/reembolso",        "Reembolso"),
+    ("/usuarios",         "Usuários"),
+]
 
 
 def _hash_password(password: str) -> str:
@@ -48,17 +58,33 @@ def _hash_password(password: str) -> str:
 
 def _norm_user(r: Dict) -> Dict:
     return {
-        "id":          str(r.get("id","")),
-        "login":       str(r.get("login","")),
-        "nome":        str(r.get("nome") or r.get("login","")),
-        "email":       str(r.get("email","")),
-        "role":        str(r.get("role","Operário")),
-        "role_id":     str(r.get("role_id","")),
-        "contrato":    str(r.get("contrato","")),
-        "client_id":   str(r.get("client_id","")),
-        "is_active":   bool(r.get("is_active", True)),
-        "avatar_icon": str(r.get("avatar_icon","user")),
-        "created_at":  str(r.get("created_at",""))[:10],
+        "id":          str(r.get("id", "")),
+        "login":       str(r.get("username", "")),
+        "username":    str(r.get("username", "")),
+        "nome":        str(r.get("username", "")),  # login table tem apenas username
+        "email":       str(r.get("email", "")),
+        "role":        str(r.get("user_role", "Operário")),
+        "user_role":   str(r.get("user_role", "Operário")),
+        "contrato":    str(r.get("project", "")),
+        "project":     str(r.get("project", "")),
+        "client_id":   str(r.get("client_id", "")),
+        "is_active":   True,  # campo não existe na tabela — assume ativo
+        "avatar_icon": str(r.get("avatar_icon", "user")),
+        "created_at":  str(r.get("created_at", ""))[:10],
+    }
+
+
+def _norm_role(r: Dict) -> Dict:
+    return {
+        "id":           str(r.get("id", "")),
+        "nome":         str(r.get("name", "")),
+        "name":         str(r.get("name", "")),
+        "descricao":    str(r.get("icon", "")),  # usando icon como descrição curta
+        "modulos":      r.get("modules") or [],
+        "modules":      r.get("modules") or [],
+        "landing_page": str(r.get("landing_page", "")),
+        "client_id":    str(r.get("client_id", "")),
+        "created_at":   str(r.get("created_at", ""))[:10],
     }
 
 
@@ -72,7 +98,7 @@ async def list_users(
     filters: Dict[str, Any] = {}
     if client_id:
         filters["client_id"] = client_id
-    rows = sb_select("login", filters=filters, order="login.asc", limit=500) or []
+    rows = sb_select("login", filters=filters, order="username.asc", limit=500) or []
     return {"users": [_norm_user(r) for r in rows]}
 
 
@@ -82,26 +108,25 @@ async def create_user(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    login    = str(body.get("login","")).strip()
-    password = str(body.get("password","")).strip()
-    if not login or not password:
+    username = str(body.get("login", body.get("username", ""))).strip()
+    password = str(body.get("password", "")).strip()
+    if not username or not password:
         return {"ok": False, "error": "Login e senha obrigatórios"}
 
-    existing = sb_select("login", filters={"login": login}, limit=1) or []
+    existing = sb_select("login", filters={"username": username}, limit=1) or []
     if existing:
         return {"ok": False, "error": "Login já existe"}
 
+    pw_hash = _hash_password(password)
     payload = {
-        "login":       login,
-        "password":    _hash_password(password),
-        "nome":        body.get("nome", login),
-        "email":       body.get("email",""),
-        "role":        body.get("role","Operário"),
-        "role_id":     body.get("role_id") or None,
-        "contrato":    body.get("contrato",""),
-        "client_id":   client_id,
-        "is_active":   True,
-        "avatar_icon": body.get("avatar_icon","user"),
+        "username":   username,
+        "password":   pw_hash,
+        "pw_hash":    pw_hash,
+        "user_role":  body.get("role", body.get("user_role", "Operário")),
+        "email":      body.get("email", ""),
+        "project":    body.get("contrato", body.get("project", "")),
+        "avatar_icon": body.get("avatar_icon", "user"),
+        "client_id":  client_id,
     }
     row = sb_insert("login", payload)
     return {"ok": True, "user": _norm_user(row) if row else {}}
@@ -113,12 +138,23 @@ async def update_user(
     body: Dict[str, Any] = Body(...),
     _user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    allowed = {"nome","email","role","role_id","contrato","is_active","avatar_icon"}
-    data    = {k: v for k,v in body.items() if k in allowed}
+    data: Dict[str, Any] = {}
+    if "role" in body or "user_role" in body:
+        data["user_role"] = body.get("role") or body.get("user_role")
+    if "email" in body:
+        data["email"] = body["email"]
+    if "contrato" in body or "project" in body:
+        data["project"] = body.get("contrato") or body.get("project")
+    if "avatar_icon" in body:
+        data["avatar_icon"] = body["avatar_icon"]
     if "password" in body and body["password"]:
-        data["password"] = _hash_password(str(body["password"]))
+        pw = _hash_password(str(body["password"]))
+        data["password"] = pw
+        data["pw_hash"]  = pw
+    if not data:
+        return {"ok": True}
     row = sb_update("login", filters={"id": user_id}, data=data)
-    return {"ok": True, "user": _norm_user(row) if row else {}}
+    return {"ok": True, "user": _norm_user(row) if isinstance(row, dict) else {}}
 
 
 @router.delete("/{user_id}")
@@ -135,12 +171,12 @@ async def list_roles(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     filters: Dict[str, Any] = {"client_id": client_id} if client_id else {}
-    rows = sb_select("roles", filters=filters, order="nome.asc", limit=200) or []
+    rows = sb_select("roles", filters=filters, order="name.asc", limit=200) or []
     return {
-        "roles": rows, 
-        "role_options": ROLES, 
-        "modules": [{"slug": m[0], "label": m[1], "icon": m[2]} for m in MODULES],
-        "default_modules": [m[0] for m in MODULES]
+        "roles":           [_norm_role(r) for r in rows],
+        "modules":         [{"slug": m[0], "label": m[1], "icon": m[2]} for m in MODULES],
+        "landing_options": [{"path": p[0], "label": p[1]} for p in LANDING_OPTIONS],
+        "default_modules": [m[0] for m in MODULES],
     }
 
 
@@ -151,14 +187,14 @@ async def create_role(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     payload = {
-        "nome":        body.get("nome",""),
-        "descricao":   body.get("descricao",""),
-        "modulos":     body.get("modulos",[]),
-        "permissoes":  body.get("permissoes",{}),
-        "client_id":   client_id,
+        "name":         body.get("nome", body.get("name", "")),
+        "modules":      body.get("modulos", body.get("modules", [])),
+        "icon":         body.get("descricao", body.get("icon", "")),
+        "landing_page": body.get("landing_page", ""),
+        "client_id":    client_id,
     }
     row = sb_insert("roles", payload)
-    return {"ok": True, "role": row}
+    return {"ok": True, "role": _norm_role(row) if row else {}}
 
 
 @router.patch("/roles/{role_id}")
@@ -167,10 +203,19 @@ async def update_role(
     body: Dict[str, Any] = Body(...),
     _user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    allowed = {"nome","descricao","modulos","permissoes"}
-    data    = {k: v for k,v in body.items() if k in allowed}
+    data: Dict[str, Any] = {}
+    if "nome" in body or "name" in body:
+        data["name"] = body.get("nome") or body.get("name")
+    if "modulos" in body or "modules" in body:
+        data["modules"] = body.get("modulos") or body.get("modules")
+    if "descricao" in body or "icon" in body:
+        data["icon"] = body.get("descricao") or body.get("icon")
+    if "landing_page" in body:
+        data["landing_page"] = body["landing_page"]
+    if not data:
+        return {"ok": True}
     row = sb_update("roles", filters={"id": role_id}, data=data)
-    return {"ok": True, "role": row}
+    return {"ok": True, "role": _norm_role(row) if isinstance(row, dict) else {}}
 
 
 @router.delete("/roles/{role_id}")
@@ -183,7 +228,7 @@ async def delete_role(role_id: str, _user=Depends(get_current_user)) -> Dict[str
 
 @router.get("/perfil")
 async def get_perfil(user=Depends(get_current_user)) -> Dict[str, Any]:
-    rows = sb_select("login", filters={"login": user["login"]}, limit=1) or []
+    rows = sb_select("login", filters={"username": user.get("login", user.get("username", ""))}, limit=1) or []
     if not rows:
         return {"user": {}}
     return {"user": _norm_user(rows[0])}
@@ -194,18 +239,21 @@ async def update_perfil(
     body: Dict[str, Any] = Body(...),
     user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    rows = sb_select("login", filters={"login": user["login"]}, limit=1) or []
+    username = user.get("login") or user.get("username", "")
+    rows = sb_select("login", filters={"username": username}, limit=1) or []
     if not rows:
         return {"ok": False, "error": "Usuário não encontrado"}
     user_id = rows[0]["id"]
     data: Dict[str, Any] = {}
-    if body.get("nome"):
-        data["nome"] = body["nome"]
     if body.get("email"):
         data["email"] = body["email"]
     if body.get("avatar_icon"):
         data["avatar_icon"] = body["avatar_icon"]
     if body.get("password"):
-        data["password"] = _hash_password(str(body["password"]))
+        pw = _hash_password(str(body["password"]))
+        data["password"] = pw
+        data["pw_hash"]  = pw
+    if not data:
+        return {"ok": True}
     row = sb_update("login", filters={"id": user_id}, data=data)
-    return {"ok": True, "user": _norm_user(row) if row else {}}
+    return {"ok": True, "user": _norm_user(row) if isinstance(row, dict) else {}}

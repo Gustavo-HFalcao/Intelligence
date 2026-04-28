@@ -16,6 +16,7 @@ export interface User {
   client_name: string | null
   is_master: boolean
   allowed_modules: string[]
+  landing_page?: string
   avatar_icon?: string
   whatsapp?: string
 }

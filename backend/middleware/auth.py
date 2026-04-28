@@ -125,10 +125,12 @@ def login_user(username: str, password: str) -> Optional[dict]:
 
     # 5. Busca Permissões do Role (Paridade 1:1)
     # No backend, o formatador de permissões do Reflex é simplificado aqui
+    landing_page = ""
     try:
         role_rows = sb_select("roles", filters={"name": role_name, "client_id": client_id})
         if role_rows:
             allowed_modules = list(role_rows[0].get("modules", []))
+            landing_page    = str(role_rows[0].get("landing_page") or "")
     except Exception as e:
         print(f"DEBUG AUTH: Erro ao buscar permissões: {e}")
 
@@ -142,6 +144,7 @@ def login_user(username: str, password: str) -> Optional[dict]:
         "role_name":      role_name,
         "is_master":      is_master,
         "allowed_modules": allowed_modules,
+        "landing_page":   landing_page,
         "avatar_icon":    str(user.get("avatar_icon") or ""),
         "avatar_type":    str(user.get("avatar_type") or "initial"),
         "whatsapp":       str(user.get("whatsapp") or ""),

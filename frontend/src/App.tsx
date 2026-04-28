@@ -96,6 +96,9 @@ function RoleRedirect() {
   if (isLoading || isPremiumLoading) return <LoadingScreen />
   if (!user) return <Navigate to="/login" replace />
 
+  // landing_page configurada no perfil tem prioridade
+  if (user.landing_page) return <Navigate to={user.landing_page} replace />
+
   // Se tem allowed_modules, vai para o primeiro disponível
   if (user.allowed_modules?.length) {
     const target = getFirstAllowedRoute(user.allowed_modules)
