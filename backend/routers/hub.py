@@ -84,8 +84,19 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None, 
     if working_days is None:
         working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default (contrato padrão)
 
-    # Se não há data de referência (sem RDOs), o esperado = 0 → desvio = 0
-    ref = ref_date if ref_date is not None else today
+    # REGRA FUNDAMENTAL: sem RDO submetido não existe desvio
+    # ref_date=None significa que nenhum RDO foi submetido ainda
+    if ref_date is None:
+        ids_com_filhos_z = {a["parent_id"] for a in atividades if a.get("parent_id")}
+        folhas_z = [a for a in atividades if a["id"] not in ids_com_filhos_z and a.get("fase") is not None] or atividades
+        if not folhas_z:
+            return {"progress_pct": 0.0, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
+        peso_total_z = sum(float(a.get("peso_pct") or 1) for a in folhas_z) or 1
+        progress_z = round(sum(float(a.get("conclusao_pct") or 0) * float(a.get("peso_pct") or 1) for a in folhas_z) / peso_total_z, 1)
+        # Desvio = 0 porque não há RDO de referência
+        return {"progress_pct": progress_z, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
+
+    ref = ref_date
 
     ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
     folhas = [
@@ -135,6 +146,7 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None, 
     spi = round(progress_pct / prazo_decorrido_pct, 2) if prazo_decorrido_pct > 0 else 1.0
     desvio_pct = round(progress_pct - prazo_decorrido_pct, 1)
     return {"progress_pct": progress_pct, "prazo_decorrido_pct": prazo_decorrido_pct, "spi": spi, "desvio_pct": desvio_pct}
+
 
 
 def _get_last_rdo_date(contrato: str, client_id: Optional[str] = None) -> Optional[date]:

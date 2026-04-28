@@ -473,14 +473,14 @@ async def submit_rdo(
             # Preferência: atividade_id direto (novo fluxo); fallback: busca por nome
             hub_rows = []
             if at.get("atividade_id"):
-                hub_rows = sb_select("hub_atividades", filters={"id": at["atividade_id"]}, limit=1, client_id=client_id) or []
+                # Busca pelo ID diretamente — sem client_id pois hub_atividades pode não ter client_id preenchido
+                hub_rows = sb_select("hub_atividades", filters={"id": at["atividade_id"]}, limit=1) or []
             if not hub_rows:
                 hub_rows = sb_select(
                     "hub_atividades",
                     filters={"contrato": contrato},
                     raw_filters={"atividade": f"ilike.*{atividade_nome[:40]}*"},
                     limit=1,
-                    client_id=client_id,
                 ) or []
 
             if not hub_rows:
@@ -499,7 +499,7 @@ async def submit_rdo(
                         "conclusao_pct": 100,
                         "last_rdo_date": today_str,
                     }
-                    sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
+                    sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
                     sb_insert("hub_atividade_historico", {
                         "atividade_id":           hub_id,
                         "contrato":               contrato,
@@ -517,7 +517,7 @@ async def submit_rdo(
                     "conclusao_pct": novo_pct,
                     "last_rdo_date": today_str,
                 }
-                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
+                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
                 sb_insert("hub_atividade_historico", {
                     "atividade_id":           hub_id,
                     "contrato":               contrato,
@@ -542,7 +542,7 @@ async def submit_rdo(
                 if novo_pct > pct_atual:
                     hub_update["conclusao_pct"] = novo_pct
 
-                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
+                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
                 sb_insert("hub_atividade_historico", {
                     "atividade_id":           hub_id,
                     "contrato":               contrato,
@@ -592,8 +592,12 @@ async def submit_rdo(
                 _recalc_parent_dates(parent_id, cont, client_id or "")
             # Invalida cache do cronograma — dados mudaram com o RDO
             cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
+            # Invalida DataLoader (contratos/dashboard) para o hub refletir imediatamente
+            from backend.core.data_loader import DataLoader
+            DataLoader.invalidate_cache(client_id or "")
         except Exception:
             pass
+
 
         # ── Insights assíncronos — fire-and-forget via Celery ────────────────
         try:
@@ -658,17 +662,19 @@ def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
         from backend.integrations.supabase import sb_select as _sb
 
         today        = date.today()
-        atividades   = sb_select("hub_atividades",          filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-        rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=7) or []
-        historico    = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=300) or []
+        # Busca SEM client_id para garantir que encontra o RDO recém submetido
+        # (hub_atividades e rdo_master podem não ter client_id preenchido em todos os registros)
+        atividades   = sb_select("hub_atividades",          filters={"contrato": contrato}, limit=500) or []
+        rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato}, order="data.desc", limit=7) or []
+        historico    = sb_select("hub_atividade_historico", filters={"contrato": contrato}, limit=300) or []
 
-        existing     = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+        existing     = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []
         insights_ant = (existing[0].get("insights") or []) if existing else []
 
         insights = _build_insights_llm(atividades, rdo_recentes, contrato, today, historico, insights_ant)
 
         # Persiste no agente_insights (upsert por contrato)
-        existing = sb_select("agente_insights", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
+        existing = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []
         payload  = {
             "contrato":    contrato,
             "insights":    insights,
@@ -681,8 +687,10 @@ def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
         else:
             sb_insert("agente_insights", payload)
 
-    except Exception:
-        pass  # Insights nunca devem bloquear o submit
+    except Exception as exc:
+        import logging
+        logging.getLogger("rdo").error(f"_trigger_insights error: {exc}")
+        # Insights nunca devem bloquear o submit
 
 
 # ── PDF Generation ────────────────────────────────────────────────────────────

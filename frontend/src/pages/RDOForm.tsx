@@ -569,12 +569,21 @@ export default function RDOForm() {
         signatory_doc: form.signatory_doc,
         signatory_sig_b64: sig,
       })
+      // Invalida TODOS os caches relevantes — o hub de projetos atualiza em tempo real
+      // para qualquer usuário que já está na página
       qc.invalidateQueries({ queryKey: ['rdo-historico'] })
+      qc.invalidateQueries({ queryKey: ['rdo-drafts'] })
+      qc.invalidateQueries({ queryKey: ['hub-contratos'] })
+      qc.invalidateQueries({ queryKey: ['cronograma-atividades'] })
+      qc.invalidateQueries({ queryKey: ['hub-kpis'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-kpis'] })
+      qc.invalidateQueries({ queryKey: ['rdo-insights'] })
       navigate('/rdo-historico')
     } finally {
       setIsSubmitting(false)
     }
   }
+
 
   // ── Helpers UI ───────────────────────────────────────────────────────────
 
@@ -588,6 +597,19 @@ export default function RDOForm() {
   const gpsCheckinOk  = !!form.checkin_lat && !!form.checkin_timestamp
   const gpsCheckoutOk = !!form.checkout_lat && !!form.checkout_timestamp
   const hasLinkedContract = !!userContrato
+
+  // Sincroniza projeto/cliente/localizacao do contrato selecionado no form
+  // para que sejam salvos no draft e apareçam no RDO View
+  useEffect(() => {
+    if (!contratoInfo) return
+    setForm(f => ({
+      ...f,
+      projeto:     contratoInfo.projeto    || f.projeto    || '',
+      cliente:     contratoInfo.cliente    || f.cliente    || '',
+      localizacao: contratoInfo.localizacao || f.localizacao || '',
+    }))
+  }, [contratoInfo?.contrato])
+
 
   // ── Lightbox nav ─────────────────────────────────────────────────────────
 
