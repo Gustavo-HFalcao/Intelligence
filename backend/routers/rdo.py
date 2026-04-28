@@ -102,8 +102,10 @@ def _fmt_atividade(a: Dict) -> Dict:
         "status":       _norm(a.get("observacao")),   # observacao = status/notas
         "observacao":   _norm(a.get("observacao")),
         "created_at":   _norm(a.get("created_at")),
-        "is_extra":     bool(a.get("is_extra", False)),
-        "atividade_id": _norm(a.get("atividade_id")),
+        "is_extra":         bool(a.get("is_extra", False)),
+        "atividade_id":     _norm(a.get("atividade_id")),
+        "is_marco":         bool(a.get("is_marco", False)),
+        "marco_concluido":  bool(a.get("marco_concluido", False)),
     }
 
 
@@ -285,15 +287,20 @@ async def add_atividade(
         quantidade = float(pct)
         unidade = "%"
 
+    is_marco        = bool(body.get("is_marco", False))
+    marco_concluido = bool(body.get("marco_concluido", False))
+
     payload = {
-        "rdo_id":      rdo_id,
-        "atividade":   descricao,
-        "quantidade":  quantidade,
-        "unidade":     unidade,
-        "efetivo":     int(body.get("efetivo") or 0),
-        "observacao":  status,
-        "is_extra":    is_extra,
-        "atividade_id": atividade_id,
+        "rdo_id":           rdo_id,
+        "atividade":        descricao,
+        "quantidade":       quantidade,
+        "unidade":          unidade,
+        "efetivo":          int(body.get("efetivo") or 0),
+        "observacao":       status,
+        "is_extra":         is_extra,
+        "atividade_id":     atividade_id,
+        "is_marco":         is_marco,
+        "marco_concluido":  marco_concluido,
     }
     row = sb_insert("rdo_atividades", payload)
     return {"ok": True, "row": _fmt_atividade(row) if isinstance(row, dict) else row}
@@ -448,9 +455,17 @@ async def submit_rdo(
         for at in atividades_rdo:
             if at.get("is_extra"):
                 continue  # extras são tratados no bloco seguinte
-            atividade_nome = _norm(at.get("atividade"))
-            quantidade     = float(at.get("quantidade") or 0)
-            unidade_at     = _norm(at.get("unidade"))
+            atividade_nome  = _norm(at.get("atividade"))
+            unidade_at      = _norm(at.get("unidade"))
+            is_marco        = bool(at.get("is_marco", False))
+            marco_concluido = bool(at.get("marco_concluido", False))
+
+            # quantidade armazenada: para %, é o pct; para física, é qtd_executada
+            if unidade_at == "%":
+                quantidade = float(at.get("quantidade") or 0)
+            else:
+                # campo "quantidade" na tabela JÁ guarda o qtd_executada para unidades físicas
+                quantidade = float(at.get("quantidade") or 0)
 
             if not atividade_nome:
                 continue
@@ -477,28 +492,44 @@ async def submit_rdo(
             if hub.get("parent_id"):
                 _affected_parents.add((hub["parent_id"], contrato))
 
-            # Se unidade é % e quantidade > pct atual → atualiza progresso
-            if unidade_at == "%" and quantidade > pct_atual:
+            # ── Marco concluído → 100% imediato ──────────────────────────────
+            if is_marco and marco_concluido:
+                if pct_atual < 100:
+                    hub_update: Dict[str, Any] = {
+                        "conclusao_pct": 100,
+                        "last_rdo_date": today_str,
+                    }
+                    sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
+                    sb_insert("hub_atividade_historico", {
+                        "atividade_id":           hub_id,
+                        "contrato":               contrato,
+                        "conclusao_pct_novo":     100,
+                        "conclusao_pct_anterior": pct_atual,
+                        "rdo_id":                 rdo_id,
+                        "data":                   today_str,
+                        "created_at":             datetime.utcnow().isoformat(),
+                        "client_id":              client_id,
+                    })
+            # ── Percentual direto (não marco) → atualiza se avançou ──────────
+            elif unidade_at == "%" and quantidade > pct_atual:
                 novo_pct = min(100, int(quantidade))
-                hub_update: Dict[str, Any] = {
+                hub_update = {
                     "conclusao_pct": novo_pct,
                     "last_rdo_date": today_str,
                 }
                 sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
-
-                # Histórico
                 sb_insert("hub_atividade_historico", {
-                    "atividade_id":       hub_id,
-                    "contrato":           contrato,
-                    "conclusao_pct_novo": novo_pct,
+                    "atividade_id":           hub_id,
+                    "contrato":               contrato,
+                    "conclusao_pct_novo":     novo_pct,
                     "conclusao_pct_anterior": pct_atual,
-                    "rdo_id":             rdo_id,
-                    "data":               today_str,
-                    "created_at":         datetime.utcnow().isoformat(),
-                    "client_id":          client_id,
+                    "rdo_id":                 rdo_id,
+                    "data":                   today_str,
+                    "created_at":             datetime.utcnow().isoformat(),
+                    "client_id":              client_id,
                 })
-            elif unidade_at != "%" and quantidade > 0:
-                # Quantidade física → atualiza exec_qty
+            # ── Quantidade física → incrementa exec_qty ───────────────────────
+            elif unidade_at not in ("%", "marco", "") and quantidade > 0:
                 exec_atual = float(hub.get("exec_qty") or 0)
                 novo_exec  = exec_atual + quantidade
                 total_qty  = float(hub.get("total_qty") or 0)
@@ -512,20 +543,19 @@ async def submit_rdo(
                     hub_update["conclusao_pct"] = novo_pct
 
                 sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update, client_id=client_id)
-
                 sb_insert("hub_atividade_historico", {
-                    "atividade_id":       hub_id,
-                    "contrato":           contrato,
-                    "conclusao_pct_novo": novo_pct,
+                    "atividade_id":           hub_id,
+                    "contrato":               contrato,
+                    "conclusao_pct_novo":     novo_pct,
                     "conclusao_pct_anterior": pct_atual,
-                    "exec_qty_novo":      novo_exec,
-                    "producao_dia":       quantidade,
-                    "total_qty":          total_qty,
-                    "unidade":            unidade_at,
-                    "rdo_id":             rdo_id,
-                    "data":               today_str,
-                    "created_at":         datetime.utcnow().isoformat(),
-                    "client_id":          client_id,
+                    "exec_qty_novo":          novo_exec,
+                    "producao_dia":           quantidade,
+                    "total_qty":              total_qty,
+                    "unidade":                unidade_at,
+                    "rdo_id":                 rdo_id,
+                    "data":                   today_str,
+                    "created_at":             datetime.utcnow().isoformat(),
+                    "client_id":              client_id,
                 })
 
         # ── Atividades extras (não mapeadas) → pendentes de aprovação no hub ────

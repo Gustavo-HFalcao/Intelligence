@@ -75,12 +75,17 @@ def _get_working_days(contrato: str, client_id: str = None) -> set:
     return {0, 1, 2, 3, 4, 5}
 
 
-def _calc_progress_spi(atividades: list, today: date, working_days: set = None) -> dict:
+def _calc_progress_spi(atividades: list, today: date, working_days: set = None, ref_date: date = None) -> dict:
     """Calcula progresso físico e SPI usando apenas atividades-folha (sem filhos).
     Usa dias úteis (working_days) para o previsto, evitando distorção por fins de semana.
+    ref_date: data de referência para pct_esperado. Se None, usa today.
+              REGRA: desvio só existe se há RDO submetido — passe last_rdo_date aqui.
     Retorna: progress_pct, prazo_decorrido_pct, spi, desvio_pct"""
     if working_days is None:
         working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default (contrato padrão)
+
+    # Se não há data de referência (sem RDOs), o esperado = 0 → desvio = 0
+    ref = ref_date if ref_date is not None else today
 
     ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
     folhas = [
@@ -106,14 +111,14 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None) 
             try:
                 d_ini = date.fromisoformat(ini_s)
                 d_ter = date.fromisoformat(ter_s)
-                if today < d_ini:
+                if ref < d_ini:
                     pct_esp = 0.0
-                elif today >= d_ter:
+                elif ref >= d_ter:
                     pct_esp = 100.0
                 else:
                     # Usa dias úteis para refletir o cronograma real do contrato
                     total_du = max(_count_working_days(ini_s, ter_s, working_days), 1)
-                    decorridos_du = _count_working_days(ini_s, today.isoformat(), working_days)
+                    decorridos_du = _count_working_days(ini_s, ref.isoformat(), working_days)
                     pct_esp = min(100.0, decorridos_du / total_du * 100)
             except ValueError:
                 pass
@@ -130,6 +135,24 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None) 
     spi = round(progress_pct / prazo_decorrido_pct, 2) if prazo_decorrido_pct > 0 else 1.0
     desvio_pct = round(progress_pct - prazo_decorrido_pct, 1)
     return {"progress_pct": progress_pct, "prazo_decorrido_pct": prazo_decorrido_pct, "spi": spi, "desvio_pct": desvio_pct}
+
+
+def _get_last_rdo_date(contrato: str, client_id: Optional[str] = None) -> Optional[date]:
+    """Retorna a data do último RDO submetido para o contrato. None se não há RDOs."""
+    rows = sb_select(
+        "rdo_master",
+        filters={"contrato": contrato, "status": "Submetido"},
+        client_id=client_id,
+        order="data.desc",
+        limit=1,
+    ) or []
+    if not rows:
+        return None
+    data_str = str(rows[0].get("data", ""))[:10]
+    try:
+        return date.fromisoformat(data_str)
+    except Exception:
+        return None
 
 
 def _working_days_between(d_start: date, d_end: date, working_days: set = None) -> int:
@@ -631,10 +654,17 @@ def _build_insights_llm(
         a["_risk_score"] = _calc_risk_score(a, vel, today)
 
     # ── #5 Caminho Crítico ─────────────────────────────────────────────────────
-    kpis = _calc_progress_spi(atividades, today)
+    # last_rdo: pega o mais recente dos rdos_recentes (já filtrado por Submetido no caller)
+    _last_rdo_ref = None
+    if rdo_recentes:
+        try:
+            _last_rdo_ref = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
+        except Exception:
+            pass
+    kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref)
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
     atrasadas    = [a for a in atividades if a.get("termino_previsto")
-                    and str(a["termino_previsto"])[:10] < today.isoformat()
+                    and str(a["termino_previsto"])[:10] < (_last_rdo_ref or today).isoformat()
                     and float(a.get("conclusao_pct") or 0) < 100]
     proximos_7d  = [a for a in atividades if a.get("termino_previsto")
                     and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7
@@ -790,7 +820,13 @@ def _rule_based_insights(
     velocities: dict | None = None,
 ) -> list:
     """Fallback rule-based enriquecido com velocity e anomalias."""
-    kpis     = _calc_progress_spi(atividades, today)
+    _last_rdo = None
+    if rdo_recentes:
+        try:
+            _last_rdo = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
+        except Exception:
+            pass
+    kpis       = _calc_progress_spi(atividades, today, ref_date=_last_rdo)
     anomalias  = anomalias or []
     velocities = velocities or {}
     insights: list = []
@@ -799,9 +835,11 @@ def _rule_based_insights(
     for a in anomalias[:2]:
         insights.append({"title": a["title"], "body": a["body"], "priority": a["priority"], "tipo": "anomalia"})
 
+    # Atividades atrasadas somente se há RDO (ref_date preenchida)
+    _ref_iso = (_last_rdo or today).isoformat()
     atrasadas = [a for a in atividades
                  if a.get("termino_previsto")
-                 and str(a["termino_previsto"])[:10] < today.isoformat()
+                 and str(a["termino_previsto"])[:10] < _ref_iso
                  and float(a.get("conclusao_pct") or 0) < 100]
     proximos_7d = []
     antecipadas = []
@@ -914,10 +952,12 @@ async def get_agente_insights(
         raw = existing[0]["insights"]
         insights = raw if isinstance(raw, list) else []
         if insights:
+            _ativs = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
             kpis = _calc_progress_spi(
-                sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or [],
+                _ativs,
                 date.today(),
                 _get_working_days(contrato, client_id),
+                ref_date=_get_last_rdo_date(contrato, client_id),
             )
             return {"insights": insights, "spi": kpis["spi"], "pct_geral": kpis["progress_pct"]}
 
@@ -937,7 +977,7 @@ async def trigger_insights_generation(
 
     today      = date.today()
     atividades = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    rdos       = sb_select("rdo_master",     filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=7) or []
+    rdos       = sb_select("rdo_master",     filters={"contrato": contrato, "status": "Submetido"}, client_id=client_id, order="data.desc", limit=7) or []
     historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=300) or []
 
     # Carrega insights anteriores para o delta
@@ -945,7 +985,8 @@ async def trigger_insights_generation(
     insights_ant = (existing[0].get("insights") or []) if existing else []
 
     insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant)
-    kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id))
+    last_rdo_date = _get_last_rdo_date(contrato, client_id)
+    kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=last_rdo_date)
 
     try:
         _persist_insights(contrato, insights, client_id)
@@ -976,9 +1017,10 @@ async def agente_chat(
 
     today      = date.today()
     atividades = sb_select("hub_atividades",          filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    rdos       = sb_select("rdo_master",              filters={"contrato": contrato}, client_id=client_id, order="data.desc", limit=5) or []
+    rdos       = sb_select("rdo_master",              filters={"contrato": contrato, "status": "Submetido"}, client_id=client_id, order="data.desc", limit=5) or []
     historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=200) or []
-    kpis       = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id))
+    _last_rdo_chat = _get_last_rdo_date(contrato, client_id)
+    kpis       = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=_last_rdo_chat)
 
     # Velocity para todas as atividades com qty
     velocities = {}
@@ -990,7 +1032,8 @@ async def agente_chat(
     anomalias = _detect_anomalies(atividades, rdos, historico)
 
     # Contexto da obra para o system prompt
-    atrasadas   = [a for a in atividades if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < today.isoformat() and float(a.get("conclusao_pct") or 0) < 100]
+    _ref_chat   = (_last_rdo_chat or today).isoformat()
+    atrasadas   = [a for a in atividades if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < _ref_chat and float(a.get("conclusao_pct") or 0) < 100]
     proximos_7d = [a for a in atividades if a.get("termino_previsto") and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7 and float(a.get("conclusao_pct") or 0) < 100]
 
     ativ_resumo = []
@@ -1113,8 +1156,10 @@ async def get_visao_geral(
     _wd_set = _parse_dias_uteis(_wd_str) if _wd_str else None
 
     # Progresso + SPI — usando atividades-folha para evitar dupla contagem
-    ativ_para_calc = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    kpis = _calc_progress_spi(ativ_para_calc, today, _wd_set)
+    # ref_date = data do último RDO submetido (regra: só há desvio quando há RDO do dia)
+    ativ_para_calc  = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    last_rdo_date   = _get_last_rdo_date(contrato, client_id)
+    kpis = _calc_progress_spi(ativ_para_calc, today, _wd_set, ref_date=last_rdo_date)
     progress_pct = kpis["progress_pct"]
     prazo_decorrido_pct = kpis["prazo_decorrido_pct"]
     spi = kpis["spi"]
@@ -1232,19 +1277,22 @@ async def get_cronograma(
 
     # Historico de produção para velocity e risk score
     hist_rows = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
-    today_d = date.today()
+    today_d    = date.today()
+    # Referência para atraso: apenas após RDO submetido do dia
+    last_rdo_d = _get_last_rdo_date(contrato, client_id)
+    ref_d      = last_rdo_d if last_rdo_d is not None else today_d
 
     # Map to list and apply forecast
     atividades = []
     for r in rows:
         # Apply parity forecast
         f = _compute_forecast(r, today=today_d)
-        
+
         # Format for display
         f["inicio_br"] = _iso_to_br(str(r.get("inicio_previsto", ""))[:10])
         f["termino_br"] = _iso_to_br(str(r.get("termino_previsto", ""))[:10])
         f["fase_color"] = FASE_COLORS.get(str(r.get("fase", "")).lower().strip(), "#889999")
-        
+
         # Map status like legacy
         pct = float(r.get("conclusao_pct", 0) or 0)
         ini_s = str(r.get("inicio_previsto", "") or "")[:10]
@@ -1253,13 +1301,13 @@ async def get_cronograma(
         if pct >= 100: st = "concluida"
         elif ini_s:
             try:
-                today_d = date.today()
                 ini_d = date.fromisoformat(ini_s)
                 ter_d = date.fromisoformat(ter_s) if ter_s else None
                 if pct > 0:
                     st = "em_execucao"
-                    if ter_d and ter_d < today_d and pct < 100:
-                        if ini_d <= today_d:
+                    # Atraso: termino < último RDO (não today) — regra do usuário
+                    if ter_d and ter_d < ref_d and pct < 100:
+                        if ini_d <= ref_d:
                             st = "atrasada"
                 elif ini_d <= today_d:
                     st = "em_execucao"
@@ -1950,8 +1998,9 @@ async def list_contratos(
     for _, row in contratos_df.iterrows():
         cod = str(row.get("contrato", ""))
         # Usa _calc_progress_spi para consistência com visao-geral
-        ativ_contrato = sb_select("hub_atividades", filters={"contrato": cod}, client_id=client_id, limit=500) or []
-        kpis_c = _calc_progress_spi(ativ_contrato, date.today(), _get_working_days(cod, client_id))
+        ativ_contrato   = sb_select("hub_atividades", filters={"contrato": cod}, client_id=client_id, limit=500) or []
+        _last_rdo_c     = _get_last_rdo_date(cod, client_id)
+        kpis_c = _calc_progress_spi(ativ_contrato, date.today(), _get_working_days(cod, client_id), ref_date=_last_rdo_c)
         prog = kpis_c["progress_pct"]
 
         item: Dict[str, Any] = {}
