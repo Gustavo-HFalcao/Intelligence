@@ -5,6 +5,7 @@ Cobre as 6 abas: Visão Geral, Dashboard, Cronograma, Auditoria, Timeline, Finan
 Porta HubState (hub_state.py, 4159 linhas) para endpoints REST.
 """
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -1837,10 +1838,9 @@ async def get_hub_financeira(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Resumo financeiro do contrato — consulta fin_custos diretamente (sem cache DataLoader)."""
+    """Resumo financeiro do contrato — consulta fin_custos + fin_lancamentos diretamente (sem cache DataLoader)."""
     from backend.integrations.supabase import sb_select
     import re as _re
-    from collections import defaultdict
 
     def _pf(v) -> float:
         if v is None:
@@ -1861,28 +1861,50 @@ async def get_hub_financeira(
     filters: Dict[str, Any] = {"contrato": contrato}
     if client_id:
         filters["client_id"] = client_id
-    rows = sb_select("fin_custos", filters=filters, order="data.asc", limit=2000) or []
+    custos_rows = sb_select("fin_custos", filters=filters, order="data.asc", limit=2000) or []
+
+    # Lançamentos reais de execução (append-only)
+    lanc_filters: Dict[str, Any] = {"contrato": contrato}
+    if client_id:
+        lanc_filters["client_id"] = client_id
+    lanc_rows = sb_select("fin_lancamentos", filters=lanc_filters, order="data.asc", limit=5000) or []
 
     budget_planejado = 0.0
-    budget_realizado = 0.0
-    prev_by_mes: Dict[str, float] = defaultdict(float)
-    exec_by_mes: Dict[str, float] = defaultdict(float)
+    prev_by_date: Dict[str, float] = defaultdict(float)
+    exec_by_date: Dict[str, float] = defaultdict(float)
 
-    for r in rows:
+    for r in custos_rows:
         prev = _pf(r.get("valor_previsto", 0))
-        exec_ = _pf(r.get("valor_executado", 0))
         budget_planejado += prev
-        budget_realizado += exec_
         d = str(r.get("data") or "")[:10]
-        if len(d) >= 7:
-            mes = f"{d[5:7]}/{d[:4]}"
-            prev_by_mes[mes] += prev
-            exec_by_mes[mes] += exec_
+        if len(d) == 10:
+            prev_by_date[d] += prev
 
-    all_mes = sorted(set(list(prev_by_mes) + list(exec_by_mes)),
-                     key=lambda m: (m[3:], m[:2]))
-    series = [{"mes": m, "planejado": round(prev_by_mes.get(m, 0), 2),
-               "realizado": round(exec_by_mes.get(m, 0), 2)} for m in all_mes]
+    # Execução via lançamentos; fallback para valor_executado se não há lançamentos
+    if lanc_rows:
+        for lc in lanc_rows:
+            d = str(lc.get("data") or "")[:10]
+            if len(d) == 10:
+                exec_by_date[d] += _pf(lc.get("valor", 0))
+    else:
+        for r in custos_rows:
+            d = str(r.get("data") or "")[:10]
+            if len(d) == 10:
+                exec_by_date[d] += _pf(r.get("valor_executado", 0))
+
+    budget_realizado = sum(exec_by_date.values())
+
+    # S-curve acumulada dia a dia
+    all_dates = sorted(set(list(prev_by_date) + list(exec_by_date)))
+    series, acum_prev, acum_exec = [], 0.0, 0.0
+    for d in all_dates:
+        acum_prev += prev_by_date.get(d, 0.0)
+        acum_exec += exec_by_date.get(d, 0.0)
+        series.append({
+            "data":           d,
+            "previsto_acum":  round(acum_prev, 2),
+            "executado_acum": round(acum_exec, 2),
+        })
 
     saldo = budget_planejado - budget_realizado
     cpi = round(budget_realizado / budget_planejado, 3) if budget_planejado > 0 else 0.0

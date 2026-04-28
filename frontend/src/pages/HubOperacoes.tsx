@@ -164,13 +164,13 @@ function OrcamentoTip({ active, payload, label }: any) {
 
 function SCurveFinTip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
-  const real = payload.find((p: any) => p.dataKey === 'realizado')
-  const plan = payload.find((p: any) => p.dataKey === 'planejado')
+  const plan = payload.find((p: any) => p.dataKey === 'previsto_acum'  || p.dataKey === 'planejado')
+  const real = payload.find((p: any) => p.dataKey === 'executado_acum' || p.dataKey === 'realizado')
   return (
     <TooltipShell>
       <TipLabel>S-Curve · {label}</TipLabel>
-      {plan && <TipRow label="Planejado" value={_fmt(plan.value)} color={COPPER} />}
-      {real && <TipRow label="Realizado" value={_fmt(real.value)} color={TEAL} />}
+      {plan && <TipRow label="Baseline Acum." value={_fmt(plan.value)} color={COPPER} />}
+      {real && <TipRow label="Executado Acum." value={_fmt(real.value)} color={TEAL} />}
     </TooltipShell>
   )
 }
@@ -1796,46 +1796,90 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
 
   if (isLoading) return <Skeleton />
   const d = data || {}
+  const series: any[] = d.series ?? []
+  const burnPct = d.budget_planejado > 0
+    ? Math.min(100, (d.budget_realizado / d.budget_planejado) * 100)
+    : 0
+  const cpiGood = (d.cpi ?? 0) >= 1
 
   return (
     <div className="flex flex-col gap-8 animate-enter">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
           <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Budget Planejado</div>
           <div className="text-xl font-bold font-display text-white">{_fmt(d.budget_planejado)}</div>
         </div>
         <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Budget Executado</div>
-          <div className="text-xl font-bold font-display text-patina">{_fmt(d.budget_realizado)}</div>
+          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Executado</div>
+          <div className="text-xl font-bold font-display text-teal-400">{_fmt(d.budget_realizado)}</div>
         </div>
         <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Saldo Remanescente</div>
+          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Saldo</div>
           <div className="text-xl font-bold font-display text-copper">{_fmt(d.saldo)}</div>
+          <div className="h-1 w-full bg-white/5 rounded-full mt-3 overflow-hidden">
+            <div className="h-full bg-teal-500 rounded-full transition-all duration-700" style={{ width: `${burnPct}%` }} />
+          </div>
+          <div className="text-[9px] text-text-muted mt-1">{burnPct.toFixed(1)}% executado</div>
         </div>
         <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Índice CPI</div>
-          <div className="text-xl font-bold font-display text-blue-400">{d.cpi}</div>
-          <div className="text-[9px] text-text-muted uppercase mt-1">Cost Performance Index</div>
+          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">CPI</div>
+          <div className="text-xl font-bold font-display" style={{ color: cpiGood ? TEAL : RED }}>{d.cpi}</div>
+          <div className="text-[9px] mt-1" style={{ color: cpiGood ? TEAL : RED }}>
+            {cpiGood ? '✓ Custo sob controle' : '⚠ Acima do previsto'}
+          </div>
         </div>
       </div>
 
+      {/* S-Curve diária */}
       <div className="bg-void/40 border border-white/5 p-8 rounded-3xl">
-        <div className="flex items-center gap-2 mb-8">
-           <Wallet size={16} className="text-copper" />
-           <h3 className="text-xs font-black uppercase tracking-widest text-white">S-Curve Financeira — Fluxo de Desembolso</h3>
+        <div className="flex items-center gap-2 mb-2">
+          <Wallet size={16} className="text-copper" />
+          <h3 className="text-xs font-black uppercase tracking-widest text-white">S-Curve Financeira</h3>
         </div>
-        <div className="h-[350px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={d.series}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
-              <XAxis dataKey="mes" stroke="#666" fontSize={10} axisLine={false} />
-              <YAxis stroke="#666" fontSize={10} axisLine={false} />
-              <Tooltip content={<SCurveFinTip />} />
-              <Bar dataKey="realizado" fill={TEAL} radius={[4, 4, 0, 0]} />
-              <Line type="monotone" dataKey="planejado" stroke={COPPER} strokeWidth={3} dot={{ r: 4, fill: COPPER }} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+        <p className="text-[10px] text-text-muted mb-8 ml-6">Evolução acumulada diária — Baseline vs. Execução Real</p>
+        {series.length === 0 ? (
+          <div className="h-64 flex items-center justify-center text-white/20 text-sm">
+            Sem dados de lançamento para plotar
+          </div>
+        ) : (
+          <div className="h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="hub_fp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={COPPER} stopOpacity={0.12} />
+                    <stop offset="95%" stopColor={COPPER} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="hub_fe" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={TEAL} stopOpacity={0.18} />
+                    <stop offset="95%" stopColor={TEAL} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis
+                  dataKey="data"
+                  axisLine={false} tickLine={false}
+                  tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }}
+                  interval={Math.max(0, Math.floor(series.length / 7) - 1)}
+                  dy={8}
+                />
+                <YAxis
+                  axisLine={false} tickLine={false}
+                  tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }}
+                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`}
+                />
+                <Tooltip content={<SCurveFinTip />} />
+                <Legend
+                  formatter={v => <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{v}</span>}
+                  iconType="circle" iconSize={8}
+                />
+                <Area type="monotone" dataKey="previsto_acum"  stroke={COPPER} strokeWidth={2}   fill="url(#hub_fp)" name="Baseline" dot={false} />
+                <Area type="monotone" dataKey="executado_acum" stroke={TEAL}   strokeWidth={2.5} fill="url(#hub_fe)" name="Executado" dot={{ r: 3, fill: TEAL, strokeWidth: 0 }} activeDot={{ r: 5 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </div>
   )
