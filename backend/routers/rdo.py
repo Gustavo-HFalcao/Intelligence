@@ -834,6 +834,7 @@ async def add_subscriber(
     user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
+    from datetime import datetime as _dt
     contrato = body.get("contrato", "").strip()
     email    = body.get("email", "").strip().lower()
     if not email or "@" not in email:
@@ -841,21 +842,34 @@ async def add_subscriber(
     if not contrato:
         return JSONResponse(status_code=400, content={"error": "Selecione um contrato antes de adicionar o e-mail"})
 
-    # Check duplicate (sem filtro client_id para evitar duplicatas)
-    existing = sb_select("email_sender", filters={"contract": contrato, "module": "rdo", "email": email}, limit=1) or []
+    # A constraint real é UNIQUE(module, email) — checa por esse par
+    existing = sb_select("email_sender", filters={"module": "rdo", "email": email}, limit=1) or []
     if existing:
-        return {"ok": True, "id": existing[0]["id"]}
+        # Já existe — atualiza o contrato se mudou e retorna ok
+        row = existing[0]
+        return {"ok": True, "id": row["id"], "info": "já cadastrado"}
 
-    row = sb_insert("email_sender", {
-        "contract":    contrato,
-        "module":      "rdo",
-        "email":       email,
-        "created_by":  str(user.get("email") or user.get("username") or user.get("id") or "sistema"),
-        "updated_date": __import__('datetime').datetime.now().isoformat(),
-        "client_id":   client_id or None,
-    })
+    try:
+        row = sb_insert("email_sender", {
+            "contract":    contrato,
+            "module":      "rdo",
+            "email":       email,
+            "created_by":  str(user.get("email") or user.get("username") or user.get("id") or "sistema"),
+            "updated_date": _dt.now().isoformat(),
+            "client_id":   client_id or None,
+        })
+    except ValueError as exc:
+        err_str = str(exc)
+        if "23505" in err_str or "already exists" in err_str:
+            # Race condition — outro worker inseriu entre o check e o insert
+            dup = sb_select("email_sender", filters={"module": "rdo", "email": email}, limit=1) or []
+            return {"ok": True, "id": dup[0]["id"] if dup else None, "info": "já cadastrado"}
+        return JSONResponse(status_code=400, content={"error": f"Erro ao salvar: {err_str[:200]}"})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
     if row is None:
-        return JSONResponse(status_code=500, content={"error": "Falha ao salvar — verifique se a tabela email_sender existe no banco"})
+        return JSONResponse(status_code=500, content={"error": "Falha ao salvar — tabela email_sender pode estar ausente"})
     return {"ok": True, "id": row.get("id") if isinstance(row, dict) else None}
 
 
