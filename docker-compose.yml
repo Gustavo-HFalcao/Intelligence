@@ -58,12 +58,14 @@ services:
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "8443:443"
+      - "80:80"
+      - "443:443"
     depends_on:
       backend:
         condition: service_healthy
     volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/letsencrypt/live/34.95.186.98.nip.io/fullchain.pem:/etc/letsencrypt/live/34.95.186.98.nip.io/fullchain.pem:ro
+      - /etc/letsencrypt/live/34.95.186.98.nip.io/privkey.pem:/etc/letsencrypt/live/34.95.186.98.nip.io/privkey.pem:ro
 
 volumes:
   redis_data:
