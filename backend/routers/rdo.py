@@ -147,11 +147,22 @@ async def get_draft(
         # Continuar/editar RDO específico (qualquer status)
         rows = sb_select("rdo_master", filters={"id": draft_id}, limit=1) or []
     else:
-        # Busca rascunho mais recente do contrato
+        # Busca rascunho mais recente do contrato — ignora rascunhos vazios de datas passadas
         filters: Dict[str, Any] = {"contrato": contrato, "status": "Rascunho"}
         if client_id:
             filters["client_id"] = client_id
-        rows = sb_select("rdo_master", filters=filters, order="created_at.desc", limit=1) or []
+        candidates = sb_select("rdo_master", filters=filters, order="created_at.desc", limit=10) or []
+        today_str = str(_date.today())
+        rows = []
+        for c in candidates:
+            rdo_date = str(c.get("data", ""))[:10]
+            # Descarta rascunhos de datas passadas que não têm atividades (fantasmas)
+            if rdo_date < today_str:
+                has_ats = sb_select("rdo_atividades", filters={"rdo_id": c["id"]}, limit=1) or []
+                if not has_ats:
+                    continue
+            rows = [c]
+            break
 
     if rows:
         r = rows[0]

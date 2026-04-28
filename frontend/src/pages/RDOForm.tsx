@@ -132,7 +132,11 @@ export default function RDOForm() {
 
   const [form, setForm] = useState<Record<string, any>>({
     contrato: initialContrato,
-    data: new Date().toISOString().slice(0, 10),
+    data: (() => {
+      // Usa data local (não UTC) para evitar desvio de fuso
+      const now = new Date()
+      return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+    })(),
     clima: 'Ensolarado',
     turno: 'Diurno',
     tipo_tarefa: 'Diário de Obra',
@@ -215,6 +219,22 @@ export default function RDOForm() {
           setAtividadesRDO(ats || [])
           setEvidencias(evs || [])
         } else if (!urlDraftId) {
+          // Sem rascunho: busca último RDO submetido e calcula próximo dia útil
+          api.get(`/rdo/historico?contrato=${encodeURIComponent(form.contrato)}&page_size=1`)
+            .then(hr => {
+              const lastRdos: any[] = hr.data?.rdos ?? []
+              if (lastRdos.length > 0) {
+                const lastDate = lastRdos[0].data?.slice(0, 10)
+                if (lastDate) {
+                  const next = new Date(lastDate + 'T12:00:00')
+                  // Avança para o próximo dia útil (segunda a sexta)
+                  do { next.setDate(next.getDate() + 1) } while ([0, 6].includes(next.getDay()))
+                  const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`
+                  setForm(f => ({ ...f, data: nextStr }))
+                }
+              }
+            })
+            .catch(() => {})
           setDraftId('')
           setAtividadesRDO([])
           setEvidencias([])

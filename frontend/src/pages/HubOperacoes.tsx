@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  AreaChart, Area, CartesianGrid, ComposedChart, ReferenceLine, Bar, BarChart, LabelList,
+  AreaChart, Area, CartesianGrid, ComposedChart, ReferenceLine, Bar, BarChart, LabelList, Legend,
 } from 'recharts'
 import {
   Plus, Image as ImageIcon, Clock, Activity,
@@ -566,30 +566,38 @@ function DashboardTab({ contrato }: { contrato: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ChartWrapper title="Curva S: Planejado vs Realizado" icon={TrendingUp}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={d.scurve}>
+            <AreaChart data={d.scurve} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <defs>
                 <linearGradient id="gCopper" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COPPER} stopOpacity={0.1}/><stop offset="95%" stopColor={COPPER} stopOpacity={0}/></linearGradient>
                 <linearGradient id="gTeal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={TEAL} stopOpacity={0.2}/><stop offset="95%" stopColor={TEAL} stopOpacity={0}/></linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
               <XAxis dataKey="data" tick={{ fill: '#444', fontSize: 10 }} axisLine={false} />
-              <YAxis tick={{ fill: '#444', fontSize: 10 }} axisLine={false} />
+              <YAxis tick={{ fill: '#444', fontSize: 10 }} axisLine={false} tickFormatter={v => `${v}%`} />
               <Tooltip content={<SCurveTip />} />
-              <Area type="monotone" dataKey="previsto" stroke={COPPER} fill="url(#gCopper)" strokeWidth={2} />
-              <Area type="monotone" dataKey="realizado" stroke={TEAL} fill="url(#gTeal)" strokeWidth={3} />
+              <Legend
+                wrapperStyle={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }}
+                formatter={(value) => value === 'previsto' ? 'Planejado' : 'Realizado'}
+              />
+              <Area type="monotone" dataKey="previsto" name="previsto" stroke={COPPER} fill="url(#gCopper)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="realizado" name="realizado" stroke={TEAL} fill="url(#gTeal)" strokeWidth={3} dot={{ r: 3, fill: TEAL }} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartWrapper>
 
         <ChartWrapper title="Tendência de Performance (SPI)" icon={Activity}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={d.spi_trend}>
+            <LineChart data={d.spi_trend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
               <XAxis dataKey="data" tick={{ fill: '#444', fontSize: 10 }} axisLine={false} />
-              <YAxis tick={{ fill: '#444', fontSize: 10 }} axisLine={false} domain={[0.5, 1.5]} />
+              <YAxis tick={{ fill: '#444', fontSize: 10 }} axisLine={false} domain={[0.5, 1.5]} tickFormatter={v => v.toFixed(1)} />
               <Tooltip content={<SPITip />} />
-              <Line type="step" dataKey="spi" stroke={TEAL} strokeWidth={3} dot={false} />
-              <ReferenceLine y={1} stroke="#666" strokeDasharray="5 5" label={{ value: '1.0', position: 'right', fill: '#444', fontSize: 10 }} />
+              <Legend
+                wrapperStyle={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }}
+                formatter={() => 'SPI (Schedule Performance Index)'}
+              />
+              <ReferenceLine y={1} stroke="#666" strokeDasharray="5 5" label={{ value: '1.0 — Meta', position: 'insideTopRight', fill: '#555', fontSize: 9 }} />
+              <Line type="step" dataKey="spi" name="spi" stroke={TEAL} strokeWidth={3} dot={{ r: 3, fill: TEAL }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartWrapper>
@@ -603,10 +611,11 @@ function DashboardTab({ contrato }: { contrato: string }) {
               <XAxis dataKey="data" tick={{ fill: '#444', fontSize: 9 }} axisLine={false} />
               <YAxis tick={{ fill: '#444', fontSize: 9 }} axisLine={false} />
               <Tooltip content={<ProdDiariaTip />} />
-              <Bar dataKey="realizado" fill={TEAL} radius={[4,4,0,0]} opacity={0.85} minPointSize={4}>
+              <Legend wrapperStyle={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }} formatter={(v) => v === 'realizado' ? 'Realizado' : 'Meta'} />
+              <Bar dataKey="realizado" name="realizado" fill={TEAL} radius={[4,4,0,0]} opacity={0.85} minPointSize={4}>
                 <LabelList dataKey="realizado" position="top" style={{ fill: TEAL, fontSize: 9, fontWeight: 700 }} />
               </Bar>
-              <Bar dataKey="previsto" fill={COPPER} radius={[4,4,0,0]} opacity={0.45}>
+              <Bar dataKey="previsto" name="previsto" fill={COPPER} radius={[4,4,0,0]} opacity={0.45}>
                 <LabelList dataKey="previsto" position="top" style={{ fill: COPPER, fontSize: 9, fontWeight: 700 }} />
               </Bar>
             </BarChart>
@@ -634,8 +643,11 @@ function DashboardTab({ contrato }: { contrato: string }) {
               <XAxis dataKey="mes" tick={{ fill: '#444', fontSize: 9 }} axisLine={false} />
               <YAxis tick={{ fill: '#444', fontSize: 9 }} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
               <Tooltip content={<OrcamentoTip />} />
-              <Bar dataKey="previsto" fill={COPPER} opacity={0.3} radius={[4,4,0,0]} />
-              <Bar dataKey="realizado" fill={TEAL} opacity={0.8} radius={[4,4,0,0]} />
+              <Legend wrapperStyle={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.4)', paddingTop: 8 }} formatter={(v) => v === 'previsto' ? 'Previsto' : 'Realizado'} />
+              <Bar dataKey="previsto" name="previsto" fill={COPPER} opacity={0.3} radius={[4,4,0,0]} />
+              <Bar dataKey="realizado" name="realizado" fill={TEAL} opacity={0.8} radius={[4,4,0,0]}>
+                <LabelList dataKey="realizado" position="top" formatter={(v: number) => v > 0 ? `${(v/1000).toFixed(0)}k` : ''} style={{ fill: TEAL, fontSize: 9, fontWeight: 700 }} />
+              </Bar>
             </ComposedChart>
           </ResponsiveContainer>
         </ChartWrapper>
@@ -1865,6 +1877,11 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
   const contrato = searchParams.get('contrato') ?? ''
   const activeTab = hubTab || searchParams.get('tab') || 'visao_geral'
   const queryClient = useQueryClient()
+
+  // Scroll to top when entering a contract view
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [contrato])
 
   const { data: contratosList } = useQuery({
     queryKey: ['hub-contratos'],
