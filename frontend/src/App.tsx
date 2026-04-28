@@ -143,10 +143,10 @@ export default function App() {
       <Route path="/contract-features"  element={<WithLayout module="gerenciar_usuarios"><FeatureFlags /></WithLayout>} />
       <Route path="/reembolso-dashboard" element={<WithLayout module="reembolso_dash"><ReembolsoDashboard /></WithLayout>} />
       <Route path="/rdo-dashboard"      element={<WithLayout module="rdo_dashboard"><RDODashboard /></WithLayout>} />
-      <Route path="/rdo-historico"      element={<WithLayout module="rdo_historico"><RDOHistorico /></WithLayout>} />
 
-      {/* Protegido — sem sidebar (full-screen forms) */}
-      <Route path="/rdo-form"      element={<PrivateRoute module="rdo_form"><div className="min-h-screen bg-bg-void p-6"><RDOForm /></div></PrivateRoute>} />
+      {/* Protegido — sem sidebar (full-screen forms / mobile) */}
+      <Route path="/rdo-form"       element={<PrivateRoute module="rdo_form"><div className="min-h-screen bg-bg-void p-4 md:p-6"><RDOForm /></div></PrivateRoute>} />
+      <Route path="/rdo-historico"  element={<PrivateRoute module="rdo_historico"><div className="min-h-screen bg-bg-void p-4 md:p-6"><RDOHistorico /></div></PrivateRoute>} />
       <Route path="/reembolso-form" element={<PrivateRoute module="reembolso"><div className="min-h-screen bg-bg-void p-6"><ReembolsoForm /></div></PrivateRoute>} />
 
       <Route path="/projetos"      element={<WithLayout><Projetos /></WithLayout>} />

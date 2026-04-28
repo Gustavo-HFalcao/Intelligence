@@ -639,6 +639,23 @@ def _build_insights_llm(
     historico = historico or []
     insights_anteriores = insights_anteriores or []
 
+    # Sem RDOs submetidos: não há base para análise de desvio/atraso
+    rdos_submetidos_b = [r for r in rdo_recentes if r.get("status") == "Submetido"]
+    if not rdos_submetidos_b and atividades:
+        primeiro_ini = min(
+            (str(a.get("inicio_previsto", ""))[:10] for a in atividades if a.get("inicio_previsto")),
+            default=today.isoformat()
+        )
+        try:
+            dias_sem_rdo = max(0, (today - date.fromisoformat(primeiro_ini)).days)
+        except Exception:
+            dias_sem_rdo = 0
+        return [{
+            "title": "Nenhum RDO submetido ainda",
+            "body": f"Obra com {dias_sem_rdo} dia(s) sem RDO. Envie o primeiro RDO para ativar o monitoramento de progresso.",
+            "priority": "Medium", "tipo": "risco",
+        }]
+
     # ── #1 Velocity Engine ─────────────────────────────────────────────────────
     velocities: dict = {}
     for a in atividades:
@@ -739,8 +756,11 @@ def _build_insights_llm(
         except Exception:
             pass
 
-    context = f"""CONTRATO: {contrato} | DATA: {today.isoformat()}
+    rdos_submetidos_llm = [r for r in rdo_recentes if r.get("status") == "Submetido"]
+    sem_rdo_aviso = "" if rdos_submetidos_llm else "\n⚠️ ATENÇÃO: Nenhum RDO submetido ainda. NÃO reporte atrasos. O único insight relevante é alertar que RDOs precisam ser enviados.\n"
 
+    context = f"""CONTRATO: {contrato} | DATA: {today.isoformat()}
+{sem_rdo_aviso}
 PROGRESSO FÍSICO:
   Realizado={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}% | SPI={kpis['spi']}
   Total={len(atividades)} ativs | Concluídas={len(concluidas)} | Em andamento={len(em_andamento)} | Atrasadas={len(atrasadas)} | Vencendo 7d={len(proximos_7d)}
@@ -776,6 +796,8 @@ DIRETRIZES DE QUALIDADE:
 - Se há delta vs insights anteriores: diga o que MUDOU (piorou/melhorou)
 - Seja cirúrgico: "Perfuração: 80/dia, precisa 728/dia, gap de 648 furos/dia" é melhor que "produção insuficiente"
 - Nunca invente dados. Se não tiver info, diga explicitamente.
+- Se não houver RDOs submetidos: o único insight válido é alertar sobre a falta de RDOs. NÃO reporte atrasos, desvios ou SPI negativo sem base em RDO real.
+- "Atrasada" significa termino_previsto < data_ultimo_rdo. Se não há RDO, nenhuma atividade está atrasada.
 
 Responda SOMENTE com JSON array:
 [{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
@@ -830,6 +852,25 @@ def _rule_based_insights(
     anomalias  = anomalias or []
     velocities = velocities or {}
     insights: list = []
+
+    # Sem RDOs submetidos: único insight relevante é alertar sobre RDOs faltando
+    rdos_submetidos = [r for r in rdo_recentes if r.get("status") == "Submetido"]
+    if not rdos_submetidos and atividades:
+        # Calcula quantos dias de obra passaram sem RDO
+        primeiro_ini = min(
+            (str(a.get("inicio_previsto", ""))[:10] for a in atividades if a.get("inicio_previsto")),
+            default=today.isoformat()
+        )
+        try:
+            dias_sem_rdo = max(0, (today - date.fromisoformat(primeiro_ini)).days)
+        except Exception:
+            dias_sem_rdo = 0
+        insights.append({
+            "title": "Nenhum RDO submetido ainda",
+            "body": f"Obra com {dias_sem_rdo} dia(s) sem RDO. Desvio e SPI só são calculados após o primeiro RDO.",
+            "priority": "Medium", "tipo": "risco",
+        })
+        return insights[:4]
 
     # Anomalias primeiro — são factuais
     for a in anomalias[:2]:
@@ -1039,7 +1080,26 @@ async def agente_chat(
     ativ_resumo = []
     for a in sorted(atividades, key=lambda x: float(x.get("_risk_score") or 0), reverse=True)[:15]:
         vel = velocities.get(str(a.get("id","")), {})
-        vel_txt = f", vel={vel['velocity_real']}/dia, EAC={vel.get('eac_date','?')}" if vel.get("velocity_real",0) > 0 else ""
+        total_qty = float(a.get("total_qty") or 0)
+        exec_qty  = float(a.get("exec_qty") or 0)
+        # Se velocity_real = 0 mas há qty, calcula taxa planejada para estimativas
+        if vel.get("velocity_real", 0) > 0:
+            vel_txt = f", vel_real={vel['velocity_real']}/dia, EAC={vel.get('eac_date','?')}"
+        elif total_qty > 0:
+            # Taxa planejada: total_qty / dias_planejados do contrato
+            ini_s = str(a.get("inicio_previsto",""))[:10]
+            ter_s = str(a.get("termino_previsto",""))[:10]
+            if ini_s and ter_s:
+                try:
+                    dp = max(1, (date.fromisoformat(ter_s) - date.fromisoformat(ini_s)).days)
+                    taxa_plan = round(total_qty / dp, 1)
+                    vel_txt = f", vel_real=0(sem RDO), taxa_plan={taxa_plan}/dia, saldo={total_qty - exec_qty:.0f}"
+                except Exception:
+                    vel_txt = f", vel_real=0(sem histórico), saldo={total_qty - exec_qty:.0f}"
+            else:
+                vel_txt = ""
+        else:
+            vel_txt = ""
         ativ_resumo.append(
             f"  {a.get('atividade','?')[:45]}: {a.get('conclusao_pct',0)}%"
             f", prazo={str(a.get('termino_previsto','?'))[:10]}"
@@ -1062,7 +1122,10 @@ ANOMALIAS: {'; '.join(a['title'] for a in anomalias) if anomalias else 'Nenhuma'
 RDOs RECENTES: {'; '.join(f"{str(r.get('data',''))[:10]}(equipe={r.get('equipe_alocada','?')}p)" for r in rdos[:3])}
 
 Quando te perguntarem "se adicionar X pessoas", calcule: saldo / (velocity_atual * (1 + X/equipe_atual)) = dias_necessários.
-Quando te perguntarem "o que antecipar", liste atividades com inicio_previsto > hoje que têm predecessores concluídos."""
+Quando te perguntarem "o que antecipar", liste atividades com inicio_previsto > hoje que têm predecessores concluídos.
+Se vel_real=0 mas taxa_plan existe: use taxa_plan para estimativas de prazo — explique que é baseado no planejamento, não em histórico real.
+Se não houver RDOs submetidos: não afirme que há atrasos. Alerte que sem RDOs o SPI e desvio são inválidos.
+Para recomendações de alocação: se velocity_real < taxa_plan, sugira reforço de equipe e calcule o delta necessário."""
 
     # Gerencia sessão
     if not session_id:

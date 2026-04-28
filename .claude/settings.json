@@ -89,7 +89,20 @@
       "Bash(echo \"SERVER_PID=$!\")",
       "Bash(curl -s http://localhost:8000/health)",
       "Bash(curl -s \"http://localhost:8000/openapi.json\")",
-      "Bash(curl -sv \"http://localhost:8000/api/hub/agente/chat\")"
+      "Bash(curl -sv \"http://localhost:8000/api/hub/agente/chat\")",
+      "Bash(docker compose *)",
+      "Bash(docker-compose build *)",
+      "Bash(git -C /c/Users/Gustavo/intelligence log --oneline -10)",
+      "Bash(git -C /c/Users/Gustavo/intelligence diff HEAD~1 HEAD -- backend/services/data_loader.py)",
+      "Bash(git -C /c/Users/Gustavo/intelligence show HEAD:backend/services/data_loader.py)",
+      "Bash(git -C /c/Users/Gustavo/intelligence diff backend/services/data_loader.py)",
+      "Bash(git -C /c/Users/Gustavo/intelligence add backend/services/data_loader.py backend/routers/hub.py frontend/src/pages/HubOperacoes.tsx)",
+      "Bash(git -C /c/Users/Gustavo/intelligence status)",
+      "Bash(git -C /c/Users/Gustavo/intelligence commit -m ' *)",
+      "Bash(git -C /c/Users/Gustavo/intelligence push origin main)",
+      "Bash(git -C /c/Users/Gustavo/intelligence log --oneline -3)",
+      "Bash(git -C /c/Users/Gustavo/intelligence add backend/routers/financeiro.py backend/routers/hub.py frontend/src/pages/Financeiro.tsx frontend/src/pages/HubOperacoes.tsx)",
+      "Bash(git -C /c/Users/Gustavo/intelligence status --short)"
     ]
   },
   "mcpServers": {

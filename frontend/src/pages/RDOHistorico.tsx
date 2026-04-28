@@ -8,6 +8,7 @@ import {
   CheckCircle, FileText, Clock, AlertCircle, Building2,
 } from 'lucide-react'
 import api from '@/services/api'
+import { useAuth } from '@/context/AuthContext'
 
 const COPPER = '#C98B2A'
 const TEAL   = '#2A9D8F'
@@ -29,15 +30,19 @@ function statusIcon(s: string) {
 }
 
 export default function RDOHistorico() {
-  const navigate = useNavigate()
-  const qc       = useQueryClient()
+  const navigate    = useNavigate()
+  const qc          = useQueryClient()
+  const { user }    = useAuth()
+  // Contrato vinculado ao perfil do usuário (operário de campo)
+  const userContrato = (user as any)?.project || (user as any)?.contrato || ''
 
   const [statusFilter, setStatus] = useState('Todos')
   const [dateFrom, setDateFrom]   = useState('')
   const [dateTo, setDateTo]       = useState('')
   const [page, setPage]           = useState(1)
   const [emailPanel, setEmailPanel] = useState(false)
-  const [emailContrato, setEmailContrato] = useState('')
+  // Se tem contrato vinculado, usa direto; senão permite selecionar
+  const [emailContrato, setEmailContrato] = useState(userContrato)
   const [newEmail, setNewEmail]   = useState('')
   const PAGE_SIZE = 20
 
@@ -129,53 +134,65 @@ export default function RDOHistorico() {
                 <span className="text-xs font-black uppercase tracking-widest" style={{ color: TEAL }}>Destinatários de Notificação por RDO</span>
               </div>
 
-              {/* Contract selector for email */}
-              <div className="flex flex-wrap gap-2 mb-4">
-                {contratos.length > 0 ? contratos.map(c => (
-                  <button key={c} onClick={() => setEmailContrato(c)}
-                    style={{ background: emailContrato === c ? `${TEAL}25` : 'rgba(255,255,255,0.04)', border: `1px solid ${emailContrato === c ? TEAL : 'rgba(255,255,255,0.08)'}`, color: emailContrato === c ? TEAL : '#e2c87a', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
-                    <Building2 size={10} style={{ display: 'inline', marginRight: 4 }} />{c}
-                  </button>
-                )) : (
-                  <span style={{ fontSize: 12, color: '#555' }}>Carregue RDOs para ver contratos</span>
+              <div className="flex flex-col gap-3">
+                {/* Contrato — travado se usuário tem vínculo */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest" style={{ color: 'rgba(42,157,143,0.6)' }}>Contrato</label>
+                  {userContrato ? (
+                    <div style={{ background: `${TEAL}10`, border: `1px solid ${TEAL}30`, borderRadius: 8, padding: '8px 12px', fontSize: 13, color: TEAL, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Building2 size={12} />
+                      {userContrato}
+                      <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 'auto' }}>vinculado ao perfil</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={emailContrato}
+                      onChange={e => setEmailContrato(e.target.value)}
+                      style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', appearance: 'none' }}
+                    >
+                      <option value="">Selecionar contrato...</option>
+                      {contratos.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                {/* Email input */}
+                {emailContrato && (
+                  <>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        placeholder="email@empresa.com"
+                        value={newEmail}
+                        onChange={e => setNewEmail(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && newEmail && addSubMut.mutate(newEmail)}
+                        style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: 1, outline: 'none' }}
+                      />
+                      <button
+                        onClick={() => newEmail && addSubMut.mutate(newEmail)}
+                        disabled={!newEmail || addSubMut.isPending}
+                        style={{ background: TEAL, color: '#0d1117', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: newEmail ? 1 : 0.5 }}
+                      >
+                        <Plus size={14} /> Adicionar
+                      </button>
+                    </div>
+                    {subscribers.length === 0 ? (
+                      <p className="text-xs text-white/30">Nenhum destinatário para {emailContrato}.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {subscribers.map((s: any) => (
+                          <div key={s.id} style={{ background: `${TEAL}15`, border: `1px solid ${TEAL}30`, borderRadius: 20, padding: '4px 12px', fontSize: 12, color: TEAL, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {s.email}
+                            <button onClick={() => delSubMut.mutate(s.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', padding: 0, display: 'flex' }}>
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-
-              {emailContrato && (
-                <>
-                  <div className="flex gap-2 mb-3">
-                    <input
-                      type="email"
-                      placeholder="email@empresa.com"
-                      value={newEmail}
-                      onChange={e => setNewEmail(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && newEmail && addSubMut.mutate(newEmail)}
-                      style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: 1, outline: 'none' }}
-                    />
-                    <button
-                      onClick={() => newEmail && addSubMut.mutate(newEmail)}
-                      disabled={!newEmail || addSubMut.isPending}
-                      style={{ background: TEAL, color: '#0d1117', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-                    >
-                      <Plus size={14} /> Adicionar
-                    </button>
-                  </div>
-                  {subscribers.length === 0 ? (
-                    <p className="text-xs text-white/30 py-1">Nenhum destinatário cadastrado para {emailContrato}.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {subscribers.map((s: any) => (
-                        <div key={s.id} style={{ background: `${TEAL}15`, border: `1px solid ${TEAL}30`, borderRadius: 20, padding: '4px 12px', fontSize: 12, color: TEAL, display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {s.email}
-                          <button onClick={() => delSubMut.mutate(s.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', padding: 0, display: 'flex' }}>
-                            <X size={11} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           </motion.div>
         )}

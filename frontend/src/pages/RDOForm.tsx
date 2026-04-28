@@ -1081,38 +1081,43 @@ export default function RDOForm() {
             diaInfo         = `Dia ${Math.min(daysDone, totalDays)} de ${totalDays}`
           }
 
+          // Card unificado: info + input em um só lugar
           return (
             <motion.div
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
-              style={{ background: isLate ? `${RED}08` : `${TEAL}08`, border: `1px solid ${isLate ? RED : TEAL}25`, borderRadius: 10 }}
+              style={{ background: isLate ? `${RED}08` : `${TEAL}08`, border: `1px solid ${isLate ? RED : TEAL}30`, borderRadius: 10 }}
               className="p-3 mb-3 text-xs"
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-black uppercase tracking-widest text-[10px]" style={{ color: isLate ? RED : TEAL }}>
-                  {isLate ? '⚠ Atividade Atrasada' : '📋 Info do Cronograma'}
-                </span>
-                <button onClick={() => { setSelectedCronAt(null); setNewAt(a => ({ ...a, atividade_id: '' })) }}
-                  style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}>✕</button>
+              {/* Header: nome + badge + fechar */}
+              <div className="flex items-start justify-between mb-2 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-sm" style={{ color: isLate ? RED : TEAL }}>{selectedCronAt.atividade}</span>
+                  {newAt.is_marco && <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}40`, borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>MARCO</span>}
+                  {isLate && <span style={{ fontSize: 9, color: RED, fontWeight: 700 }}>⚠ ATRASADA</span>}
+                  {diaInfo && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{diaInfo}</span>}
+                </div>
+                <button onClick={() => { setSelectedCronAt(null); setNewAt(a => ({ ...a, atividade_id: '', descricao: '', qtd_executada: '', unidade: '', is_marco: false, marco_concluido: false })) }}
+                  style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}>✕</button>
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                {totalQty > 0 && <>
-                  <span className="text-white/40">Progresso acumulado</span>
-                  <span style={{ color: COPPER }} className="font-bold">{execQty} / {totalQty} {selectedCronAt.unidade || ''} ({pctAcum}%)</span>
-                  <span className="text-white/40">Esperado hoje</span>
-                  <span className="text-white/70 font-bold">{esperadoHoje} {selectedCronAt.unidade || ''} {diaInfo && `· ${diaInfo}`}</span>
+
+              {/* Stats row */}
+              <div className="flex flex-wrap gap-x-5 gap-y-1 mb-3 text-[10px]">
+                {totalQty > 0 ? <>
+                  <span><span className="text-white/40">Acumulado </span><span style={{ color: COPPER }} className="font-bold">{execQty}/{totalQty} {selectedCronAt.unidade || ''} ({pctAcum}%)</span></span>
+                  <span><span className="text-white/40">Esperado hoje </span><span className="text-white/80 font-bold">{esperadoHoje} {selectedCronAt.unidade || ''}</span></span>
+                </> : <>
+                  <span><span className="text-white/40">Conclusão </span><span style={{ color: COPPER }} className="font-bold">{pctAcum}%</span></span>
                 </>}
-                {!totalQty && <>
-                  <span className="text-white/40">Conclusão acumulada</span>
-                  <span style={{ color: COPPER }} className="font-bold">{pctAcum}%</span>
-                </>}
-                {termino && <>
-                  <span className="text-white/40">Prazo</span>
-                  <span className={isLate ? 'text-red-400 font-bold' : 'text-white/70'}>
-                    {new Date(termino + 'T12:00:00').toLocaleDateString('pt-BR')}
-                    {isLate && ` (atrasou ${Math.round((new Date(today).getTime() - new Date(termino).getTime()) / 86_400_000)}d)`}
+                {termino && (
+                  <span>
+                    <span className="text-white/40">Prazo </span>
+                    <span className={isLate ? 'text-red-400 font-bold' : 'text-white/70'}>
+                      {new Date(termino + 'T12:00:00').toLocaleDateString('pt-BR')}
+                      {isLate && ` (−${Math.round((new Date(today).getTime() - new Date(termino).getTime()) / 86_400_000)}d)`}
+                    </span>
                   </span>
-                </>}
+                )}
               </div>
             </motion.div>
           )
@@ -1121,21 +1126,8 @@ export default function RDOForm() {
         {/* Form adicionar atividade */}
         <div style={{ background: 'rgba(13,17,23,0.5)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }} className="p-3 mb-3">
           {newAt.atividade_id ? (
-            /* ── Atividade vinculada ao cronograma: interface simplificada ── */
+            /* ── Atividade vinculada ao cronograma: inputs apenas ── */
             <div className="flex flex-col gap-3">
-              {/* Header: nome da atividade vinculada */}
-              <div style={{ background: `${TEAL}10`, border: `1px solid ${TEAL}25`, borderRadius: 8, padding: '8px 12px' }} className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold" style={{ color: TEAL }}>{newAt.descricao}</div>
-                  {newAt.is_marco && (
-                    <span style={{ fontSize: 9, color: COPPER, border: `1px solid ${COPPER}30`, borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>MARCO</span>
-                  )}
-                </div>
-                <button
-                  onClick={() => { setSelectedCronAt(null); setNewAt(a => ({ ...a, atividade_id: '', descricao: '', qtd_executada: '', unidade: '', is_marco: false, marco_concluido: false })) }}
-                  style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11 }}
-                >✕</button>
-              </div>
 
               {newAt.is_marco ? (
                 /* Marco: só toggle de conclusão */
