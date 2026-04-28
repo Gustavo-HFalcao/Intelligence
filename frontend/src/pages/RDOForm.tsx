@@ -40,7 +40,8 @@ function statusFromPct(pct: number): string {
 function statusColor(status: string): string {
   if (status === 'Concluída') return GREEN
   if (status === 'Em andamento') return COPPER
-  return 'rgba(255,255,255,0.3)'
+  // 'Não iniciada', 'Pendente', etc → mesmo tom neutro
+  return 'rgba(255,255,255,0.25)'
 }
 
 // ── Sort atividades by fase hierarchy (1 > 1.1 > 1.2 > 2 ...) ────────────────
@@ -441,7 +442,10 @@ export default function RDOForm() {
       const efetivoExistente = atividadesRDO.reduce((sum, a) => sum + Number(a.efetivo || 0), 0)
       const novoEfetivo = Number(newAt.efetivo || 0)
       if (efetivoExistente + novoEfetivo > equipeTotal) {
-        setValidationErrors([`Efetivo total (${efetivoExistente + novoEfetivo}) excede a equipe alocada (${equipeTotal}). Ajuste os valores.`])
+        const msg = `⚠️ Efetivo insuficiente: você alocou ${efetivoExistente + novoEfetivo} pessoas, mas só há ${equipeTotal} na equipe do dia. Reduza as pessoas desta atividade ou ajuste o campo "Equipe Alocada" acima.`
+        setValidationErrors([msg])
+        // Scroll para o banner de erro para que o user veja
+        setTimeout(() => document.getElementById('validation-banner')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
         return
       }
     }
@@ -707,6 +711,7 @@ export default function RDOForm() {
       {/* Validation errors */}
       {validationErrors.length > 0 && (
         <motion.div
+          id="validation-banner"
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           style={{ background: `${RED}10`, border: `1px solid ${RED}35`, borderRadius: 10 }}
@@ -714,7 +719,7 @@ export default function RDOForm() {
         >
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle size={14} style={{ color: RED }} />
-            <span className="text-xs font-black uppercase tracking-widest" style={{ color: RED }}>Campos obrigatórios não preenchidos</span>
+            <span className="text-xs font-black uppercase tracking-widest" style={{ color: RED }}>Atenção</span>
           </div>
           <ul className="list-disc list-inside space-y-1">
             {validationErrors.map((e, i) => (
@@ -723,6 +728,7 @@ export default function RDOForm() {
           </ul>
         </motion.div>
       )}
+
 
       {/* Banner: rascunho existente encontrado */}
       <AnimatePresence>

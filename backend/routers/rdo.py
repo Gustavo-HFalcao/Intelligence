@@ -717,7 +717,7 @@ async def generate_rdo_pdf(
 
 @router.get("/historico")
 async def list_historico(
-    contrato: str = Query(...),
+    contrato: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(15, le=100),
     status: Optional[str] = Query(None),
@@ -726,7 +726,9 @@ async def list_historico(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    filters: Dict[str, Any] = {"contrato": contrato}
+    filters: Dict[str, Any] = {}
+    if contrato:
+        filters["contrato"] = contrato
     if client_id:
         filters["client_id"] = client_id
 
@@ -737,7 +739,6 @@ async def list_historico(
         raw_filters["data"] = f"gte.{date_from}"
     if date_to:
         if "data" in raw_filters:
-            # Can't do both with raw_filters easily — use gte and accept lte separately
             pass
         raw_filters["data"] = f"lte.{date_to}" if not date_from else raw_filters.get("data", "")
 
@@ -763,6 +764,7 @@ async def list_historico(
         "page":     page,
         "total":    total,
     }
+
 
 
 # ── Subscribers (notificações por e-mail) ─────────────────────────────────────

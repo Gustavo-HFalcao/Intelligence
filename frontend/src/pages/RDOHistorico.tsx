@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ClipboardList, ExternalLink, Play, Edit2, Trash2,
   ChevronLeft, ChevronRight, Filter, Mail, Plus, X,
-  CheckCircle, FileText, Clock, AlertCircle, Building2,
+  CheckCircle, FileText, Clock, AlertCircle, Building2, PenSquare,
 } from 'lucide-react'
 import api from '@/services/api'
 import { useAuth } from '@/context/AuthContext'
@@ -33,7 +33,6 @@ export default function RDOHistorico() {
   const navigate    = useNavigate()
   const qc          = useQueryClient()
   const { user }    = useAuth()
-  // Contrato vinculado ao perfil do usuário (operário de campo)
   const userContrato = (user as any)?.project || (user as any)?.contrato || ''
 
   const [statusFilter, setStatus] = useState('Todos')
@@ -41,25 +40,47 @@ export default function RDOHistorico() {
   const [dateTo, setDateTo]       = useState('')
   const [page, setPage]           = useState(1)
   const [emailPanel, setEmailPanel] = useState(false)
-  // Se tem contrato vinculado, usa direto; senão permite selecionar
   const [emailContrato, setEmailContrato] = useState(userContrato)
   const [newEmail, setNewEmail]   = useState('')
   const PAGE_SIZE = 20
 
-  // Load ALL rdos (no contract required)
+  // ── Histórico principal ─────────────────────────────────────────────────────
   const { data, isLoading } = useQuery({
     queryKey: ['rdo-historico', page, statusFilter, dateFrom, dateTo],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) })
       if (statusFilter !== 'Todos') params.set('status', statusFilter)
       if (dateFrom) params.set('date_from', dateFrom)
-      if (dateTo) params.set('date_to', dateTo)
+      if (dateTo)   params.set('date_to', dateTo)
       return api.get(`/rdo/historico?${params}`).then(r => r.data)
     },
     staleTime: Infinity,
   })
 
-  // Email subscribers — load when panel open for selected contract
+  // ── Rascunhos do dia (para banner no topo) ──────────────────────────────────
+  // Busca todos os rascunhos independente do filtro de status
+  const { data: draftData } = useQuery({
+    queryKey: ['rdo-drafts'],
+    queryFn: () =>
+      api.get('/rdo/historico?status=Rascunho&page=1&page_size=10').then(r => r.data),
+    staleTime: 30_000,
+  })
+  const drafts: any[] = (draftData?.rdos ?? []).filter((r: any) => r.status === 'Rascunho')
+
+  // ── Lista de contratos para dropdown de notificações ────────────────────────
+  // Usa todos os RDOs carregados + a lista de contratos do hub
+  const { data: contratosData } = useQuery({
+    queryKey: ['hub-contratos-list'],
+    queryFn: () => api.get('/api/hub/contratos').then(r => r.data),
+    staleTime: 60_000,
+  })
+  // Combina contratos do hub + contratos dos RDOs carregados
+  const allRdos: any[] = data?.rdos ?? []
+  const hubContratos: string[] = (contratosData?.contratos ?? []).map((c: any) => c.contrato).filter(Boolean)
+  const rdoContratos: string[] = allRdos.map((r: any) => r.contrato).filter(Boolean)
+  const contratos = Array.from(new Set([...hubContratos, ...rdoContratos])).sort()
+
+  // ── Notificações ─────────────────────────────────────────────────────────────
   const { data: subData, refetch: refetchSubs } = useQuery({
     queryKey: ['rdo-subscribers', emailContrato],
     queryFn: () => api.get(`/rdo/subscribers?contrato=${encodeURIComponent(emailContrato)}`).then(r => r.data),
@@ -79,15 +100,15 @@ export default function RDOHistorico() {
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/rdo/draft/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rdo-historico'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rdo-historico'] })
+      qc.invalidateQueries({ queryKey: ['rdo-drafts'] })
+    },
   })
 
-  const rdos: any[] = data?.rdos ?? []
-  const hasNext     = data?.has_next ?? false
-  const hasPrev     = page > 1
-
-  // Get unique contracts from rdos for email filter
-  const contratos = Array.from(new Set(rdos.map((r: any) => r.contrato).filter(Boolean)))
+  const rdos: any[]    = allRdos.filter((r: any) => r.status !== 'Rascunho')
+  const hasNext        = data?.has_next ?? false
+  const hasPrev        = page > 1
 
   return (
     <div className="flex flex-col gap-6 animate-enter">
@@ -150,7 +171,7 @@ export default function RDOHistorico() {
                       onChange={e => setEmailContrato(e.target.value)}
                       style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', appearance: 'none' }}
                     >
-                      <option value="">Selecionar contrato...</option>
+                      <option value="">{contratos.length === 0 ? 'Carregando...' : 'Selecionar contrato...'}</option>
                       {contratos.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   )}
@@ -177,7 +198,7 @@ export default function RDOHistorico() {
                       </button>
                     </div>
                     {subscribers.length === 0 ? (
-                      <p className="text-xs text-white/30">Nenhum destinatário para {emailContrato}.</p>
+                      <p className="text-xs text-white/30">Nenhum destinatário cadastrado para {emailContrato}.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {subscribers.map((s: any) => (
@@ -193,6 +214,62 @@ export default function RDOHistorico() {
                   </>
                 )}
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Rascunhos em andamento ── */}
+      <AnimatePresence>
+        {drafts.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            style={{ background: `${COPPER}08`, border: `1px solid ${COPPER}35`, borderRadius: 12 }}
+            className="p-4"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <PenSquare size={14} style={{ color: COPPER }} />
+              <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: COPPER }}>
+                Rascunhos em andamento — {drafts.length} não {drafts.length === 1 ? 'enviado' : 'enviados'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {drafts.map((r: any) => (
+                <div
+                  key={r.id}
+                  style={{ background: 'rgba(13,17,23,0.6)', border: `1px solid ${COPPER}20`, borderRadius: 8 }}
+                  className="flex items-center justify-between p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <Clock size={13} style={{ color: COPPER, flexShrink: 0 }} />
+                    <div>
+                      <div className="text-sm font-semibold text-white/80 font-mono">{r.data}</div>
+                      <div className="text-[10px] text-white/30">
+                        {r.contrato && <span style={{ color: COPPER }}>{r.contrato}</span>}
+                        {r.turno && <span className="ml-2">{r.turno}</span>}
+                        {r.equipe_alocada ? <span className="ml-2">· {r.equipe_alocada} pessoas</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigate(`/rdo-form?contrato=${encodeURIComponent(r.contrato)}&draft_id=${r.id}`)}
+                      style={{ background: `${TEAL}15`, border: `1px solid ${TEAL}30`, color: TEAL, borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <Play size={11} /> Continuar RDO
+                    </button>
+                    <button
+                      onClick={() => window.confirm('Excluir este rascunho?') && deleteMut.mutate(r.id)}
+                      style={{ background: `${RED}10`, border: `1px solid ${RED}25`, color: RED, borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                      title="Excluir rascunho"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </motion.div>
         )}
@@ -243,7 +320,7 @@ export default function RDOHistorico() {
               </tr>
             </thead>
             <tbody>
-              {rdos.map((r: any, idx: number) => (
+              {allRdos.map((r: any, idx: number) => (
                 <motion.tr
                   key={r.id}
                   initial={{ opacity: 0 }}
@@ -280,7 +357,7 @@ export default function RDOHistorico() {
                             <Play size={11} /> Continuar
                           </button>
                           <button
-                            onClick={() => confirm(`Excluir rascunho?`) && deleteMut.mutate(r.id)}
+                            onClick={() => window.confirm('Excluir rascunho?') && deleteMut.mutate(r.id)}
                             style={{ background: `${RED}10`, border: `1px solid ${RED}25`, color: RED, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
                             <Trash2 size={11} /> Excluir
                           </button>
@@ -300,7 +377,7 @@ export default function RDOHistorico() {
             </tbody>
           </table>
 
-          {rdos.length === 0 && (
+          {allRdos.length === 0 && (
             <div className="p-10 text-center text-white/20 text-sm">
               Nenhum RDO encontrado.
             </div>

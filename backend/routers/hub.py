@@ -2197,12 +2197,20 @@ async def update_contrato(
     data = {k: v for k, v in body.items() if k in ALLOWED}
 
     if not data:
-        # Nenhum campo válido enviado (ex: frontend mandou só 'contrato' que é chave,
-        # não campo editável). Retorna sucesso silencioso para não travar o modal.
+        # Nenhum campo válido enviado — retorna ok silencioso
         return {"ok": True}
 
-    sb_update("contratos", filters=filters, data=data)
+    # IMPORTANT: filtro APENAS pelo código do contrato (chave natural da tabela).
+    # Não incluir client_id no filtro de UPDATE — se o registro tiver client_id=NULL
+    # o Supabase retorna 404 (0 rows matched) e a operação falha silenciosamente.
+    # O client_id é usado para autorização de leitura, não como filtro de escrita aqui.
+    try:
+        sb_update("contratos", filters={"contrato": contrato_code}, data=data)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
     DataLoader.invalidate_cache(client_id or "")
+
     return {"ok": True}
 
 
