@@ -260,6 +260,8 @@ async def create_custo(
         "client_id":       client_id,
     }
     row = sb_insert("fin_custos", payload)
+    from backend.services.data_loader import DataLoader
+    DataLoader.invalidate_cache(client_id or "")
     return {"ok": True, "row": row}
 
 
@@ -268,6 +270,7 @@ async def update_custo(
     custo_id: str,
     body: Dict[str, Any] = Body(...),
     _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     allowed = {"categoria_id","categoria_nome","empresa","descricao","valor_previsto",
                "valor_executado","status","data","atividade_id","observacoes"}
@@ -277,6 +280,8 @@ async def update_custo(
     if "valor_executado" in data:
         data["valor_executado"] = round(_parse_float(data["valor_executado"]), 2)
     row = sb_update("fin_custos", filters={"id": custo_id}, data=data)
+    from backend.services.data_loader import DataLoader
+    DataLoader.invalidate_cache(client_id or "")
     return {"ok": True, "row": row}
 
 
@@ -284,8 +289,11 @@ async def update_custo(
 async def delete_custo(
     custo_id: str,
     _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     sb_delete("fin_custos", filters={"id": custo_id})
+    from backend.services.data_loader import DataLoader
+    DataLoader.invalidate_cache(client_id or "")
     return {"ok": True}
 
 
