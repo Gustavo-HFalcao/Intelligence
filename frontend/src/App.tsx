@@ -35,6 +35,7 @@ import AppMobile       from '@/pages/AppMobile'
 import MobileChat      from '@/pages/MobileChat'
 
 import MainLayout from '@/components/MainLayout'
+import RDOTopBar  from '@/components/RDOTopBar'
 
 import LoadingScreen from '@/components/LoadingScreen'
 
@@ -145,8 +146,8 @@ export default function App() {
       <Route path="/rdo-dashboard"      element={<WithLayout module="rdo_dashboard"><RDODashboard /></WithLayout>} />
 
       {/* Protegido — sem sidebar (full-screen forms / mobile) */}
-      <Route path="/rdo-form"       element={<PrivateRoute module="rdo_form"><div className="min-h-screen bg-bg-void p-4 md:p-6"><RDOForm /></div></PrivateRoute>} />
-      <Route path="/rdo-historico"  element={<PrivateRoute module="rdo_historico"><div className="min-h-screen bg-bg-void p-4 md:p-6"><RDOHistorico /></div></PrivateRoute>} />
+      <Route path="/rdo-form"       element={<PrivateRoute module="rdo_form"><div className="min-h-screen bg-bg-void flex flex-col"><RDOTopBar page="form" /><div className="flex-1 p-4 md:p-6"><RDOForm /></div></div></PrivateRoute>} />
+      <Route path="/rdo-historico"  element={<PrivateRoute module="rdo_historico"><div className="min-h-screen bg-bg-void flex flex-col"><RDOTopBar page="historico" /><div className="flex-1 p-4 md:p-6"><RDOHistorico /></div></div></PrivateRoute>} />
       <Route path="/reembolso-form" element={<PrivateRoute module="reembolso"><div className="min-h-screen bg-bg-void p-6"><ReembolsoForm /></div></PrivateRoute>} />
 
       <Route path="/projetos"      element={<WithLayout><Projetos /></WithLayout>} />
