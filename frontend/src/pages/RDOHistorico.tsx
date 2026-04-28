@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ClipboardList, ExternalLink, Play, Edit2, Trash2,
   ChevronLeft, ChevronRight, Filter, Mail, Plus, X,
-  CheckCircle, FileText, Clock, AlertCircle, Building2, PenSquare,
+  CheckCircle, FileText, Clock, AlertCircle, Building2, PenSquare, Loader2,
 } from 'lucide-react'
 import api from '@/services/api'
 import { useAuth } from '@/context/AuthContext'
@@ -33,7 +33,7 @@ export default function RDOHistorico() {
   const navigate    = useNavigate()
   const qc          = useQueryClient()
   const { user }    = useAuth()
-  const userContrato = (user as any)?.project || (user as any)?.contrato || ''
+  const userContrato = (user as any)?.project || (user as any)?.contrato || (user as any)?.contract || ''
 
   const [statusFilter, setStatus] = useState('Todos')
   const [dateFrom, setDateFrom]   = useState('')
@@ -42,6 +42,7 @@ export default function RDOHistorico() {
   const [emailPanel, setEmailPanel] = useState(false)
   const [emailContrato, setEmailContrato] = useState(userContrato)
   const [newEmail, setNewEmail]   = useState('')
+  const [subError, setSubError]   = useState('')
   const PAGE_SIZE = 20
 
   // ── Histórico principal ─────────────────────────────────────────────────────
@@ -91,11 +92,16 @@ export default function RDOHistorico() {
 
   const addSubMut = useMutation({
     mutationFn: (email: string) => api.post('/rdo/subscribers', { contrato: emailContrato, email }),
-    onSuccess: () => { refetchSubs(); setNewEmail('') },
+    onSuccess: () => { refetchSubs(); setNewEmail(''); setSubError('') },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error || err?.message || 'Erro ao cadastrar e-mail'
+      setSubError(msg)
+    },
   })
   const delSubMut = useMutation({
     mutationFn: (id: string) => api.delete(`/rdo/subscribers/${id}`),
-    onSuccess: () => refetchSubs(),
+    onSuccess: () => { refetchSubs(); setSubError('') },
+    onError: (err: any) => setSubError(err?.response?.data?.error || 'Erro ao remover'),
   })
 
   const deleteMut = useMutation({
@@ -185,18 +191,22 @@ export default function RDOHistorico() {
                         type="email"
                         placeholder="email@empresa.com"
                         value={newEmail}
-                        onChange={e => setNewEmail(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && newEmail && addSubMut.mutate(newEmail)}
-                        style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: 1, outline: 'none' }}
+                        onChange={e => { setNewEmail(e.target.value); setSubError('') }}
+                        onKeyDown={e => e.key === 'Enter' && newEmail && !addSubMut.isPending && addSubMut.mutate(newEmail)}
+                        style={{ background: 'rgba(13,17,23,0.8)', border: `1px solid ${subError ? '#EF4444' : TEAL}40`, color: '#e2c87a', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: 1, outline: 'none' }}
                       />
                       <button
-                        onClick={() => newEmail && addSubMut.mutate(newEmail)}
+                        onClick={() => newEmail && !addSubMut.isPending && addSubMut.mutate(newEmail)}
                         disabled={!newEmail || addSubMut.isPending}
-                        style={{ background: TEAL, color: '#0d1117', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: newEmail ? 1 : 0.5 }}
+                        style={{ background: TEAL, color: '#0d1117', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: addSubMut.isPending ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: (!newEmail || addSubMut.isPending) ? 0.5 : 1 }}
                       >
-                        <Plus size={14} /> Adicionar
+                        {addSubMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                        {addSubMut.isPending ? 'Salvando...' : 'Adicionar'}
                       </button>
                     </div>
+                    {subError && (
+                      <p style={{ fontSize: 11, color: '#EF4444', marginTop: 2 }}>⚠️ {subError}</p>
+                    )}
                     {subscribers.length === 0 ? (
                       <p className="text-xs text-white/30">Nenhum destinatário cadastrado para {emailContrato}.</p>
                     ) : (

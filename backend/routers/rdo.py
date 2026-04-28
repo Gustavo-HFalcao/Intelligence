@@ -798,10 +798,14 @@ async def list_subscribers(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
+    # Filtra por contrato + module; client_id é opcional
     filters: Dict[str, Any] = {"contract": contrato, "module": "rdo"}
     if client_id:
         filters["client_id"] = client_id
     rows = sb_select("email_sender", filters=filters, limit=100) or []
+    # Fallback sem client_id para usuários RDO sem tenant definido
+    if not rows and client_id:
+        rows = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=100) or []
     return {"subscribers": [{"id": r["id"], "email": r["email"]} for r in rows]}
 
 
@@ -811,12 +815,14 @@ async def add_subscriber(
     user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    contrato = body.get("contrato", "")
+    contrato = body.get("contrato", "").strip()
     email    = body.get("email", "").strip().lower()
     if not email or "@" not in email:
         return JSONResponse(status_code=400, content={"error": "E-mail inválido"})
+    if not contrato:
+        return JSONResponse(status_code=400, content={"error": "Selecione um contrato antes de adicionar o e-mail"})
 
-    # Check duplicate
+    # Check duplicate (sem filtro client_id para evitar duplicatas)
     existing = sb_select("email_sender", filters={"contract": contrato, "module": "rdo", "email": email}, limit=1) or []
     if existing:
         return {"ok": True, "id": existing[0]["id"]}
@@ -826,8 +832,10 @@ async def add_subscriber(
         "module":      "rdo",
         "email":       email,
         "created_by":  str(user.get("id", "")),
-        "client_id":   client_id,
+        "client_id":   client_id or None,
     })
+    if row is None:
+        return JSONResponse(status_code=500, content={"error": "Falha ao salvar — verifique se a tabela email_sender existe no banco"})
     return {"ok": True, "id": row.get("id") if isinstance(row, dict) else None}
 
 
