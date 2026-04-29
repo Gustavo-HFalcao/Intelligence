@@ -408,16 +408,17 @@ export default function RDOForm() {
     // O backend fará append ao exec_qty acumulado e recalculará o % automaticamente
     const pct = newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : 0  // pct nunca editável pelo user
     const payload = {
-      descricao:      newAt.descricao,
+      descricao:       newAt.descricao,
       pct,
-      status:         statusFromPct(pct),
-      ordem:          atividadesRDO.length,
-      qtd_executada:  newAt.qtd_executada || null,  // produção do dia — backend soma ao acumulado
-      unidade:        newAt.unidade || null,
-      efetivo:        Number(newAt.efetivo) || 0,
-      is_marco:       newAt.is_marco,
-      atividade_id:   newAt.atividade_id || null,   // link ao hub_atividades
-      is_extra:       !newAt.atividade_id,           // não mapeada = precisa aprovação do gestor
+      status:          statusFromPct(pct),
+      ordem:           atividadesRDO.length,
+      qtd_executada:   newAt.qtd_executada || null,
+      unidade:         newAt.unidade || null,
+      efetivo:         Number(newAt.efetivo) || 0,
+      is_marco:        newAt.is_marco,
+      marco_concluido: newAt.is_marco ? newAt.marco_concluido : false,
+      atividade_id:    newAt.atividade_id || null,
+      is_extra:        !newAt.atividade_id,
     }
 
     let currentDraftId = draftId

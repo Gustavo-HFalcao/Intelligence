@@ -464,6 +464,8 @@ async def submit_rdo(
     if contrato:
         atividades_rdo = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
         today_str = str(_date.today())
+        # data_rdo é a data do dia de obra — pode ser diferente de today (RDO retroativo)
+        rdo_data_str = str(master_rows[0].get("data") or today_str)[:10] if master_rows else today_str
         _affected_parents: set = set()  # track parents that need % rollup
 
         for at in atividades_rdo:
@@ -473,6 +475,11 @@ async def submit_rdo(
             unidade_at      = _norm(at.get("unidade"))
             is_marco        = bool(at.get("is_marco", False))
             marco_concluido = bool(at.get("marco_concluido", False))
+            # Fallback: se is_marco e observacao indica conclusão, tratar como concluído
+            if is_marco and not marco_concluido:
+                obs_lower = _norm(at.get("observacao")).lower()
+                if obs_lower in ("concluída", "concluida", "concluído", "concluido", "100%"):
+                    marco_concluido = True
 
             # quantidade armazenada: para %, é o pct; para física, é qtd_executada
             if unidade_at == "%":
@@ -511,7 +518,7 @@ async def submit_rdo(
             # Verifica se tem sub-atividades — se sim, % é driven by subs
             has_subs = bool(sb_select("hub_atividades", filters={"parent_id": hub_id}, limit=1) or [])
 
-            hub_update: Dict[str, Any] = {"last_rdo_date": today_str}
+            hub_update: Dict[str, Any] = {"last_rdo_date": rdo_data_str}
             novo_pct = pct_atual
             producao_dia = None
             novo_exec = None
@@ -560,7 +567,7 @@ async def submit_rdo(
                 "conclusao_pct_novo":     novo_pct,
                 "conclusao_pct_anterior": pct_atual,
                 "rdo_id":                 rdo_id,
-                "data":                   today_str,
+                "data":                   rdo_data_str,
                 "created_at":             datetime.utcnow().isoformat(),
                 "client_id":              client_id,
             }
