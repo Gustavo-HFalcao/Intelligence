@@ -161,9 +161,10 @@ def _calc_progress_spi(
         ter_s = str(a.get("termino_previsto") or "")[:10]
         peso = float(a.get("peso_pct") or 1)
 
-        # Realizado: prioriza hist_map (dados de RDO); fallback para conclusao_pct
-        # apenas quando hist_map não foi passado (callers sem acesso ao historico)
-        if hist_map is not None:
+        # Realizado: usa hist_map quando disponível E não-vazio.
+        # hist_map vazio = histórico ainda não populado (contrato novo ou dados migrados)
+        # → fallback para conclusao_pct para não zerar tudo.
+        if hist_map:
             hist_val = _hist_pct_at(hist_map, str(a["id"]), ref)
             pct_real = hist_val if hist_val is not None else 0.0
         else:
@@ -1905,17 +1906,23 @@ async def get_hub_dashboard(
                 frac = _working_days_between(ini.date(), d_end.date() + timedelta(days=1)) / max(1, dur_wd)
             prev_acc += frac * peso
             
-            # Realizado: APENAS via hist_map (entradas de RDO).
+            # Realizado: via hist_map quando populado; fallback para conclusao_pct
+            # quando hist_map vazio (histórico ainda não gerado para este contrato).
             # Dias além do last_rdo_date nunca têm realizado — regra do usuário.
             if last_rdo_date_sc is not None and d.date() <= last_rdo_date_sc:
                 aid = str(row.get("id", ""))
                 val = 0.0
-                if aid in hist_map:
-                    for dt, pct in hist_map[aid]:
-                        if dt.date() <= d_end.date():
-                            val = float(pct)
-                        else:
-                            break
+                if hist_map:
+                    if aid in hist_map:
+                        for dt, pct in hist_map[aid]:
+                            if dt.date() <= d_end.date():
+                                val = float(pct)
+                            else:
+                                break
+                else:
+                    # fallback: usa conclusao_pct atual quando não há histórico
+                    if d_end.date() >= today.date():
+                        val = float(row.get("conclusao_pct", 0))
                 real_acc += (val / 100.0) * peso
 
         pt = {"data": d.strftime("%d/%m" if freq != "MS" else "%m/%y"), "previsto": round(prev_acc, 1)}
