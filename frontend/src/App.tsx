@@ -33,6 +33,7 @@ import Obras           from '@/pages/Obras'
 import EditorDados     from '@/pages/EditorDados'
 import AppMobile       from '@/pages/AppMobile'
 import MobileChat      from '@/pages/MobileChat'
+import LTDemo          from '@/pages/LTDemo'
 
 import MainLayout from '@/components/MainLayout'
 import RDOTopBar  from '@/components/RDOTopBar'
@@ -159,6 +160,9 @@ export default function App() {
       <Route path="/master-settings" element={<WithLayout><div className="p-8 text-text-muted">Master Settings — Fase C.10</div></WithLayout>} />
       <Route path="/app-mobile"    element={<WithLayout><AppMobile /></WithLayout>} />
       <Route path="/mobile-chat"   element={<PrivateRoute><MobileChat /></PrivateRoute>} />
+      
+      {/* Demonstração Técnica LT Windy */}
+      <Route path="/demo-lt"       element={<LTDemo />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
