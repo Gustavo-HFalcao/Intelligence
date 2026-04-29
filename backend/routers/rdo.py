@@ -648,14 +648,7 @@ async def submit_rdo(
             _pdf_path = ""
             _pdf_url = ""
 
-            # 0. Insights do cronograma (usa dados já atualizados no banco)
-            try:
-                _trigger_insights(_contrato_bg, _rdo_id_bg, _client_id_bg)
-            except Exception as _e:
-                import logging as _log
-                _log.getLogger("rdo").warning(f"Insights falhou: {_e}")
-
-            # 1. IA — gera ai_summary (timeout via socket/requests dentro do openai SDK)
+            # 1. IA — gera ai_summary primeiro (dados do RDO frescos)
             try:
                 _ai_summary = _generate_ai_summary_sync(rdo_row_snap, atividades_snap, _client_id_bg or "")
                 if _ai_summary:
@@ -664,7 +657,14 @@ async def submit_rdo(
                 import logging as _log
                 _log.getLogger("rdo").warning(f"AI summary falhou: {_e}")
 
-            # 2. PDF — gera com ai_summary já disponível no banco
+            # 2. Insights do cronograma — depois da IA, com last_rdo_id=rdo_id para o view detectar
+            try:
+                _trigger_insights(_contrato_bg, _rdo_id_bg, _client_id_bg)
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger("rdo").warning(f"Insights falhou: {_e}")
+
+            # 3. PDF — gera com ai_summary já disponível no banco
             try:
                 from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
                 _result = _pdf_task.run(rdo_id=_rdo_id_bg, client_id=_client_id_bg or "")
@@ -675,7 +675,7 @@ async def submit_rdo(
                 import logging as _log
                 _log.getLogger("rdo").warning(f"PDF falhou: {_e}")
 
-            # 3. Email executivo (com atividades, ai_summary, pdf anexado, link view)
+            # 4. Email executivo (com atividades, ai_summary, pdf anexado, link view)
             if email_list:
                 try:
                     from backend.integrations.email import send_rdo_executivo
@@ -813,7 +813,7 @@ def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
         # Busca SEM client_id para garantir que encontra o RDO recém submetido
         # (hub_atividades e rdo_master podem não ter client_id preenchido em todos os registros)
         atividades   = sb_select("hub_atividades",          filters={"contrato": contrato}, limit=500) or []
-        rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato}, order="data.desc", limit=7) or []
+        rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato, "status": "Submetido"}, order="data.desc", limit=7) or []
         historico    = sb_select("hub_atividade_historico", filters={"contrato": contrato}, limit=300) or []
 
         existing     = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []

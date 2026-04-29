@@ -2103,6 +2103,13 @@ async def list_contratos(
         if not item.get("localizacao"):
             item["localizacao"] = None
 
+        # Aliases lat/lng → latitude/longitude para o frontend (Windy e mapa)
+        # A tabela contratos usa lat/lng; o frontend espera latitude/longitude
+        if item.get("lat") and not item.get("latitude"):
+            item["latitude"] = float(item["lat"])
+        if item.get("lng") and not item.get("longitude"):
+            item["longitude"] = float(item["lng"])
+
         # Saúde calculada: desvio já vem do _calc_progress_spi (mesma lógica em todas as páginas)
         desvio_pct_v = kpis_c["desvio_pct"]
 
@@ -2167,10 +2174,16 @@ async def create_contrato(
         body["latitude"] = lat
         body["longitude"] = lon
 
+    # Normaliza latitude/longitude → lat/lng (nome real na tabela contratos)
+    if "latitude" in body:
+        body["lat"] = body.pop("latitude")
+    if "longitude" in body:
+        body["lng"] = body.pop("longitude")
+
     # Campos permitidos na tabela contratos
     ALLOWED_CREATE = {
         "contrato", "projeto", "cliente", "gestor", "localizacao", "valor_contratado",
-        "data_inicio", "data_termino", "status", "latitude", "longitude",
+        "data_inicio", "data_termino", "status", "lat", "lng",
         "potencia_kwp", "prioridade", "terceirizado", "dias_uteis_semana", "obs", "client_id",
     }
     body = {k: v for k, v in body.items() if k in ALLOWED_CREATE}
@@ -2201,15 +2214,21 @@ async def update_contrato(
         body["potencia_kwp"] = body["potencia_kwp_contratada"]
 
     # Se mudar localização e não tiver lat/long, re-geocodificar
-    if body.get("localizacao") and not body.get("latitude"):
+    if body.get("localizacao") and not body.get("lat") and not body.get("latitude"):
         lat, lon = await _get_coords(body["localizacao"])
-        body["latitude"] = lat
-        body["longitude"] = lon
+        body["lat"] = lat
+        body["lng"] = lon
+
+    # Normaliza latitude/longitude → lat/lng (nome real na tabela contratos)
+    if "latitude" in body:
+        body["lat"] = body.pop("latitude")
+    if "longitude" in body:
+        body["lng"] = body.pop("longitude")
 
     # Campos permitidos na tabela contratos (evita erro de coluna desconhecida)
     ALLOWED = {
         "projeto", "cliente", "gestor", "localizacao", "valor_contratado",
-        "data_inicio", "data_termino", "status", "latitude", "longitude",
+        "data_inicio", "data_termino", "status", "lat", "lng",
         "potencia_kwp", "prioridade", "terceirizado", "dias_uteis_semana", "obs",
     }
     data = {k: v for k, v in body.items() if k in ALLOWED}
