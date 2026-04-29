@@ -293,7 +293,8 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
 
   const desvio = d.desvio_pct ?? 0
   const desvioStr = desvio > 0 ? `+${desvio}%` : desvio < 0 ? `${desvio}%` : '0%'
-  const desvioColor = desvio > 0 ? RED : desvio < 0 ? TEAL : '#888'
+  // desvio = realizado - esperado: positivo = adiantado (TEAL), negativo = atrasado (RED)
+  const desvioColor = desvio > 0 ? TEAL : desvio < 0 ? RED : '#888'
 
   const cards = [
     { label: 'Progresso Físico', value: `${d.progress_pct ?? 0}%`, icon: Activity, color: COPPER, sub: 'Avanço Realizado', onClick: undefined },
@@ -551,10 +552,10 @@ function DashboardTab({ contrato }: { contrato: string }) {
     <div className="flex flex-col gap-8 animate-enter">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { l: 'Progresso Global', v: `${k.progress_global || 0}%`, icon: Activity, col: COPPER },
-          { l: 'Performance (SPI)', v: (k.spi || 1.0).toFixed(2), icon: TrendingUp, col: (k.spi >= 1 ? TEAL : RED) },
-          { l: 'Workflow Total', v: k.total_atividades || 0, icon: List, col: '#fff' },
-          { l: 'Deliveries Blue', v: k.concluidas || 0, icon: CheckCircle, col: TEAL },
+          { l: 'Progresso Global',  v: `${k.progress_global || 0}%`, icon: Activity,     col: COPPER },
+          { l: 'Performance (SPI)', v: (k.spi || 1.0).toFixed(2),    icon: TrendingUp,   col: (k.spi >= 1 ? TEAL : RED) },
+          { l: 'Desvio vs. Plan',   v: (() => { const d = k.desvio_pct ?? 0; return `${d > 0 ? '+' : ''}${d}%` })(), icon: TrendingDown, col: (k.desvio_pct ?? 0) > 0 ? TEAL : (k.desvio_pct ?? 0) < 0 ? RED : '#888' },
+          { l: 'Deliveries Blue',   v: k.concluidas || 0,             icon: CheckCircle,  col: TEAL },
         ].map(card => (
           <div key={card.l} style={{ background: GLASS, border: BORDER, borderRadius: 20 }} className="p-6 relative overflow-hidden group">
              <div className="text-[9px] text-text-muted font-black uppercase tracking-[0.2em] mb-2">{card.l}</div>
@@ -682,22 +683,18 @@ function TendenciaDot({ tendencia }: { tendencia: string }) {
 }
 
 // KPI cards clicáveis do topo do cronograma
-function CronMenuBar({ allRows, onCreateMacro, onImportIA, onRecalcular, onKpiClick }: any) {
+function CronMenuBar({ allRows, kpisData, onCreateMacro, onImportIA, onRecalcular, onKpiClick }: any) {
   const total = allRows.length
   const concluidas = allRows.filter((a: any) => Number(a.conclusao_pct || 0) >= 100).length
   const criticas = allRows.filter((a: any) => String(a.critico).toLowerCase() === 'sim').length
-  const progresso = useMemo(() => {
-    if (!total) return 0
-    const weights = allRows.reduce((s: number, a: any) => s + Number(a.peso_pct || 1), 0)
-    if (!weights) return 0
-    return allRows.reduce((s: number, a: any) => s + Number(a.conclusao_pct || 0) * Number(a.peso_pct || 1), 0) / weights
-  }, [allRows, total])
+  // Progresso vem do backend (_calc_progress_spi com hist_map) — mesma fonte que Visão Geral e Dashboard
+  const progresso = kpisData?.progress_pct ?? 0
 
   const kpis = [
     { id: 'total',     label: 'Total de Atividades', value: total,              color: '#fff',   icon: List },
     { id: 'concluidas',label: 'Concluídas',           value: concluidas,         color: TEAL,     icon: CheckCircle },
     { id: 'criticas',  label: 'Críticas',             value: criticas,           color: RED,      icon: AlertTriangle },
-    { id: 'progresso', label: 'Progresso Geral',      value: `${progresso.toFixed(1)}%`, color: COPPER, icon: Activity },
+    { id: 'progresso', label: 'Progresso Geral',      value: `${Number(progresso).toFixed(1)}%`, color: COPPER, icon: Activity },
   ]
 
   return (
@@ -1262,6 +1259,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
       {/* 1 — Menu Bar: KPIs + botões de ação */}
       <CronMenuBar
         allRows={allRows}
+        kpisData={data?.kpis}
         onCreateMacro={openCreateMacro}
         onImportIA={() => alert('Importar via IA — em breve')}
         onRecalcular={handleRecalcular}
@@ -1988,7 +1986,8 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
               const saude = c.saude || 'OK'
               const saudeColor = c.saude_color || TEAL
               const desvio = c.desvio_pct || 0
-              const desvioColor = desvio > 0 ? RED : desvio < 0 ? TEAL : '#888'
+              // desvio = realizado - esperado: positivo = adiantado (TEAL), negativo = atrasado (RED)
+              const desvioColor = desvio > 0 ? TEAL : desvio < 0 ? RED : '#888'
               const statusColors: Record<string, { color: string; bg: string }> = {
                 'Em Execução':    { color: TEAL,   bg: `${TEAL}15` },
                 'Em Planejamento':{ color: COPPER, bg: `${COPPER}15` },

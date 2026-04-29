@@ -1502,7 +1502,17 @@ async def get_cronograma(
             "color":          "#EF4444" if (r.get("critico") is True or str(r.get("critico","")).lower() in ("true","sim","1")) else r.get("fase_color", "#C98B2A"),
         })
 
-    result = {"atividades": sorted_atividades, "gantt": gantt, "total": len(atividades)}
+    # KPIs de progresso — mesma lógica da visão-geral para consistência total
+    _hmap_cron = _build_hist_map(hist_rows)
+    _wd_cron   = _get_working_days(contrato, client_id)
+    kpis_cron  = _calc_progress_spi(rows, today_d, _wd_cron, ref_date=last_rdo_d, hist_map=_hmap_cron)
+
+    result = {
+        "atividades": sorted_atividades,
+        "gantt": gantt,
+        "total": len(atividades),
+        "kpis": kpis_cron,
+    }
     cache_set(client_id or "global", cache_key, result, ttl=_CRONOGRAMA_TTL)
     return result
 
@@ -2000,6 +2010,14 @@ async def get_hub_dashboard(
     contrato_info_dict = df_contr[df_contr["contrato"] == contrato].iloc[0].to_dict() if not df_contr.empty else {}
     risk = _calculate_risk_score(df_c, df_fin, contrato_info_dict)
 
+    # KPIs canônicos via _calc_progress_spi — mesma fonte que visão-geral e cronograma
+    _ativ_dash  = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    _hist_dash  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    _lrdo_dash  = last_rdo_date_sc  # já calculado acima para a S-curve
+    _hmap_dash  = _build_hist_map(_hist_dash)
+    _wd_dash    = _get_working_days(contrato, client_id)
+    _kpis_calc  = _calc_progress_spi(_ativ_dash, date.today(), _wd_dash, ref_date=_lrdo_dash, hist_map=_hmap_dash)
+
     return {
         "scurve": scurve,
         "productivity": prod_data,
@@ -2010,10 +2028,12 @@ async def get_hub_dashboard(
         "orcamento_mensal": orcamento_mensal,
         "risk": risk,
         "kpis": {
-            "progress_global": scurve[-1]["realizado"] if scurve and "realizado" in scurve[-1] else 0,
-            "spi": spi_trend[-1]["spi"] if spi_trend else 1.0,
+            "progress_global": _kpis_calc["progress_pct"],
+            "spi":             _kpis_calc["spi"],
+            "desvio_pct":      _kpis_calc["desvio_pct"],
+            "prazo_decorrido": _kpis_calc["prazo_decorrido_pct"],
             "total_atividades": len(df_c),
-            "concluidas": int((df_c["conclusao_pct"] >= 100).sum())
+            "concluidas": int((df_c["conclusao_pct"] >= 100).sum()),
         }
     }
 

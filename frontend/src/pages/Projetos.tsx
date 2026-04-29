@@ -268,7 +268,7 @@ export default function Projetos() {
                   </div>
                   <div className="bg-white/[0.03] border border-white/[0.05] rounded-xl p-3">
                     <div className="text-[8px] font-bold text-text-muted uppercase mb-1">Desvio</div>
-                    <div className="text-sm font-black" style={{ color: (c.desvio_pct || 0) > 0 ? RED : TEAL }}>
+                    <div className="text-sm font-black" style={{ color: (c.desvio_pct || 0) > 0 ? TEAL : (c.desvio_pct || 0) < 0 ? RED : '#888' }}>
                       {(c.desvio_pct || 0) > 0 ? '+' : ''}{c.desvio_pct || 0}%
                     </div>
                   </div>
