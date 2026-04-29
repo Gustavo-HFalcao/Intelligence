@@ -16,6 +16,7 @@ from backend.integrations.supabase import sb_delete, sb_insert, sb_select, sb_up
 from backend.middleware.auth import get_current_user
 from backend.middleware.tenant import get_current_tenant
 from backend.core.audit import audit_log, AuditCategory
+from backend.core.logging import get_logger
 from backend.services.rdo_service import (
     apply_watermark,
     extract_exif_full,
@@ -24,6 +25,8 @@ from backend.services.rdo_service import (
     haversine_m,
     reverse_geocode,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/rdo", tags=["rdo"])
 
@@ -318,6 +321,9 @@ async def update_atividade(
         data["atividade"] = body["descricao"]
     if "pct" in body:
         data["quantidade"] = float(body["pct"])
+        # unidade fica "%" quando editando por percentual
+        if body.get("unidade", "%") == "%":
+            data["unidade"] = "%"
     if "status" in body:
         data["observacao"] = body["status"]
     if "efetivo" in body:
@@ -325,7 +331,15 @@ async def update_atividade(
     if "qtd_executada" in body and body.get("unidade", "%") != "%":
         data["quantidade"] = float(body["qtd_executada"] or 0)
         data["unidade"] = body.get("unidade", "")
-    row = sb_update("rdo_atividades", filters={"id": at_id, "rdo_id": rdo_id}, data=data)
+    if "marco_concluido" in body:
+        data["marco_concluido"] = bool(body["marco_concluido"])
+        # Garante que is_marco fica true quando marcando conclusão
+        data["is_marco"] = True
+    if "is_marco" in body:
+        data["is_marco"] = bool(body["is_marco"])
+    if "quantidade" in body and "pct" not in body and "qtd_executada" not in body:
+        data["quantidade"] = float(body["quantidade"] or 0)
+    sb_update("rdo_atividades", filters={"id": at_id, "rdo_id": rdo_id}, data=data)
     return {"ok": True}
 
 
@@ -489,74 +503,77 @@ async def submit_rdo(
             hub = hub_rows[0]
             hub_id = hub["id"]
             pct_atual = int(hub.get("conclusao_pct") or 0)
+            cur_status = str(hub.get("status_atividade") or "")
+            efetivo_at = int(at.get("efetivo") or 0)
             if hub.get("parent_id"):
                 _affected_parents.add((hub["parent_id"], contrato))
 
+            # Verifica se tem sub-atividades — se sim, % é driven by subs
+            has_subs = bool(sb_select("hub_atividades", filters={"parent_id": hub_id}, limit=1) or [])
+
+            hub_update: Dict[str, Any] = {"last_rdo_date": today_str}
+            novo_pct = pct_atual
+            producao_dia = None
+            novo_exec = None
+            unidade_hist = str(hub.get("unidade") or "")
+
             # ── Marco concluído → 100% imediato ──────────────────────────────
             if is_marco and marco_concluido:
-                if pct_atual < 100:
-                    hub_update: Dict[str, Any] = {
-                        "conclusao_pct": 100,
-                        "last_rdo_date": today_str,
-                    }
-                    sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
-                    sb_insert("hub_atividade_historico", {
-                        "atividade_id":           hub_id,
-                        "contrato":               contrato,
-                        "conclusao_pct_novo":     100,
-                        "conclusao_pct_anterior": pct_atual,
-                        "rdo_id":                 rdo_id,
-                        "data":                   today_str,
-                        "created_at":             datetime.utcnow().isoformat(),
-                        "client_id":              client_id,
-                    })
-            # ── Percentual direto (não marco) → atualiza se avançou ──────────
+                novo_pct = 100
+                if not has_subs:
+                    hub_update["conclusao_pct"] = 100
+            # ── Percentual direto (não marco) ─────────────────────────────────
             elif unidade_at == "%" and quantidade > pct_atual:
                 novo_pct = min(100, int(quantidade))
-                hub_update = {
-                    "conclusao_pct": novo_pct,
-                    "last_rdo_date": today_str,
-                }
-                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
-                sb_insert("hub_atividade_historico", {
-                    "atividade_id":           hub_id,
-                    "contrato":               contrato,
-                    "conclusao_pct_novo":     novo_pct,
-                    "conclusao_pct_anterior": pct_atual,
-                    "rdo_id":                 rdo_id,
-                    "data":                   today_str,
-                    "created_at":             datetime.utcnow().isoformat(),
-                    "client_id":              client_id,
-                })
+                if not has_subs:
+                    hub_update["conclusao_pct"] = novo_pct
             # ── Quantidade física → incrementa exec_qty ───────────────────────
             elif unidade_at not in ("%", "marco", "") and quantidade > 0:
                 exec_atual = float(hub.get("exec_qty") or 0)
-                novo_exec  = exec_atual + quantidade
                 total_qty  = float(hub.get("total_qty") or 0)
-                novo_pct   = min(100, int(novo_exec / total_qty * 100)) if total_qty > 0 else pct_atual
+                novo_exec  = exec_atual + quantidade
+                producao_dia = quantidade
+                unidade_hist = unidade_at
+                hub_update["exec_qty"] = novo_exec
+                if total_qty > 0 and not has_subs:
+                    calc_pct = min(100, int(novo_exec / total_qty * 100))
+                    if calc_pct > pct_atual:
+                        novo_pct = calc_pct
+                        hub_update["conclusao_pct"] = novo_pct
 
-                hub_update = {
-                    "exec_qty":      novo_exec,
-                    "last_rdo_date": today_str,
-                }
-                if novo_pct > pct_atual:
-                    hub_update["conclusao_pct"] = novo_pct
+            # ── Auto-transiciona status_atividade ─────────────────────────────
+            if novo_pct >= 100 and not has_subs:
+                hub_update["status_atividade"] = "concluida"
+            elif novo_pct > 0 and cur_status in ("nao_iniciada", "pronta_iniciar", "Não Iniciada", ""):
+                hub_update["status_atividade"] = "em_execucao"
 
-                sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
-                sb_insert("hub_atividade_historico", {
-                    "atividade_id":           hub_id,
-                    "contrato":               contrato,
-                    "conclusao_pct_novo":     novo_pct,
-                    "conclusao_pct_anterior": pct_atual,
-                    "exec_qty_novo":          novo_exec,
-                    "producao_dia":           quantidade,
-                    "total_qty":              total_qty,
-                    "unidade":                unidade_at,
-                    "rdo_id":                 rdo_id,
-                    "data":                   today_str,
-                    "created_at":             datetime.utcnow().isoformat(),
-                    "client_id":              client_id,
-                })
+            # ── Registra efetivo alocado ──────────────────────────────────────
+            if efetivo_at > 0:
+                hub_update["efetivo_alocado"] = efetivo_at
+
+            sb_update("hub_atividades", filters={"id": hub_id}, data=hub_update)
+
+            # ── Histórico completo (auditoria) ────────────────────────────────
+            hist: Dict[str, Any] = {
+                "atividade_id":           hub_id,
+                "contrato":               contrato,
+                "conclusao_pct_novo":     novo_pct,
+                "conclusao_pct_anterior": pct_atual,
+                "rdo_id":                 rdo_id,
+                "data":                   today_str,
+                "created_at":             datetime.utcnow().isoformat(),
+                "client_id":              client_id,
+            }
+            if producao_dia is not None:
+                hist["producao_dia"] = producao_dia
+            if novo_exec is not None:
+                hist["exec_qty_novo"] = novo_exec
+                total_qty_h = float(hub.get("total_qty") or 0)
+                if total_qty_h:
+                    hist["total_qty"] = total_qty_h
+            if unidade_hist:
+                hist["unidade"] = unidade_hist
+            sb_insert("hub_atividade_historico", hist)
 
         # ── Atividades extras (não mapeadas) → pendentes de aprovação no hub ────
         for at in atividades_rdo:
@@ -599,50 +616,79 @@ async def submit_rdo(
             pass
 
 
-        # ── Insights + AI Summary + PDF — fire-and-forget via Celery ──────────
-        try:
-            from backend.workers.tasks.insight_tasks import generate_insights, generate_rdo_ai_analysis
-            from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
-            generate_insights.delay(
-                contrato=contrato,
-                rdo_id=rdo_id,
-                client_id=client_id or "",
-            )
-            # Análise de IA do RDO — persiste em rdo_master.ai_summary
-            generate_rdo_ai_analysis.delay(
-                rdo_id=rdo_id,
-                client_id=client_id or "",
-            )
-            # PDF gerado após insights para ter ai_summary no documento
-            _pdf_task.delay(
-                rdo_id=rdo_id,
-                client_id=client_id or "",
-            )
-        except Exception:
-            # Fallback síncrono se Celery não disponível
-            _trigger_insights(contrato, rdo_id, client_id)
-            # PDF fallback inline (bloqueante mas garante que seja gerado)
+        # ── Pipeline background: Insights + IA + PDF + Email ────────────────────
+        # Tudo em thread daemon — não bloqueia o response ao usuário
+        rdo_row_snap = dict(master_rows[0]) if master_rows else {}
+        rdo_row_snap["data_rdo"] = str(rdo_row_snap.get("data", today_str))[:10]
+        atividades_snap = list(sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or [])
+        evidencias_snap = list(sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or [])
+        subs = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=50) or []
+        email_list = [s["email"] for s in subs if s.get("email")]
+
+        import threading as _threading
+        from backend.core.config import Config as _Config
+
+        _contrato_bg = contrato
+        _client_id_bg = client_id
+        _rdo_id_bg = rdo_id
+
+        def _background_pipeline():
+            _ai_summary = ""
+            _pdf_path = ""
+            _pdf_url = ""
+
+            # 0. Insights do cronograma (usa dados já atualizados no banco)
             try:
-                from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_sync
-                import asyncio as _asyncio
-                loop = _asyncio.get_event_loop()
-                loop.run_in_executor(None, lambda: _pdf_sync.run(rdo_id=rdo_id, client_id=client_id or ""))
-            except Exception:
-                pass  # PDF é melhor esforço — não bloqueia submit
+                _trigger_insights(_contrato_bg, _rdo_id_bg, _client_id_bg)
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger("rdo").warning(f"Insights falhou: {_e}")
 
+            # 1. IA — gera ai_summary (timeout via socket/requests dentro do openai SDK)
+            try:
+                _ai_summary = _generate_ai_summary_sync(rdo_row_snap, atividades_snap, _client_id_bg or "")
+                if _ai_summary:
+                    sb_update("rdo_master", filters={"id": _rdo_id_bg}, data={"ai_summary": _ai_summary})
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger("rdo").warning(f"AI summary falhou: {_e}")
 
-        # ── Email para subscribers ────────────────────────────────────────────
-        try:
-            subs = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=50) or []
-            if subs:
-                emails  = [s["email"] for s in subs if s.get("email")]
-                rdo_row = master_rows[0] if master_rows else {}
-                data_rdo = str(rdo_row.get("data", today_str))[:10]
-                from backend.integrations.email import send_rdo_submitted
-                from backend.core.config import Config
-                send_rdo_submitted(emails, contrato, data_rdo, view_token, Config.APP_URL)
-        except Exception:
-            pass  # Email opcional — não bloqueia submit
+            # 2. PDF — gera com ai_summary já disponível no banco
+            try:
+                from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
+                _result = _pdf_task.run(rdo_id=_rdo_id_bg, client_id=_client_id_bg or "")
+                if isinstance(_result, dict):
+                    _pdf_url = _result.get("pdf_url", "")
+                    # pdf_path local para anexar no email
+                    _contrato_safe = str(rdo_row_snap.get("contrato", "rdo")).replace("/", "-")
+                    _data_safe = str(rdo_row_snap.get("data_rdo", ""))[:10].replace("-", "")
+                    import os as _os, pathlib as _pl
+                    _pdf_dir = str(_Config.RDO_PDF_DIR)
+                    _pdf_path = _os.path.join(_pdf_dir, f"RDO-{_contrato_safe}-{_data_safe}-{_rdo_id_bg[:8]}.pdf")
+                    if not _pl.Path(_pdf_path).exists():
+                        _pdf_path = ""
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger("rdo").warning(f"PDF falhou: {_e}")
+
+            # 3. Email executivo (com atividades, ai_summary, pdf anexado, link view)
+            if email_list:
+                try:
+                    from backend.integrations.email import send_rdo_executivo
+                    _view_url = f"{_Config.APP_URL}/rdo/{view_token}"
+                    send_rdo_executivo(
+                        to_emails=email_list,
+                        rdo=rdo_row_snap,
+                        atividades=atividades_snap,
+                        ai_summary=_ai_summary,
+                        view_url=_view_url,
+                        pdf_path=_pdf_path,
+                    )
+                except Exception as _e:
+                    import logging as _log
+                    _log.getLogger("rdo").error(f"Email executivo falhou: {_e}")
+
+        _threading.Thread(target=_background_pipeline, daemon=True).start()
 
         # ── Alertas reativos — check event hooks ─────────────────────────────
         try:
@@ -667,6 +713,88 @@ async def submit_rdo(
     )
 
     return {"ok": True, "view_token": view_token}
+
+
+def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: str) -> str:
+    """Gera ai_summary para o RDO usando OpenAI. Chamado em thread — não bloqueia response."""
+    try:
+        from backend.core.config import Config
+        import openai
+
+        contrato = rdo.get("contrato", "")
+        data_rdo = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10]
+        clima = str(rdo.get("condicao_climatica") or rdo.get("clima") or "")
+        chuva = "Sim" if rdo.get("houve_chuva") else "Não"
+        interrupcao = str(rdo.get("motivo_interrupcao") or "") if rdo.get("houve_interrupcao") else "Não houve"
+        acidente = str(rdo.get("descricao_acidente") or "") if rdo.get("houve_acidente") else "Não houve"
+        observacoes = str(rdo.get("observacoes") or "")
+        orientacao = str(rdo.get("orientacao") or "")
+        equipe = rdo.get("equipe_alocada", "?")
+        hora_i = str(rdo.get("hora_inicio") or "")[:5]
+        hora_f = str(rdo.get("hora_termino") or "")[:5]
+
+        # Enriquece atividades com dados do cronograma
+        hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, limit=500) or []
+        hub_by_id = {str(h.get("id", "")): h for h in hub_ativs}
+        hub_by_name = {str(h.get("atividade", "")).lower().strip(): h for h in hub_ativs}
+
+        ativ_lines = []
+        for at in atividades:
+            nome = str(at.get("atividade") or "").strip()
+            qty = at.get("quantidade", 0)
+            unit = str(at.get("unidade") or "")
+            efetivo = at.get("efetivo") or 0
+            is_marco = bool(at.get("is_marco"))
+            marco_conc = bool(at.get("marco_concluido"))
+
+            ha = hub_by_id.get(str(at.get("atividade_id") or "")) or hub_by_name.get(nome.lower().strip(), {})
+            pct_atual = ha.get("conclusao_pct", "?")
+            ter = str(ha.get("termino_previsto", "?"))[:10]
+            critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
+
+            if is_marco:
+                status_str = "MARCO CONCLUÍDO" if marco_conc else "marco pendente"
+            elif unit == "%":
+                status_str = f"{int(qty)}% executado hoje"
+            else:
+                status_str = f"{qty}{unit} executado"
+
+            ativ_lines.append(
+                f"  - {nome}: {status_str}, {efetivo} pessoas, "
+                f"conclusão acumulada={pct_atual}%, prazo={ter}"
+                f"{' [CRÍTICO]' if critico else ''}"
+            )
+
+        ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
+
+        prompt = f"""Você é um gestor sênior de obras. Analise o RDO abaixo e gere um insight executivo conciso (3-5 frases) sobre o dia de obra.
+
+DATA: {data_rdo}  |  CONTRATO: {contrato}
+CLIMA: {clima}  |  CHUVA: {chuva}  |  ACIDENTE: {acidente}
+EQUIPE: {equipe} pessoas  |  HORÁRIO: {hora_i}–{hora_f}
+INTERRUPÇÃO: {interrupcao}
+OBSERVAÇÕES DO ENGENHEIRO: {observacoes}
+ORIENTAÇÃO PARA AMANHÃ: {orientacao}
+
+ATIVIDADES EXECUTADAS:
+{ativ_text}
+
+Responda com análise direta da produtividade do dia, riscos identificados, e recomendação objetiva para as próximas 24h. Sem bullet points, texto corrido em português."""
+
+        client_ai = openai.OpenAI(api_key=Config.OPENAI_API_KEY, timeout=60.0)
+        resp = client_ai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.35,
+        )
+        summary = resp.choices[0].message.content.strip() if resp.choices else ""
+        if summary:
+            logger.info(f"AI summary gerado: rdo={str(rdo.get('id', ''))[:8]} chars={len(summary)}")
+        return summary
+    except Exception as e:
+        logger.warning(f"_generate_ai_summary_sync falhou: {e}")
+        return ""
 
 
 def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
@@ -901,6 +1029,7 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
     # Enriquecer atividades com status atual do cronograma (hub_atividades)
     if contrato and atividades:
         hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, limit=500) or []
+        hub_by_id:   Dict[str, Dict] = {str(ha.get("id", "")): ha for ha in hub_ativs}
         hub_by_name: Dict[str, Dict] = {}
         for ha in hub_ativs:
             nome = _norm(ha.get("atividade")).lower().strip()
@@ -910,15 +1039,27 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
         enriched = []
         for at in atividades:
             fmt = _fmt_atividade(at)
-            nome_lower = _norm(at.get("atividade")).lower().strip()
-            ha = hub_by_name.get(nome_lower)
+            # Lookup priority: atividade_id direto > nome fuzzy
+            ha = hub_by_id.get(str(at.get("atividade_id") or ""))
+            if not ha:
+                nome_lower = _norm(at.get("atividade")).lower().strip()
+                ha = hub_by_name.get(nome_lower)
             if ha:
-                fmt["conclusao_pct"] = int(ha.get("conclusao_pct") or 0)
-                fmt["status_cronograma"] = _norm(ha.get("status"))
-                fmt["pct"] = fmt["conclusao_pct"]
+                conclusao_pct = int(ha.get("conclusao_pct") or 0)
+                status_at = _norm(ha.get("status_atividade"))
+                fmt["conclusao_pct"]    = conclusao_pct
+                fmt["status_cronograma"] = status_at
+                # pct exibido = conclusao_pct do cronograma (fonte da verdade)
+                fmt["pct"] = conclusao_pct
+                fmt["exec_qty"]  = float(ha.get("exec_qty") or 0)
+                fmt["total_qty"] = float(ha.get("total_qty") or 0)
+                fmt["unidade"]   = _norm(ha.get("unidade")) or fmt["unidade"]
             else:
-                fmt["conclusao_pct"] = fmt["pct"]
-                fmt["status_cronograma"] = ""
+                # Atividade extra (não mapeada): usa o pct do próprio RDO
+                raw_pct = int(float(at.get("quantidade") or 0)) if _is_pct(at) else 0
+                fmt["conclusao_pct"]    = raw_pct
+                fmt["pct"]              = raw_pct
+                fmt["status_cronograma"] = "Não mapeada"
             enriched.append(fmt)
         atividades_fmt = enriched
     else:
@@ -930,6 +1071,14 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
     if insight_rows:
         raw = insight_rows[0].get("insights") or []
         insights = raw if isinstance(raw, list) else []
+
+    # Se ainda sem insights, injeta ai_summary do RDO como insight único
+    if not insights and r.get("ai_summary"):
+        insights = [{
+            "priority": "Low",
+            "title":    "Análise do dia",
+            "body":     str(r["ai_summary"]),
+        }]
 
     return {
         "rdo":        _fmt_rdo(r),

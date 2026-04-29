@@ -1396,8 +1396,8 @@ export default function RDOForm() {
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            defaultChecked={a.marco_concluido}
-                            onChange={e => updateAtividade(a.id, { marco_concluido: e.target.checked, pct: e.target.checked ? 100 : 0 })}
+                            checked={!!a.marco_concluido}
+                            onChange={e => updateAtividade(a.id, { marco_concluido: e.target.checked, pct: e.target.checked ? 100 : 0, is_marco: true })}
                             style={{ width: 16, height: 16, accentColor: COPPER }}
                           />
                           <span className="text-xs" style={{ color: COPPER }}>Marco concluído</span>

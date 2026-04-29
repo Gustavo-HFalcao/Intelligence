@@ -155,14 +155,16 @@ def _brl(v: float) -> str:
 
 def _build_rdo_html(rdo: Dict, atividades: list, evidencias: list) -> str:
     import html as _html
-    contrato = _html.escape(str(rdo.get("contrato", "")))
-    data_rdo = _html.escape(str(rdo.get("data_rdo", "")[:10] if rdo.get("data_rdo") else ""))
-    clima    = _html.escape(str(rdo.get("clima") or rdo.get("condicao_climatica") or "—"))
-    turno    = _html.escape(str(rdo.get("turno") or "—"))
-    equipe   = str(rdo.get("equipe_alocada") or 0)
-    obs      = _html.escape(str(rdo.get("observacoes") or "")).replace("\n", "<br>")
-    status   = _html.escape(str(rdo.get("status") or ""))
-    now      = datetime.now().strftime("%d/%m/%Y %H:%M")
+    contrato   = _html.escape(str(rdo.get("contrato", "")))
+    data_rdo   = _html.escape(str(rdo.get("data") or rdo.get("data_rdo") or "")[:10])
+    clima      = _html.escape(str(rdo.get("clima") or rdo.get("condicao_climatica") or "—"))
+    turno      = _html.escape(str(rdo.get("turno") or "—"))
+    equipe     = str(rdo.get("equipe_alocada") or 0)
+    obs        = _html.escape(str(rdo.get("observacoes") or "")).replace("\n", "<br>")
+    orientacao = _html.escape(str(rdo.get("orientacao") or "")).replace("\n", "<br>")
+    ai_sum     = str(rdo.get("ai_summary") or "").replace("\n", "<br>")
+    status     = _html.escape(str(rdo.get("status") or ""))
+    now        = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     at_rows = ""
     for at in atividades:
@@ -209,7 +211,9 @@ tr:nth-child(even){{background:#fafafa}}
   {at_rows or '<tr><td colspan="4" style="color:#aaa;text-align:center">Nenhuma atividade registrada</td></tr>'}
 </table>
 {'<h2>Observações</h2><div class="obs">' + obs + '</div>' if obs else ''}
+{'<h2>Orientação para Amanhã</h2><div class="obs">' + orientacao + '</div>' if orientacao else ''}
 {'<h2>Evidências Fotográficas</h2><div>' + ev_rows + '</div>' if ev_rows else ''}
+{'<h2>Análise de Inteligência Artificial</h2><div style="background:#f0faf8;border-left:3px solid #2A9D8F;padding:10px 14px;border-radius:0 4px 4px 0;line-height:1.6;font-size:11px;color:#1a1a2e">' + ai_sum + '</div>' if ai_sum else ''}
 <div class="footer">Bomtempo Intelligence &middot; Gerado em {now} &middot; RDO: {_html.escape(str(rdo.get("id",""))[:36])}</div>
 </body></html>"""
 
@@ -244,7 +248,7 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
             return {"ok": False, "error": f"WeasyPrint: {e}"}
 
         contrato = str(rdo.get("contrato") or "rdo")
-        data_str = str(rdo.get("data_rdo") or "")[:10].replace("-", "")
+        data_str = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10].replace("-", "")
         filename = f"RDO-{contrato}-{data_str}-{rdo_id[:8]}.pdf"
         path     = f"rdo-pdfs/{filename}"
 
