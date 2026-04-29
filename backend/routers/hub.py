@@ -75,38 +75,83 @@ def _get_working_days(contrato: str, client_id: str = None) -> set:
     return {0, 1, 2, 3, 4, 5}
 
 
-def _calc_progress_spi(atividades: list, today: date, working_days: set = None, ref_date: date = None) -> dict:
+def _build_hist_map(historico: list) -> dict:
+    """Constrói mapa atividade_id → [(date, conclusao_pct_novo)] ordenado por data.
+    Usado para calcular realizado estritamente via RDO (não via conclusao_pct atual)."""
+    from collections import defaultdict as _dd
+    raw: dict = _dd(list)
+    for h in historico:
+        aid = str(h.get("atividade_id") or "")
+        d_str = str(h.get("data") or "")[:10]
+        pct = h.get("conclusao_pct_novo")
+        if aid and d_str and len(d_str) == 10 and pct is not None:
+            try:
+                raw[aid].append((date.fromisoformat(d_str), float(pct)))
+            except (ValueError, TypeError):
+                pass
+    return {aid: sorted(entries, key=lambda x: x[0]) for aid, entries in raw.items()}
+
+
+def _hist_pct_at(hist_map: dict, aid: str, ref: date) -> Optional[float]:
+    """Retorna o pct registrado via RDO para a atividade até ref_date. None se sem histórico."""
+    entries = hist_map.get(str(aid))
+    if not entries:
+        return None
+    val = None
+    for d, pct in entries:
+        if d <= ref:
+            val = pct
+        else:
+            break
+    return val
+
+
+def _calc_progress_spi(
+    atividades: list,
+    today: date,
+    working_days: set = None,
+    ref_date: date = None,
+    hist_map: dict = None,
+) -> dict:
     """Calcula progresso físico e SPI usando apenas atividades-folha (sem filhos).
-    Usa dias úteis (working_days) para o previsto, evitando distorção por fins de semana.
-    ref_date: data de referência para pct_esperado. Se None, usa today.
-              REGRA: desvio só existe se há RDO submetido — passe last_rdo_date aqui.
+
+    REGRA FUNDAMENTAL: realizado só existe quando há RDO submetido.
+    - ref_date: data do último RDO submetido. None → sem RDO → desvio=0.
+    - hist_map: mapa de _build_hist_map(). Quando passado, pct_real vem
+      exclusivamente do historico até ref_date. Sem entry = 0% realizado.
+      Quando None (callers sem hist), usa conclusao_pct como fallback seguro
+      apenas se ref_date não-None (compatibilidade com insights/chat).
     Retorna: progress_pct, prazo_decorrido_pct, spi, desvio_pct"""
     if working_days is None:
-        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default (contrato padrão)
-
-    # REGRA FUNDAMENTAL: sem RDO submetido não existe desvio
-    # ref_date=None significa que nenhum RDO foi submetido ainda
-    if ref_date is None:
-        ids_com_filhos_z = {a["parent_id"] for a in atividades if a.get("parent_id")}
-        folhas_z = [a for a in atividades if a["id"] not in ids_com_filhos_z and a.get("fase") is not None] or atividades
-        if not folhas_z:
-            return {"progress_pct": 0.0, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
-        peso_total_z = sum(float(a.get("peso_pct") or 1) for a in folhas_z) or 1
-        progress_z = round(sum(float(a.get("conclusao_pct") or 0) * float(a.get("peso_pct") or 1) for a in folhas_z) / peso_total_z, 1)
-        # Desvio = 0 porque não há RDO de referência
-        return {"progress_pct": progress_z, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
-
-    ref = ref_date
+        working_days = {0, 1, 2, 3, 4, 5}  # seg–sab como default
 
     ids_com_filhos = {a["parent_id"] for a in atividades if a.get("parent_id")}
     folhas = [
         a for a in atividades
         if a["id"] not in ids_com_filhos
-        and a.get("fase") is not None  # exclui macros sem fase (ex: limpeza, serviços avulsos)
+        and a.get("fase") is not None
     ]
     if not folhas:
         folhas = [a for a in atividades if a.get("fase") is not None] or atividades
 
+    if not folhas:
+        return {"progress_pct": 0.0, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
+
+    # REGRA: sem RDO submetido → desvio=0, prazo=0, SPI=1
+    if ref_date is None:
+        peso_total_z = sum(float(a.get("peso_pct") or 1) for a in folhas) or 1
+        if hist_map is not None:
+            # sem ref_date não sabemos até quando computar: retorna 0
+            progress_z = 0.0
+        else:
+            progress_z = round(
+                sum(float(a.get("conclusao_pct") or 0) * float(a.get("peso_pct") or 1) for a in folhas)
+                / peso_total_z,
+                1,
+            )
+        return {"progress_pct": progress_z, "prazo_decorrido_pct": 0.0, "spi": 1.0, "desvio_pct": 0.0}
+
+    ref = ref_date
     peso_total = 0.0
     pct_real_pond = 0.0
     pct_esp_pond = 0.0
@@ -114,8 +159,15 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None, 
     for a in folhas:
         ini_s = str(a.get("inicio_previsto") or "")[:10]
         ter_s = str(a.get("termino_previsto") or "")[:10]
-        pct_real = float(a.get("conclusao_pct") or 0)
         peso = float(a.get("peso_pct") or 1)
+
+        # Realizado: prioriza hist_map (dados de RDO); fallback para conclusao_pct
+        # apenas quando hist_map não foi passado (callers sem acesso ao historico)
+        if hist_map is not None:
+            hist_val = _hist_pct_at(hist_map, str(a["id"]), ref)
+            pct_real = hist_val if hist_val is not None else 0.0
+        else:
+            pct_real = float(a.get("conclusao_pct") or 0)
 
         pct_esp = 0.0
         if ini_s and ter_s:
@@ -127,7 +179,6 @@ def _calc_progress_spi(atividades: list, today: date, working_days: set = None, 
                 elif ref >= d_ter:
                     pct_esp = 100.0
                 else:
-                    # Usa dias úteis para refletir o cronograma real do contrato
                     total_du = max(_count_working_days(ini_s, ter_s, working_days), 1)
                     decorridos_du = _count_working_days(ini_s, ref.isoformat(), working_days)
                     pct_esp = min(100.0, decorridos_du / total_du * 100)
@@ -696,7 +747,8 @@ def _build_insights_llm(
             _last_rdo_ref = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
         except Exception:
             pass
-    kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref)
+    _hmap_llm = _build_hist_map(historico)
+    kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
     atrasadas    = [a for a in atividades if a.get("termino_previsto")
                     and str(a["termino_previsto"])[:10] < (_last_rdo_ref or today).isoformat()
@@ -1012,11 +1064,13 @@ async def get_agente_insights(
         insights = raw if isinstance(raw, list) else []
         if insights:
             _ativs = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+            _hist_gi = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
             kpis = _calc_progress_spi(
                 _ativs,
                 date.today(),
                 _get_working_days(contrato, client_id),
                 ref_date=_get_last_rdo_date(contrato, client_id),
+                hist_map=_build_hist_map(_hist_gi),
             )
             return {"insights": insights, "spi": kpis["spi"], "pct_geral": kpis["progress_pct"]}
 
@@ -1045,7 +1099,8 @@ async def trigger_insights_generation(
 
     insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant)
     last_rdo_date = _get_last_rdo_date(contrato, client_id)
-    kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=last_rdo_date)
+    _hmap_ins = _build_hist_map(historico)
+    kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=last_rdo_date, hist_map=_hmap_ins)
 
     try:
         _persist_insights(contrato, insights, client_id)
@@ -1079,7 +1134,8 @@ async def agente_chat(
     rdos       = sb_select("rdo_master",              filters={"contrato": contrato, "status": "Submetido"}, client_id=client_id, order="data.desc", limit=5) or []
     historico  = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=200) or []
     _last_rdo_chat = _get_last_rdo_date(contrato, client_id)
-    kpis       = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=_last_rdo_chat)
+    _hmap_chat = _build_hist_map(historico)
+    kpis       = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=_last_rdo_chat, hist_map=_hmap_chat)
 
     # Velocity para todas as atividades com qty
     velocities = {}
@@ -1240,7 +1296,9 @@ async def get_visao_geral(
     # ref_date = data do último RDO submetido (regra: só há desvio quando há RDO do dia)
     ativ_para_calc  = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
     last_rdo_date   = _get_last_rdo_date(contrato, client_id)
-    kpis = _calc_progress_spi(ativ_para_calc, today, _wd_set, ref_date=last_rdo_date)
+    _hist_vg = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    _hmap_vg = _build_hist_map(_hist_vg)
+    kpis = _calc_progress_spi(ativ_para_calc, today, _wd_set, ref_date=last_rdo_date, hist_map=_hmap_vg)
     progress_pct = kpis["progress_pct"]
     prazo_decorrido_pct = kpis["prazo_decorrido_pct"]
     spi = kpis["spi"]
@@ -1799,16 +1857,17 @@ async def get_hub_dashboard(
     total_peso = valid["peso_pct"].sum() if "peso_pct" in valid.columns else len(valid)
     if total_peso == 0: total_peso = 1
 
-    # History map for Realizado — ignora entradas com data NULL (dados mock inválidos)
+    # History map for Realizado — APENAS entradas com data de RDO não-nula
+    # REGRA: realizado só existe quando há RDO submetido para aquele dia.
+    # Nunca usa conclusao_pct atual como fallback — isso contaminaria dias sem RDO.
     hist_map = {}
+    last_rdo_date_sc: Optional[date] = _get_last_rdo_date(contrato, client_id)
     if not df_hist.empty and "atividade_id" in df_hist.columns:
         df_h = df_hist[df_hist["contrato"] == contrato] if "contrato" in df_hist.columns else df_hist
-        # Filtra: usa coluna "data" (date do RDO) quando disponível e não nula
         if "data" in df_h.columns:
             df_h = df_h[df_h["data"].notna()]
         if not df_h.empty:
             for aid, grp in df_h.groupby("atividade_id"):
-                # Usa "data" (date do RDO) como referência temporal, fallback para created_at
                 if "data" in grp.columns:
                     sorted_grp = grp.sort_values("data")
                     hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["data"]), sorted_grp["conclusao_pct_novo"]))
@@ -1836,20 +1895,21 @@ async def get_hub_dashboard(
                 frac = _working_days_between(ini.date(), d_end.date() + timedelta(days=1)) / max(1, dur_wd)
             prev_acc += frac * peso
             
-            # Realizado from history
-            if d.date() <= today.date():
+            # Realizado: APENAS via hist_map (entradas de RDO).
+            # Dias além do last_rdo_date nunca têm realizado — regra do usuário.
+            if last_rdo_date_sc is not None and d.date() <= last_rdo_date_sc:
                 aid = str(row.get("id", ""))
                 val = 0.0
                 if aid in hist_map:
                     for dt, pct in hist_map[aid]:
-                        if dt.date() <= d_end.date(): val = float(pct)
-                        else: break
-                else:
-                    if d_end.date() >= today.date(): val = float(row.get("conclusao_pct", 0))
+                        if dt.date() <= d_end.date():
+                            val = float(pct)
+                        else:
+                            break
                 real_acc += (val / 100.0) * peso
-        
+
         pt = {"data": d.strftime("%d/%m" if freq != "MS" else "%m/%y"), "previsto": round(prev_acc, 1)}
-        if d.date() <= today.date():
+        if last_rdo_date_sc is not None and d.date() <= last_rdo_date_sc:
             pt["realizado"] = round(real_acc, 1)
         scurve.append(pt)
 
@@ -1870,7 +1930,7 @@ async def get_hub_dashboard(
         by_day_hist: Dict[str, float] = defaultdict(float)
         for h in hist_prod:
             d_key = str(h.get("data") or "")[:10]
-            if d_key and d_key >= "2026-04-22":  # apenas a partir do início do contrato
+            if d_key and len(d_key) == 10:
                 by_day_hist[d_key] += float(h.get("producao_dia") or 0)
 
         # Previsto por dia: média da produção planejada das atividades ativas naquele período
@@ -2081,7 +2141,9 @@ async def list_contratos(
         # Usa _calc_progress_spi para consistência com visao-geral
         ativ_contrato   = sb_select("hub_atividades", filters={"contrato": cod}, client_id=client_id, limit=500) or []
         _last_rdo_c     = _get_last_rdo_date(cod, client_id)
-        kpis_c = _calc_progress_spi(ativ_contrato, date.today(), _get_working_days(cod, client_id), ref_date=_last_rdo_c)
+        _hist_c = sb_select("hub_atividade_historico", filters={"contrato": cod}, client_id=client_id, limit=500) or []
+        _hmap_c = _build_hist_map(_hist_c)
+        kpis_c = _calc_progress_spi(ativ_contrato, date.today(), _get_working_days(cod, client_id), ref_date=_last_rdo_c, hist_map=_hmap_c)
         prog = kpis_c["progress_pct"]
 
         item: Dict[str, Any] = {}
