@@ -97,8 +97,8 @@ def _fmt_atividade(a: Dict) -> Dict:
         # frontend usa 'descricao' como label — mapeia de 'atividade'
         "descricao":    _norm(a.get("atividade")),
         "atividade":    _norm(a.get("atividade")),
-        # frontend usa 'pct' — armazenamos em 'quantidade' (0-100 para percentual)
-        "pct":          int(a.get("quantidade") or 0) if _is_pct(a) else 0,
+        # pct_executado é a fonte canônica; fallback para quantidade quando unidade="%"
+        "pct":          int(a.get("pct_executado") or 0) if a.get("pct_executado") is not None else (int(a.get("quantidade") or 0) if _is_pct(a) else 0),
         "quantidade":   float(a.get("quantidade") or 0),
         "unidade":      _norm(a.get("unidade")),
         "efetivo":      int(a.get("efetivo") or 0),
@@ -304,6 +304,7 @@ async def add_atividade(
         "atividade_id":     atividade_id,
         "is_marco":         is_marco,
         "marco_concluido":  marco_concluido,
+        "pct_executado":    pct,
     }
     row = sb_insert("rdo_atividades", payload)
     return {"ok": True, "row": _fmt_atividade(row) if isinstance(row, dict) else row}
@@ -321,7 +322,7 @@ async def update_atividade(
         data["atividade"] = body["descricao"]
     if "pct" in body:
         data["quantidade"] = float(body["pct"])
-        # unidade fica "%" quando editando por percentual
+        data["pct_executado"] = int(body["pct"])
         if body.get("unidade", "%") == "%":
             data["unidade"] = "%"
     if "status" in body:
