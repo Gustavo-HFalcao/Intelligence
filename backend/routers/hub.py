@@ -1850,20 +1850,31 @@ async def get_hub_dashboard(
     # 1. S-Curve Calculation (Previsto vs Realizado Acumulado)
     df_c["inicio_previsto"] = pd.to_datetime(df_c["inicio_previsto"], errors="coerce")
     df_c["termino_previsto"] = pd.to_datetime(df_c["termino_previsto"], errors="coerce")
-    valid = df_c.dropna(subset=["inicio_previsto", "termino_previsto"]).copy()
-    
-    if valid.empty:
+    all_valid = df_c.dropna(subset=["inicio_previsto", "termino_previsto"]).copy()
+
+    if all_valid.empty:
         return {"scurve": [], "spi_trend": [], "productivity": [], "disciplinas": [], "kpis": {}}
+
+    # Mesma lógica de folhas do _calc_progress_spi: exclui macros que têm filhos
+    # e atividades sem fase (avulsas sem hierarquia definida) — evita dupla contagem
+    ids_com_filhos = set(all_valid["parent_id"].dropna().astype(str))
+    valid = all_valid[
+        (~all_valid["id"].astype(str).isin(ids_com_filhos)) &
+        (all_valid["fase"].notna()) &
+        (all_valid["fase"].astype(str).str.strip() != "")
+    ].copy()
+    if valid.empty:
+        valid = all_valid.copy()
 
     start_date = valid["inicio_previsto"].min()
     end_date = valid["termino_previsto"].max()
     today = pd.Timestamp(date.today())
     plot_end = max(end_date, today + pd.Timedelta(days=1))
-    
+
     duration = (plot_end - start_date).days
     freq = "D" if duration <= 60 else "W-MON" if duration <= 180 else "MS"
     dates = pd.date_range(start=start_date, end=plot_end, freq=freq)
-    
+
     scurve = []
     total_peso = valid["peso_pct"].sum() if "peso_pct" in valid.columns else len(valid)
     if total_peso == 0: total_peso = 1
@@ -1920,9 +1931,9 @@ async def get_hub_dashboard(
                             else:
                                 break
                 else:
-                    # fallback: usa conclusao_pct atual quando não há histórico
-                    if d_end.date() >= today.date():
-                        val = float(row.get("conclusao_pct", 0))
+                    # fallback: sem histórico usa conclusao_pct para qualquer
+                    # dia dentro do período com RDO (não limita a today)
+                    val = float(row.get("conclusao_pct", 0))
                 real_acc += (val / 100.0) * peso
 
         pt = {"data": d.strftime("%d/%m" if freq != "MS" else "%m/%y"), "previsto": round(prev_acc, 1)}
