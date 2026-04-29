@@ -1071,19 +1071,32 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
         atividades_fmt = [_fmt_atividade(a) for a in atividades]
 
     # Busca insights do agente para esse contrato
+    # Só usa insights do agente se foram gerados a partir deste RDO (last_rdo_id bate)
+    # — evita mostrar insights stale de antes do submit quando o pipeline ainda não terminou
     insight_rows = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []
     insights = []
     if insight_rows:
-        raw = insight_rows[0].get("insights") or []
-        insights = raw if isinstance(raw, list) else []
+        row_ins = insight_rows[0]
+        # Só exibe se os insights foram gerados incluindo este RDO
+        if str(row_ins.get("last_rdo_id") or "") == str(rdo_id):
+            raw = row_ins.get("insights") or []
+            insights = raw if isinstance(raw, list) else []
 
-    # Se ainda sem insights, injeta ai_summary do RDO como insight único
+    # Fallback: ai_summary do próprio RDO (gerado após IA terminar)
     if not insights and r.get("ai_summary"):
         insights = [{
             "priority": "Low",
             "title":    "Análise do dia",
             "body":     str(r["ai_summary"]),
         }]
+    # Último fallback: insights anteriores do contrato mesmo sem bater o rdo_id
+    # (melhor que mostrar "Nenhum RDO submetido")
+    if not insights and insight_rows:
+        raw = insight_rows[0].get("insights") or []
+        candidate = raw if isinstance(raw, list) else []
+        # Filtra o insight de "sem RDO" — não faz sentido mostrar após submit
+        insights = [i for i in candidate if "nenhum rdo" not in str(i.get("body", "")).lower()
+                    and "envie o primeiro" not in str(i.get("body", "")).lower()]
 
     return {
         "rdo":        _fmt_rdo(r),
