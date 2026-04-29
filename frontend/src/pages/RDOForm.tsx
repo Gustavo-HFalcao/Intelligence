@@ -404,9 +404,19 @@ export default function RDOForm() {
   async function addAtividade() {
     if (!newAt.descricao.trim()) return
 
-    // Para atividades vinculadas ao cronograma: qtd_executada é a produção DO DIA
-    // O backend fará append ao exec_qty acumulado e recalculará o % automaticamente
-    const pct = newAt.is_marco ? (newAt.marco_concluido ? 100 : 0) : 0  // pct nunca editável pelo user
+    // Para atividades por quantidade: pct = (acumulado + hoje) / total * 100
+    // Para marcos: 100 se concluído, 0 caso contrário
+    // Para % direto (sem qty): usa pct digitado pelo usuário
+    let pct = 0
+    if (newAt.is_marco) {
+      pct = newAt.marco_concluido ? 100 : 0
+    } else if (selectedCronAt && Number(selectedCronAt.total_qty || 0) > 0 && newAt.qtd_executada) {
+      const acum  = Number(selectedCronAt.exec_qty || 0) + Number(newAt.qtd_executada)
+      const total = Number(selectedCronAt.total_qty)
+      pct = Math.min(100, Math.round(acum / total * 100))
+    } else {
+      pct = Number(newAt.pct || 0)
+    }
     const payload = {
       descricao:       newAt.descricao,
       pct,
