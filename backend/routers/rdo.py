@@ -618,7 +618,11 @@ async def submit_rdo(
 
         # ── Pipeline background: Insights + IA + PDF + Email ────────────────────
         # Tudo em thread daemon — não bloqueia o response ao usuário
-        rdo_row_snap = dict(master_rows[0]) if master_rows else {}
+        # Re-fetch para garantir que temos o registro com status=Submetido e view_token
+        fresh_rows = sb_select("rdo_master", filters={"id": rdo_id}, limit=1) or master_rows
+        rdo_row_snap = dict(fresh_rows[0]) if fresh_rows else {}
+        if not rdo_row_snap:
+            logger.warning(f"submit_rdo: rdo_row_snap vazio para rdo_id={rdo_id} — pipeline background abortado")
         rdo_row_snap["data_rdo"] = str(rdo_row_snap.get("data", today_str))[:10]
         atividades_snap = list(sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or [])
         evidencias_snap = list(sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or [])
@@ -681,7 +685,8 @@ async def submit_rdo(
                     import logging as _log
                     _log.getLogger("rdo").error(f"Email executivo falhou: {_e}")
 
-        _threading.Thread(target=_background_pipeline, daemon=True).start()
+        if rdo_row_snap:
+            _threading.Thread(target=_background_pipeline, daemon=True).start()
 
         # ── Alertas reativos — check event hooks ─────────────────────────────
         try:

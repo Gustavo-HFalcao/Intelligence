@@ -30,23 +30,29 @@ RED    = "#EF4444"
 BG     = "#081210"
 
 
-def _smtp_send(msg: MIMEMultipart) -> bool:
+def _smtp_send(msg: MIMEMultipart, _retries: int = 1) -> bool:
     """Envia mensagem MIME via Gmail SMTP. Retorna True se bem-sucedido."""
     if not GMAIL_USER or not GMAIL_PASSWORD:
         logger.warning("GMAIL_USER / GMAIL_APP_PASSWORD não configurados — email não enviado")
         return False
-    try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls(context=ctx)
-            server.login(GMAIL_USER, GMAIL_PASSWORD)
-            server.send_message(msg)
-        logger.info(f"Email enviado: {msg.get('Subject', '')[:80]} → {msg.get('To', '')}")
-        return True
-    except Exception as e:
-        logger.error(f"Falha ao enviar email: {e}")
-        return False
+    last_err = None
+    for attempt in range(_retries + 1):
+        try:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+                server.ehlo()
+                server.starttls(context=ctx)
+                server.login(GMAIL_USER, GMAIL_PASSWORD)
+                server.send_message(msg)
+            logger.info(f"Email enviado: {msg.get('Subject', '')[:80]} → {msg.get('To', '')}")
+            return True
+        except Exception as e:
+            last_err = e
+            if attempt < _retries:
+                import time
+                time.sleep(3)
+    logger.error(f"Falha ao enviar email após {_retries + 1} tentativas: {last_err}")
+    return False
 
 
 def send_email(

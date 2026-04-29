@@ -149,10 +149,6 @@ def generate_pdf(self, report_id: str, client_id: str = "", params: Dict = None)
             pass
 
 
-def _brl(v: float) -> str:
-    return f"R$ {v:_.2f}".replace(".", "DECPT").replace("_", ".").replace("DECPT", ",")
-
-
 def _build_rdo_html(rdo: Dict, atividades: list, evidencias: list) -> str:
     import html as _html
     contrato   = _html.escape(str(rdo.get("contrato", "")))
@@ -168,17 +164,23 @@ def _build_rdo_html(rdo: Dict, atividades: list, evidencias: list) -> str:
 
     at_rows = ""
     for at in atividades:
-        nome = _html.escape(str(at.get("nome_atividade") or at.get("descricao") or "—"))
-        pct  = at.get("pct_executado") or 0
+        nome = _html.escape(str(at.get("atividade") or at.get("nome_atividade") or at.get("descricao") or "—"))
+        # quantidade armazena pct (quando unidade=%) ou qty física
+        unidade_at = str(at.get("unidade") or "")
+        qty = float(at.get("quantidade") or 0)
+        if unidade_at in ("%", ""):
+            pct_str = f"{int(qty)}%"
+        else:
+            pct_str = f"{qty} {unidade_at}"
         efet = at.get("efetivo") or "—"
-        st   = _html.escape(str(at.get("status_atividade") or ""))
-        at_rows += f"<tr><td>{nome}</td><td style='text-align:center'>{pct}%</td><td style='text-align:center'>{efet}</td><td>{st}</td></tr>"
+        st   = _html.escape(str(at.get("observacao") or at.get("status_atividade") or ""))
+        at_rows += f"<tr><td>{nome}</td><td style='text-align:center'>{pct_str}</td><td style='text-align:center'>{efet}</td><td>{st}</td></tr>"
 
     ev_rows = ""
     for ev in evidencias[:20]:
-        url = ev.get("url_foto") or ev.get("url") or ""
+        url = ev.get("foto_url") or ev.get("url_foto") or ev.get("url") or ""
         tip = _html.escape(str(ev.get("tipo") or ""))
-        cap = _html.escape(str(ev.get("caption") or ""))
+        cap = _html.escape(str(ev.get("legenda") or ev.get("caption") or ""))
         if url:
             ev_rows += f'<div style="display:inline-block;margin:6px;vertical-align:top;text-align:center"><img src="{url}" style="max-width:180px;max-height:140px;border-radius:4px;border:1px solid #ddd"><br><span style="font-size:9px;color:#888">{tip} {cap}</span></div>'
 
@@ -273,6 +275,8 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
 
         if pdf_url:
             sb_update("rdo_master", {"id": rdo_id}, {"pdf_url": pdf_url})
+        elif local_path:
+            logger.warning(f"PDF storage upload falhou — PDF disponível localmente: {local_path}")
 
         return {"ok": bool(pdf_bytes), "pdf_url": pdf_url, "pdf_path": local_path}
 

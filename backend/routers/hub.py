@@ -233,9 +233,15 @@ def _count_working_days(start_iso: str, end_iso: str, working_days: set = None) 
         return 0
 
 
-def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
+def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str, _visited: set = None):
     """Atualiza APENAS o % do pai com base nos filhos (média ponderada).
     NÃO altera datas baseline — datas são imutáveis após criação para não distorcer o Gantt."""
+    if _visited is None:
+        _visited = set()
+    if parent_id in _visited:
+        return  # ciclo detectado — interrompe
+    _visited.add(parent_id)
+
     children = sb_select("hub_atividades", filters={"parent_id": parent_id, "contrato": contrato}, client_id=client_id)
     if not children:
         return
@@ -253,7 +259,7 @@ def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str):
     # Cascade up
     parent_rows = sb_select("hub_atividades", filters={"id": parent_id}, limit=1, client_id=client_id)
     if parent_rows and parent_rows[0].get("parent_id"):
-        _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id)
+        _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id, _visited)
 
 
 def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_days: set = None) -> Dict[str, Any]:
