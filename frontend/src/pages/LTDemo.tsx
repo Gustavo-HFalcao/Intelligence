@@ -125,7 +125,11 @@ export default function LTDemo() {
       const url = `https://tilecache.rainviewer.com${frame.path}/256/{z}/{x}/{y}/2/1_1.png`
       
       if (!radarLayer.current) {
-        radarLayer.current = L.tileLayer(url, { opacity: 0.6, zIndex: 10 }).addTo(map)
+        radarLayer.current = L.tileLayer(url, { 
+          opacity: 0.6, 
+          zIndex: 10,
+          maxNativeZoom: 11 // Evita "Zoom Level Not Supported"
+        }).addTo(map)
       } else {
         radarLayer.current.setUrl(url)
       }
