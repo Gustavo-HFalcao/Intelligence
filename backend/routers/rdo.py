@@ -658,15 +658,8 @@ async def submit_rdo(
                 from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
                 _result = _pdf_task.run(rdo_id=_rdo_id_bg, client_id=_client_id_bg or "")
                 if isinstance(_result, dict):
-                    _pdf_url = _result.get("pdf_url", "")
-                    # pdf_path local para anexar no email
-                    _contrato_safe = str(rdo_row_snap.get("contrato", "rdo")).replace("/", "-")
-                    _data_safe = str(rdo_row_snap.get("data_rdo", ""))[:10].replace("-", "")
-                    import os as _os, pathlib as _pl
-                    _pdf_dir = str(_Config.RDO_PDF_DIR)
-                    _pdf_path = _os.path.join(_pdf_dir, f"RDO-{_contrato_safe}-{_data_safe}-{_rdo_id_bg[:8]}.pdf")
-                    if not _pl.Path(_pdf_path).exists():
-                        _pdf_path = ""
+                    _pdf_url  = _result.get("pdf_url", "")
+                    _pdf_path = _result.get("pdf_path", "")  # caminho local salvo pelo pdf_task
             except Exception as _e:
                 import logging as _log
                 _log.getLogger("rdo").warning(f"PDF falhou: {_e}")

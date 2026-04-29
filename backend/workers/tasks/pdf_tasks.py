@@ -247,21 +247,34 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
             logger.warning(f"WeasyPrint error: {e}")
             return {"ok": False, "error": f"WeasyPrint: {e}"}
 
-        contrato = str(rdo.get("contrato") or "rdo")
+        from backend.core.config import Config as _Cfg
+        contrato = str(rdo.get("contrato") or "rdo").replace("/", "-").replace(" ", "_")
         data_str = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10].replace("-", "")
         filename = f"RDO-{contrato}-{data_str}-{rdo_id[:8]}.pdf"
-        path     = f"rdo-pdfs/{filename}"
+        storage_path = f"rdo-pdfs/{filename}"
 
+        # Salva localmente primeiro (para anexar no email)
+        local_dir = _Cfg.RDO_PDF_DIR
+        local_dir.mkdir(parents=True, exist_ok=True)
+        local_path = str(local_dir / filename)
+        try:
+            with open(local_path, "wb") as f:
+                f.write(pdf_bytes)
+        except Exception as e:
+            logger.warning(f"PDF local save failed: {e}")
+            local_path = ""
+
+        # Upload para Supabase Storage
         pdf_url = ""
         try:
-            pdf_url = sb_storage_upload("rdo-pdfs", path, pdf_bytes, "application/pdf") or ""
+            pdf_url = sb_storage_upload("rdo-pdfs", storage_path, pdf_bytes, "application/pdf") or ""
         except Exception as e:
             logger.warning(f"PDF upload failed: {e}")
 
         if pdf_url:
             sb_update("rdo_master", {"id": rdo_id}, {"pdf_url": pdf_url})
 
-        return {"ok": bool(pdf_url), "pdf_url": pdf_url}
+        return {"ok": bool(pdf_bytes), "pdf_url": pdf_url, "pdf_path": local_path}
 
     except Exception as e:
         logger.error(f"generate_rdo_pdf error: {e}")
