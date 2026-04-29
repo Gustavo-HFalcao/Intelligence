@@ -1882,20 +1882,10 @@ async def get_hub_dashboard(
     # History map for Realizado — APENAS entradas com data de RDO não-nula
     # REGRA: realizado só existe quando há RDO submetido para aquele dia.
     # Nunca usa conclusao_pct atual como fallback — isso contaminaria dias sem RDO.
-    hist_map = {}
     last_rdo_date_sc: Optional[date] = _get_last_rdo_date(contrato, client_id)
-    if not df_hist.empty and "atividade_id" in df_hist.columns:
-        df_h = df_hist[df_hist["contrato"] == contrato] if "contrato" in df_hist.columns else df_hist
-        if "data" in df_h.columns:
-            df_h = df_h[df_h["data"].notna()]
-        if not df_h.empty:
-            for aid, grp in df_h.groupby("atividade_id"):
-                if "data" in grp.columns:
-                    sorted_grp = grp.sort_values("data")
-                    hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["data"]), sorted_grp["conclusao_pct_novo"]))
-                else:
-                    sorted_grp = grp.sort_values("created_at")
-                    hist_map[str(aid)] = list(zip(pd.to_datetime(sorted_grp["created_at"]).dt.normalize(), sorted_grp["conclusao_pct_novo"]))
+    # Usa sb_select direto (não cache) para garantir dados frescos — igual ao bloco de KPIs.
+    _hist_sc_rows = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
+    hist_map = _build_hist_map(_hist_sc_rows)
 
     for d in dates:
         d_end = d if freq == "D" else (d + pd.Timedelta(days=6)) if freq == "W-MON" else (d + pd.DateOffset(months=1) - pd.Timedelta(days=1))

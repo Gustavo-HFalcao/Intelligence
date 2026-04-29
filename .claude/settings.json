@@ -102,7 +102,11 @@
       "Bash(git -C /c/Users/Gustavo/intelligence push origin main)",
       "Bash(git -C /c/Users/Gustavo/intelligence log --oneline -3)",
       "Bash(git -C /c/Users/Gustavo/intelligence add backend/routers/financeiro.py backend/routers/hub.py frontend/src/pages/Financeiro.tsx frontend/src/pages/HubOperacoes.tsx)",
-      "Bash(git -C /c/Users/Gustavo/intelligence status --short)"
+      "Bash(git -C /c/Users/Gustavo/intelligence status --short)",
+      "Read(//usr/local/**)",
+      "Read(//usr/**)",
+      "PowerShell(docker --version 2>&1)",
+      "PowerShell(docker compose --version 2>&1)"
     ]
   },
   "mcpServers": {
