@@ -112,8 +112,17 @@ export default function LTDemo() {
 
       L.control.zoom({ position: 'bottomright' }).addTo(leafletMap.current)
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19
+      // Mapa Base Satélite de Alta Resolução (Esri)
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri'
+      }).addTo(leafletMap.current)
+
+      // Camada de Calor (Wind Speed) para dar o efeito visual climático
+      L.tileLayer('https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=9fd7a449d055dba26a982a3220f32aa2', {
+        maxZoom: 19,
+        opacity: 0.4,
+        zIndex: 5
       }).addTo(leafletMap.current)
     }
 
@@ -385,15 +394,15 @@ export default function LTDemo() {
       <div className="flex-1 relative mt-16 flex">
         
         {/* Mapa Container */}
-        <div ref={mapRef} className="flex-1 h-full w-full bg-[#050808] z-0 relative">
+        <div ref={mapRef} className="flex-1 h-full w-full bg-[#0d1514] z-0 relative">
           {!kmlData && !loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#050808]/80 backdrop-blur-sm z-10">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#050808]/60 backdrop-blur-sm z-10">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center max-w-md text-center p-8 border border-white/5 bg-white/[0.02] rounded-3xl">
                 <div className="w-16 h-16 rounded-2xl bg-copper/10 border border-copper/20 flex items-center justify-center mb-6">
                   <Wind size={32} className="text-copper" />
                 </div>
-                <h2 className="text-xl font-black uppercase tracking-widest mb-2">Simulador Geoespacial</h2>
-                <p className="text-sm text-white/40 leading-relaxed mb-8">O radar meteorológico já está ativo. Carregue seu arquivo KML para cruzar os dados climáticos reais (Open-Meteo) com a malha da Linha de Transmissão.</p>
+                <h2 className="text-xl font-black uppercase tracking-widest mb-2">Satelite Operacional</h2>
+                <p className="text-sm text-white/40 leading-relaxed mb-8">A camada base está usando imageamento de satélite (Esri) com heatmap de ventos. Carregue seu arquivo KML para iniciar o cruzamento geoespacial.</p>
               </motion.div>
             </div>
           )}
