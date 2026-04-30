@@ -33,6 +33,9 @@ const RED    = '#EF4444'
 
 function safeDate(iso: string | null | undefined): Date | null {
   if (!iso) return null
+  // Parse YYYY-MM-DD as local date to avoid UTC midnight → -3h shifting the day
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3])
   const d = new Date(iso)
   return isNaN(d.getTime()) ? null : d
 }

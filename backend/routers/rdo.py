@@ -744,6 +744,13 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
         hub_by_id = {str(h.get("id", "")): h for h in hub_ativs}
         hub_by_name = {str(h.get("atividade", "")).lower().strip(): h for h in hub_ativs}
 
+        from datetime import date as _date
+        today_rdo = _date.today()
+        try:
+            today_rdo = _date.fromisoformat(data_rdo[:10])
+        except Exception:
+            pass
+
         ativ_lines = []
         for at in atividades:
             nome = str(at.get("atividade") or "").strip()
@@ -754,26 +761,50 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             marco_conc = bool(at.get("marco_concluido"))
 
             ha = hub_by_id.get(str(at.get("atividade_id") or "")) or hub_by_name.get(nome.lower().strip(), {})
-            pct_atual = ha.get("conclusao_pct", "?")
+            pct_atual = float(ha.get("conclusao_pct") or 0)
             ter = str(ha.get("termino_previsto", "?"))[:10]
+            ini = str(ha.get("inicio_previsto", "?"))[:10]
+            total_qty = float(ha.get("total_qty") or 0)
             critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
+
+            # Calcula % esperado acumulado na data do RDO
+            pct_esp_txt = ""
+            try:
+                d_ini = _date.fromisoformat(ini)
+                d_ter = _date.fromisoformat(ter)
+                d_total = max(1, (d_ter - d_ini).days)
+                d_dec = min(d_total, max(0, (today_rdo - d_ini).days + 1))
+                pct_esp = round(d_dec / d_total * 100)
+                delta = round(pct_atual - pct_esp)
+                status_prod = "ACIMA DO ESPERADO" if delta >= 0 else "ABAIXO DO ESPERADO"
+                pct_esp_txt = f", esp={pct_esp}%, delta={delta:+d}% ({status_prod})"
+            except Exception:
+                pass
 
             if is_marco:
                 status_str = "MARCO CONCLUÍDO" if marco_conc else "marco pendente"
             elif unit == "%":
                 status_str = f"{int(qty)}% executado hoje"
+            elif total_qty > 0:
+                status_str = f"{qty}{unit} executado hoje (total: {int(pct_atual)}% de {int(total_qty)}{unit})"
             else:
                 status_str = f"{qty}{unit} executado"
 
             ativ_lines.append(
-                f"  - {nome}: {status_str}, {efetivo} pessoas, "
-                f"conclusão acumulada={pct_atual}%, prazo={ter}"
+                f"  - {nome}: {status_str}{pct_esp_txt}, prazo={ter}"
                 f"{' [CRÍTICO]' if critico else ''}"
             )
 
         ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
 
-        prompt = f"""Você é um gestor sênior de obras. Analise o RDO abaixo e gere um insight executivo conciso (3-5 frases) sobre o dia de obra.
+        prompt = f"""Você é um gestor sênior de obras analisando o Relatório Diário de Obra (RDO).
+
+REGRAS DE ANÁLISE — leia antes de escrever:
+1. Se delta ≥ 0% (ACIMA DO ESPERADO): a atividade está no ritmo ou adiantada. NÃO alerte risco de prazo.
+2. Se uma atividade está ACIMA DO ESPERADO no dia 1 de 2, mencione positivamente — no dia 2 haverá folga.
+3. Só alerte risco de atraso quando: delta < 0% E prazo está próximo E a recuperação exigiria aceleração real.
+4. Equipe, clima, interrupções: mencione apenas se impactaram negativamente. Não descreva o óbvio.
+5. Recomendação: seja específica — se tudo está bem, diga isso e sugira ações proativas (antecipar, otimizar equipe).
 
 DATA: {data_rdo}  |  CONTRATO: {contrato}
 CLIMA: {clima}  |  CHUVA: {chuva}  |  ACIDENTE: {acidente}
@@ -782,10 +813,10 @@ INTERRUPÇÃO: {interrupcao}
 OBSERVAÇÕES DO ENGENHEIRO: {observacoes}
 ORIENTAÇÃO PARA AMANHÃ: {orientacao}
 
-ATIVIDADES EXECUTADAS:
+ATIVIDADES (acumulado=% total realizado até hoje, esp=% esperado no cronograma, delta=acumulado-esp):
 {ativ_text}
 
-Responda com análise direta da produtividade do dia, riscos identificados, e recomendação objetiva para as próximas 24h. Sem bullet points, texto corrido em português."""
+Gere análise executiva em 3-5 frases: produtividade real do dia, situação vs cronograma, recomendação objetiva. Texto corrido, sem bullet points, em português."""
 
         client_ai = openai.OpenAI(api_key=Config.OPENAI_API_KEY, timeout=60.0)
         resp = client_ai.chat.completions.create(

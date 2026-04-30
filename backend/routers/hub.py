@@ -750,11 +750,16 @@ def _build_insights_llm(
             pass
     _hmap_llm = _build_hist_map(historico)
     kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
+    _ref_rdo = _last_rdo_ref or today
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
+    # Atrasada: prazo vencido na data do último RDO E atividade já deveria ter iniciado
     atrasadas    = [a for a in atividades if a.get("termino_previsto")
-                    and str(a["termino_previsto"])[:10] < (_last_rdo_ref or today).isoformat()
+                    and str(a["termino_previsto"])[:10] < _ref_rdo.isoformat()
+                    and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
                     and float(a.get("conclusao_pct") or 0) < 100]
+    # proximos_7d: só atividades que já iniciaram ou iniciam até a data do RDO
     proximos_7d  = [a for a in atividades if a.get("termino_previsto")
+                    and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
                     and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7
                     and float(a.get("conclusao_pct") or 0) < 100]
     antecipadas  = [a for a in atividades if a.get("inicio_previsto")
@@ -775,6 +780,26 @@ def _build_insights_llm(
         cadeia = _build_dependency_chain(aid, atividades)
         cadeia_txt = " → ".join([c.get("atividade", "?")[:25] for c in cadeia[:3]]) if cadeia else ""
 
+        # Calcula % esperado para esta atividade na data do último RDO
+        pct_esperado_txt = ""
+        ini_s = str(a.get("inicio_previsto",""))[:10]
+        ter_s = str(a.get("termino_previsto",""))[:10]
+        if ini_s and ter_s:
+            try:
+                d_ini = date.fromisoformat(ini_s)
+                d_ter = date.fromisoformat(ter_s)
+                d_total = max(1, (d_ter - d_ini).days)
+                if d_ini > _ref_rdo:
+                    pct_esperado_txt = " | FUTURA(não iniciada)"
+                else:
+                    d_decorrido = min(d_total, max(0, (_ref_rdo - d_ini).days))
+                    pct_esp = round(d_decorrido / d_total * 100)
+                    pct_real = float(a.get("conclusao_pct") or 0)
+                    delta = round(pct_real - pct_esp)
+                    pct_esperado_txt = f" | esp={pct_esp}% real={pct_real:.0f}% delta={delta:+d}%"
+            except Exception:
+                pass
+
         vel_txt = ""
         if vel.get("velocity_real", 0) > 0:
             vel_txt = (
@@ -786,8 +811,8 @@ def _build_insights_llm(
 
         ativ_ctx.append(
             f"  - [RISCO={a.get('_risk_score',0)}] {a.get('atividade','?')[:45]}: "
-            f"{a.get('conclusao_pct',0)}% | prazo={str(a.get('termino_previsto','?'))[:10]}"
-            f"{vel_txt}"
+            f"{a.get('conclusao_pct',0)}% | ini={ini_s} | prazo={ter_s}"
+            f"{pct_esperado_txt}{vel_txt}"
             + (f" | BLOQUEIA: {cadeia_txt}" if cadeia_txt else "")
         )
 
@@ -846,29 +871,45 @@ RDOs RECENTES:
 {chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
 {dia_livre}{delta_ctx}"""
 
-    system_prompt = """Você é o Agente de Inteligência Artificial da plataforma Bomtempo — especialista em gestão de obras de infraestrutura.
+    system_prompt = """Você é o Agente de Inteligência Artificial da plataforma Bomtempo — especialista sênior em gestão de obras de infraestrutura.
 
 Analise os dados fornecidos e gere EXATAMENTE 4 insights em JSON. Cada insight:
 - "title": título direto, max 55 chars
-- "body": análise COM NÚMEROS REAIS — cite atividades, datas, quantidades, velocity, EAC. Max 180 chars.
+- "body": análise COM NÚMEROS REAIS — cite atividades, datas, delta, velocity, EAC. Max 180 chars.
 - "priority": "High" | "Medium" | "Low"
 - "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta"
 
-HIERARQUIA DE PRIORIZAÇÃO:
-1. Anomalias detectadas (dados impossíveis, atividades críticas paradas)
-2. Velocity abaixo do necessário + caminho crítico bloqueado
-3. EAC mostra atraso real vs prazo contratual
-4. Oportunidade de antecipação (dias livres, ritmo acima)
-5. Padrão de interrupções → ação preventiva
+REGRAS INVIOLÁVEIS — leia antes de qualquer análise:
+
+1. ATIVIDADES FUTURAS: qualquer atividade marcada com "FUTURA(não iniciada)" NÃO tem atraso, risco ou pendência.
+   Nunca alerte sobre atividades que ainda não deveriam ter iniciado.
+
+2. FREQUÊNCIA DE RDO: RDO é registro diário da obra — 1 por dia útil trabalhado é o correto.
+   Se há 1 RDO para cada dia de projeto, a frequência está PERFEITA. Nunca sugira "enviar mais RDOs" quando a cobertura já é total.
+
+3. SAÚDE DO PROJETO: Se SPI ≥ 1.0 e desvio ≥ 0% → projeto adiantado ou no ritmo.
+   Neste caso, NÃO gere alertas de atraso. Gere oportunidades (antecipar atividades, manter ritmo).
+
+4. PRODUTIVIDADE: Se delta de uma atividade ≥ 0% (real ≥ esperado) → produtividade positiva.
+   Destaque como ponto forte. Se velocity_real > taxa_plan → atividade será concluída antes do prazo.
+
+5. ATRASADA: atividade só está atrasada se termino_previsto < data_ultimo_rdo E inicio_previsto ≤ data_ultimo_rdo E pct < 100%.
+   Não chame de atrasada atividade futura, não iniciada, ou dentro do prazo.
+
+6. DADOS REAIS: Nunca invente dados. Use apenas o que está no contexto. Se não há informação suficiente, diga "dados insuficientes".
+
+HIERARQUIA DE PRIORIZAÇÃO (aplicar nesta ordem):
+1. Anomalias reais (dados impossíveis, atividade crítica com delta muito negativo)
+2. Atividade atrasada (conforme regra 5) com caminho crítico bloqueado
+3. Velocity abaixo do necessário em atividade que já iniciou
+4. Oportunidade: ritmo acima do esperado, antecipação possível, conclusão antes do prazo
+5. Padrão climático ou interrupções afetando produção
 
 DIRETRIZES DE QUALIDADE:
-- Se velocity_real existe: calcule dias necessários vs disponíveis e informe o gap
-- Se cadeia de bloqueio existe: mencione quais atividades são impactadas
-- Se há delta vs insights anteriores: diga o que MUDOU (piorou/melhorou)
-- Seja cirúrgico: "Perfuração: 80/dia, precisa 728/dia, gap de 648 furos/dia" é melhor que "produção insuficiente"
-- Nunca invente dados. Se não tiver info, diga explicitamente.
-- Se não houver RDOs submetidos: o único insight válido é alertar sobre a falta de RDOs. NÃO reporte atrasos, desvios ou SPI negativo sem base em RDO real.
-- "Atrasada" significa termino_previsto < data_ultimo_rdo. Se não há RDO, nenhuma atividade está atrasada.
+- Seja cirúrgico: "Perfuração: 80/dia real, taxa plan 100/dia, delta -20% → EAC 3 dias além do prazo" é melhor que "produção insuficiente"
+- Se delta ≥ 0% para atividade em andamento: "Atividade X está +Yd% acima do esperado, tende a concluir antes do prazo"
+- Se há delta vs insights anteriores: diga o que MUDOU
+- Se não houver RDOs: o único insight válido é alertar a falta de RDOs
 
 Responda SOMENTE com JSON array:
 [{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
@@ -1175,32 +1216,38 @@ async def agente_chat(
                 vel_txt = ""
         else:
             vel_txt = ""
+        ini_chat = str(a.get("inicio_previsto",""))[:10]
+        futura_txt = " [FUTURA]" if ini_chat > _ref_chat.isoformat() else ""
         ativ_resumo.append(
             f"  {a.get('atividade','?')[:45]}: {a.get('conclusao_pct',0)}%"
-            f", prazo={str(a.get('termino_previsto','?'))[:10]}"
+            f", ini={ini_chat}, prazo={str(a.get('termino_previsto','?'))[:10]}"
             f", exec={a.get('exec_qty',0)}/{a.get('total_qty',0)} {a.get('unidade','')}"
-            f"{vel_txt}"
+            f"{vel_txt}{futura_txt}"
         )
 
     system_ctx = f"""Você é o Agente de IA da obra {contrato} na plataforma Bomtempo.
 Responda perguntas do gestor com base nos dados reais abaixo. Seja direto, cite números reais.
 
-ESTADO DA OBRA (hoje: {today.isoformat()}):
+ESTADO DA OBRA (data ref: {_ref_chat} | hoje: {today.isoformat()}):
   SPI={kpis['spi']} | Progresso={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}%
-  Atrasadas={len(atrasadas)} | Vencendo 7d={len(proximos_7d)}
+  Atrasadas={len(atrasadas)} (prazo vencido na ref + já iniciadas) | Vencendo 7d={len(proximos_7d)}
+  {"✅ OBRA ADIANTADA — SPI>1 e desvio positivo" if kpis['spi'] >= 1.0 and kpis['desvio_pct'] >= 0 else "⚠️ OBRA ATRASADA" if kpis['desvio_pct'] < -5 else "🟡 OBRA NO RITMO"}
 
-ATIVIDADES (top 15 por risco):
+ATIVIDADES (top 15 por risco | FUTURA = não iniciada ainda):
 {chr(10).join(ativ_resumo)}
 
 ANOMALIAS: {'; '.join(a['title'] for a in anomalias) if anomalias else 'Nenhuma'}
 
 RDOs RECENTES: {'; '.join(f"{str(r.get('data',''))[:10]}(equipe={r.get('equipe_alocada','?')}p)" for r in rdos[:3])}
 
-Quando te perguntarem "se adicionar X pessoas", calcule: saldo / (velocity_atual * (1 + X/equipe_atual)) = dias_necessários.
-Quando te perguntarem "o que antecipar", liste atividades com inicio_previsto > hoje que têm predecessores concluídos.
-Se vel_real=0 mas taxa_plan existe: use taxa_plan para estimativas de prazo — explique que é baseado no planejamento, não em histórico real.
-Se não houver RDOs submetidos: não afirme que há atrasos. Alerte que sem RDOs o SPI e desvio são inválidos.
-Para recomendações de alocação: se velocity_real < taxa_plan, sugira reforço de equipe e calcule o delta necessário."""
+REGRAS DO AGENTE:
+- Atividades marcadas como "FUTURA" não têm atraso, risco ou pendência — são futuras por design.
+- Se SPI ≥ 1.0 e desvio ≥ 0%: obra saudável. Não afirme atrasos sem evidência.
+- Quando perguntarem "adicionar X pessoas": saldo / (velocity_atual × (1 + X/equipe_atual)) = dias_necessários.
+- Quando perguntarem "o que antecipar": liste atividades FUTURAS com predecessores concluídos.
+- Se vel_real=0 mas taxa_plan existe: use taxa_plan e informe que é estimativa do planejamento.
+- Se não houver RDOs: não afirme atrasos. Diga que sem RDOs o progresso não é mensurável.
+- Para alocação: se velocity_real < taxa_plan, sugira reforço e calcule o delta necessário."""
 
     # Gerencia sessão
     if not session_id:

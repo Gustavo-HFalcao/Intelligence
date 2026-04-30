@@ -263,7 +263,9 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
   }
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (chatMsgs.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [chatMsgs])
 
   async function handleGerarInsights() {
@@ -1017,25 +1019,28 @@ function ProdutividadeSection({ allRows }: { allRows: any[] }) {
   const [filter, setFilter] = useState<'execucao' | 'concluidas' | 'previstas'>('execucao')
   const today = new Date().toISOString().slice(0, 10)
 
+  // Apenas folhas (sem filhos) — macros são agrupamentos, não unidades mensuráveis
+  const folhas = useMemo(() => allRows.filter(a => !allRows.some(b => b.parent_id === a.id)), [allRows])
+
   const filtered = useMemo(() => {
-    let rows = allRows
+    let rows = folhas
     if (filter === 'execucao') {
-      rows = allRows.filter((a: any) => {
+      rows = folhas.filter((a: any) => {
         const ini = a.inicio_previsto?.slice(0, 10)
         const ter = a.termino_previsto?.slice(0, 10)
         const pct = Number(a.conclusao_pct || 0)
         return ini && ini <= today && pct < 100 && (ter >= today || a.status === 'atrasada')
       })
     } else if (filter === 'concluidas') {
-      rows = allRows.filter((a: any) => Number(a.conclusao_pct || 0) >= 100)
+      rows = folhas.filter((a: any) => Number(a.conclusao_pct || 0) >= 100)
     } else {
-      rows = allRows.filter((a: any) => {
+      rows = folhas.filter((a: any) => {
         const ini = a.inicio_previsto?.slice(0, 10)
         return ini && ini > today
       })
     }
     return rows
-  }, [allRows, filter, today])
+  }, [folhas, filter, today])
 
   const filterBtns = [
     { id: 'execucao',  label: 'Em Execução' },
