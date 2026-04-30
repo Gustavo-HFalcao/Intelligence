@@ -572,38 +572,49 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
                 "atividade_id": str(a.get("id", "")),
             })
 
-    # 2. Atividade crítica sem nenhum movimento por 3+ dias úteis
+    # 2. Atividade crítica (FOLHA) sem nenhum movimento por 3+ dias úteis
+    # Macros (nivel="macro" ou com filhos) nunca recebem last_rdo_date direto — são rollup das filhas.
+    # O check só faz sentido para atividades-folha que deveriam aparecer diretamente no RDO.
+    has_children_ids = {str(a.get("parent_id")) for a in atividades if a.get("parent_id")}
     for a in atividades:
         critico_val = a.get("critico")
         if not (critico_val is True or str(critico_val).lower() in ("true", "sim", "1")):
+            continue
+        # Pula macros — nunca têm last_rdo_date diretamente
+        if str(a.get("id", "")) in has_children_ids or str(a.get("nivel", "")).lower() == "macro":
             continue
         pct = float(a.get("conclusao_pct") or 0)
         if pct >= 100:
             continue
         last_rdo = str(a.get("last_rdo_date") or "")[:10]
         ini = str(a.get("inicio_previsto") or "")[:10]
-        if not last_rdo and ini and ini <= today.isoformat():
-            anomalies.append({
-                "tipo": "critica_parada",
-                "title": f"Atividade crítica sem registro há 3+ dias",
-                "body": f"'{a.get('atividade','?')[:45]}' está em {pct}% e não tem RDO registrado. Verificar imediatamente.",
-                "priority": "High",
-                "atividade_id": str(a.get("id", "")),
-            })
-        elif last_rdo:
-            try:
-                d_last = date.fromisoformat(last_rdo)
-                dias_sem_rdo = _working_days_between(d_last, today)
-                if dias_sem_rdo >= 3 and pct < 100:
-                    anomalies.append({
-                        "tipo": "critica_parada",
-                        "title": f"Atividade crítica parada há {dias_sem_rdo} dias úteis",
-                        "body": f"'{a.get('atividade','?')[:45]}' em {pct}%. Último registro: {last_rdo}. Risco de atraso em cascata.",
-                        "priority": "High",
-                        "atividade_id": str(a.get("id", "")),
-                    })
-            except ValueError:
-                pass
+        # Só dispara se a atividade já deveria ter iniciado há pelo menos 3 dias úteis
+        if ini and ini <= today.isoformat():
+            dias_desde_ini = _working_days_between(date.fromisoformat(ini), today) if ini else 0
+            if dias_desde_ini < 3:
+                continue  # atividade nova — sem RDO ainda é esperado
+            if not last_rdo:
+                anomalies.append({
+                    "tipo": "critica_parada",
+                    "title": f"Atividade crítica sem registro",
+                    "body": f"'{a.get('atividade','?')[:45]}' em {pct}% há {dias_desde_ini} dias úteis sem RDO. Verificar imediatamente.",
+                    "priority": "High",
+                    "atividade_id": str(a.get("id", "")),
+                })
+            else:
+                try:
+                    d_last = date.fromisoformat(last_rdo)
+                    dias_sem_rdo = _working_days_between(d_last, today)
+                    if dias_sem_rdo >= 3:
+                        anomalies.append({
+                            "tipo": "critica_parada",
+                            "title": f"Atividade crítica parada há {dias_sem_rdo}d úteis",
+                            "body": f"'{a.get('atividade','?')[:45]}' em {pct}%. Último RDO: {last_rdo}. Risco de atraso em cascata.",
+                            "priority": "High",
+                            "atividade_id": str(a.get("id", "")),
+                        })
+                except ValueError:
+                    pass
 
     # 3. Dias sem RDO (projeto iniciado e sem registro há 2+ dias úteis)
     if rdo_recentes:
@@ -794,48 +805,65 @@ def _build_insights_llm(
         key=lambda a: a.get("_risk_score", 0), reverse=True
     )[:6]
 
-    ativ_ctx = []
+    ativ_iniciadas_ctx = []
+    ativ_futuras_ctx = []
     for a in top_risco:
         aid = str(a.get("id", ""))
         vel = velocities.get(aid, {})
         cadeia = _build_dependency_chain(aid, atividades)
         cadeia_txt = " → ".join([c.get("atividade", "?")[:25] for c in cadeia[:3]]) if cadeia else ""
 
-        # Calcula % esperado para esta atividade na data do último RDO
-        pct_esperado_txt = ""
         ini_s = str(a.get("inicio_previsto",""))[:10]
         ter_s = str(a.get("termino_previsto",""))[:10]
+        pct_real = float(a.get("conclusao_pct") or 0)
+
+        is_futura = False
+        ritmo_txt = ""
         if ini_s and ter_s:
             try:
                 d_ini = date.fromisoformat(ini_s)
                 d_ter = date.fromisoformat(ter_s)
-                d_total = max(1, (d_ter - d_ini).days)
+                d_total_dias = max(1, (d_ter - d_ini).days)
+
                 if d_ini > _ref_rdo:
-                    pct_esperado_txt = " | FUTURA(não iniciada)"
+                    is_futura = True
                 else:
-                    d_decorrido = min(d_total, max(0, (_ref_rdo - d_ini).days))
-                    pct_esp = round(d_decorrido / d_total * 100)
-                    pct_real = float(a.get("conclusao_pct") or 0)
+                    # Quantos dias úteis decorridos vs planejados
+                    d_decorrido_cal = min(d_total_dias, max(0, (_ref_rdo - d_ini).days))
+                    dia_atual = d_decorrido_cal + 1  # dia 1-based
+                    pct_esp = round(d_decorrido_cal / d_total_dias * 100)
                     delta = round(pct_real - pct_esp)
-                    pct_esperado_txt = f" | esp={pct_esp}% real={pct_real:.0f}% delta={delta:+d}%"
+                    status_ritmo = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
+                    ritmo_txt = (
+                        f" | dia {dia_atual}/{d_total_dias}"
+                        f" | esp={pct_esp}% real={pct_real:.0f}% delta={delta:+d}% [{status_ritmo}]"
+                    )
             except Exception:
                 pass
 
         vel_txt = ""
         if vel.get("velocity_real", 0) > 0:
+            plan = vel.get("producao_planejada_dia", 0)
+            real = vel["velocity_real"]
             vel_txt = (
-                f" | vel={vel['velocity_real']}/dia"
-                f"({vel['trend']})"
+                f" | {real}/dia(plan={plan}) {vel.get('trend','')}"
                 f" | EAC={vel.get('eac_date','?')}"
-                f" | saldo={vel.get('saldo',0):.0f}"
+                f" | saldo={vel.get('saldo',0):.0f} {a.get('unidade','')}"
             )
 
-        ativ_ctx.append(
-            f"  - [RISCO={a.get('_risk_score',0)}] {a.get('atividade','?')[:45]}: "
-            f"{a.get('conclusao_pct',0)}% | ini={ini_s} | prazo={ter_s}"
-            f"{pct_esperado_txt}{vel_txt}"
+        linha = (
+            f"  {a.get('atividade','?')[:45]}: {pct_real:.0f}%"
+            f" | ini={ini_s} prazo={ter_s}"
+            f"{ritmo_txt}{vel_txt}"
             + (f" | BLOQUEIA: {cadeia_txt}" if cadeia_txt else "")
         )
+
+        if is_futura:
+            ativ_futuras_ctx.append(linha)
+        else:
+            ativ_iniciadas_ctx.append(linha)
+
+    ativ_ctx = ativ_iniciadas_ctx  # mantém compatibilidade
 
     # RDO context rico
     rdo_ctx = []
@@ -874,50 +902,78 @@ def _build_insights_llm(
             pass
 
     rdos_submetidos_llm = [r for r in rdo_recentes if r.get("status") == "Submetido"]
-    sem_rdo_aviso = "" if rdos_submetidos_llm else "\n⚠️ ATENÇÃO: Nenhum RDO submetido ainda. NÃO reporte atrasos. O único insight relevante é alertar que RDOs precisam ser enviados.\n"
+    sem_rdo_aviso = "" if rdos_submetidos_llm else "⚠️ NENHUM RDO SUBMETIDO: Não reporte atrasos. Único insight válido: alertar que RDOs precisam ser enviados."
 
-    context = f"""CONTRATO: {contrato} | DATA: {today.isoformat()}
+    # Panorama geral para o LLM calibrar o tom
+    if kpis["spi"] >= 1.0 and kpis["desvio_pct"] >= 0:
+        panorama = f"✅ OBRA SAUDÁVEL — SPI={kpis['spi']:.2f}, desvio={kpis['desvio_pct']:+.1f}% (adiantado/no ritmo). Tom: oportunidades, não alertas."
+    elif kpis["desvio_pct"] < -10:
+        panorama = f"🔴 OBRA ATRASADA — SPI={kpis['spi']:.2f}, desvio={kpis['desvio_pct']:+.1f}%. Tom: foco em recuperação."
+    else:
+        panorama = f"🟡 OBRA NO RITMO — SPI={kpis['spi']:.2f}, desvio={kpis['desvio_pct']:+.1f}%. Tom: monitoramento."
+
+    context = f"""CONTRATO: {contrato} | DATA REF (último RDO): {_ref_rdo.isoformat()} | HOJE: {today.isoformat()}
 {sem_rdo_aviso}
-PROGRESSO FÍSICO:
-  Realizado={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}% | SPI={kpis['spi']}
-  Total={len(atividades)} ativs | Concluídas={len(concluidas)} | Em andamento={len(em_andamento)} | Atrasadas={len(atrasadas)} | Vencendo 7d={len(proximos_7d)}
+PANORAMA: {panorama}
+PROGRESSO: Realizado={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}% | SPI={kpis['spi']:.2f}
+CONTAGEM: {len(concluidas)} concluídas | {len(em_andamento)} em andamento | {len(atrasadas)} com prazo vencido | {len(atividades)} total
 
-ATIVIDADES POR RISCO (score 0-10, velocity real, caminho crítico):
-{chr(10).join(ativ_ctx) if ativ_ctx else '  Nenhuma atividade pendente'}
+ATIVIDADES EM ANDAMENTO (dia atual/total | esp% | real% | delta% | ritmo):
+{chr(10).join(ativ_iniciadas_ctx) if ativ_iniciadas_ctx else '  Nenhuma em andamento'}
 
-ANOMALIAS DETECTADAS AUTOMATICAMENTE:
-{chr(10).join(anom_ctx) if anom_ctx else '  Nenhuma anomalia detectada'}
+ATIVIDADES FUTURAS (NÃO INICIADAS — PROIBIDO gerar alertas, riscos ou pendências sobre estas):
+{chr(10).join(ativ_futuras_ctx) if ativ_futuras_ctx else '  Nenhuma futura listada'}
+
+ANOMALIAS FACTUAIS (detectadas automaticamente — cite apenas as relevantes):
+{chr(10).join(anom_ctx) if anom_ctx else '  Nenhuma anomalia'}
 
 RDOs RECENTES:
 {chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
 {dia_livre}{delta_ctx}"""
 
-    system_prompt = """Você é o Agente de Inteligência Artificial da plataforma Bomtempo — especialista sênior em gestão de obras de infraestrutura.
+    system_prompt = """Você é o Agente de Inteligência da plataforma Bomtempo — gestor sênior de obras de infraestrutura.
 
-Analise os dados fornecidos e gere EXATAMENTE 4 insights em JSON. Cada insight:
-- "title": título direto, max 55 chars
-- "body": análise COM NÚMEROS REAIS — cite atividades, datas, delta, velocity, EAC. Max 180 chars.
+Gere EXATAMENTE 4 insights em JSON. Cada insight:
+- "title": max 55 chars, direto ao ponto
+- "body": análise com NÚMEROS REAIS do contexto — atividade, dia X/Y, delta%, velocity, EAC. Max 180 chars.
 - "priority": "High" | "Medium" | "Low"
 - "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta"
 
-REGRAS INVIOLÁVEIS — leia antes de qualquer análise:
+════ REGRAS ABSOLUTAS — violá-las é um erro crítico ════
 
-1. ATIVIDADES FUTURAS: qualquer atividade marcada com "FUTURA(não iniciada)" NÃO tem atraso, risco ou pendência.
-   Nunca alerte sobre atividades que ainda não deveriam ter iniciado.
+R1. FUTURAS: Atividades na seção "ATIVIDADES FUTURAS" NÃO EXISTEM para fins de análise.
+    NUNCA gere insight de risco, pendência ou atraso sobre elas. São futuras por design do cronograma.
 
-2. FREQUÊNCIA DE RDO: RDO é registro diário da obra — 1 por dia útil trabalhado é o correto.
-   Se há 1 RDO para cada dia de projeto, a frequência está PERFEITA. Nunca sugira "enviar mais RDOs" quando a cobertura já é total.
+R2. COBERTURA DE RDO: RDO é diário — 1 por dia de obra é a frequência CORRETA e COMPLETA.
+    Se há 1 RDO por dia trabalhado, a cobertura é 100%. JAMAIS alerte "falta de RDO" nesse caso.
 
-3. SAÚDE DO PROJETO: Se SPI ≥ 1.0 e desvio ≥ 0% → projeto adiantado ou no ritmo.
-   Neste caso, NÃO gere alertas de atraso. Gere oportunidades (antecipar atividades, manter ritmo).
+R3. OBRA SAUDÁVEL: Se o PANORAMA diz "SAUDÁVEL" (SPI ≥ 1.0 e desvio ≥ 0%), PROIBIDO gerar alertas de atraso.
+    Gere oportunidades: o que pode ser antecipado, qual atividade concluirá antes do prazo.
 
-4. PRODUTIVIDADE: Se delta de uma atividade ≥ 0% (real ≥ esperado) → produtividade positiva.
-   Destaque como ponto forte. Se velocity_real > taxa_plan → atividade será concluída antes do prazo.
+R4. RITMO POSITIVO: Se delta ≥ 0% → a atividade está NO RITMO ou ADIANTADA.
+    Encare "dia 1 de 2 com 60% realizado e esperado 50%" como ADIANTADO — no dia 2 haverá folga.
+    Se velocity_real > producao_planejada/dia → conclusão antes do prazo → mencione proativamente.
 
-5. ATRASADA: atividade só está atrasada se termino_previsto < data_ultimo_rdo E inicio_previsto ≤ data_ultimo_rdo E pct < 100%.
-   Não chame de atrasada atividade futura, não iniciada, ou dentro do prazo.
+R5. DEFINIÇÃO DE ATRASO: atividade atrasada = termino_previsto < data_ref_rdo E já iniciou E pct < 100%.
+    Atividade no prazo, futura, ou com delta ≥ 0% NÃO está atrasada.
 
-6. DADOS REAIS: Nunca invente dados. Use apenas o que está no contexto. Se não há informação suficiente, diga "dados insuficientes".
+R6. DADOS REAIS: Use APENAS os dados do contexto. Jamais invente métricas, datas ou situações.
+    Se não há dado suficiente para um insight, use "Low" priority e diga "dados insuficientes para confirmar".
+
+════ HIERARQUIA (aplique nesta ordem) ════
+1. Anomalia factual grave (produção impossível, crítica parada há 3+ dias com evidência real)
+2. Atividade em andamento com prazo vencido E delta negativo (atrasada de verdade)
+3. Ritmo insuficiente: velocity_real < 50% do planejado em atividade já iniciada
+4. Oportunidade: delta positivo, conclusão antecipada, próxima atividade pode ser adiantada
+5. Padrão climático ou interrupção recorrente com impacto comprovado
+
+════ CALIBRAÇÃO DE TOM ════
+- Projeto saudável → fale sobre o que está bem e o que pode melhorar
+- "Perfuração: dia 1/2, real=55%, esp=50%, delta=+5% → concluirá amanhã no prazo" = insight de oportunidade
+- Cite sempre: atividade, dia X/Y, delta, EAC quando disponíveis
+
+Responda SOMENTE com JSON array:
+[{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
 
 HIERARQUIA DE PRIORIZAÇÃO (aplicar nesta ordem):
 1. Anomalias reais (dados impossíveis, atividade crítica com delta muito negativo)
@@ -1214,61 +1270,85 @@ async def agente_chat(
     atrasadas   = [a for a in atividades if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < _ref_chat and float(a.get("conclusao_pct") or 0) < 100]
     proximos_7d = [a for a in atividades if a.get("termino_previsto") and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7 and float(a.get("conclusao_pct") or 0) < 100]
 
-    ativ_resumo = []
+    _ref_chat_date = date.fromisoformat(_ref_chat) if isinstance(_ref_chat, str) else (_ref_chat if isinstance(_ref_chat, date) else today)
+    ativ_iniciadas_chat = []
+    ativ_futuras_chat   = []
     for a in sorted(atividades, key=lambda x: float(x.get("_risk_score") or 0), reverse=True)[:15]:
         vel = velocities.get(str(a.get("id","")), {})
         total_qty = float(a.get("total_qty") or 0)
         exec_qty  = float(a.get("exec_qty") or 0)
-        # Se velocity_real = 0 mas há qty, calcula taxa planejada para estimativas
+        ini_chat  = str(a.get("inicio_previsto",""))[:10]
+        ter_chat  = str(a.get("termino_previsto",""))[:10]
+        pct_chat  = float(a.get("conclusao_pct") or 0)
+
+        # Posição na atividade: dia X/Y + delta vs esperado
+        ritmo_chat = ""
+        try:
+            d_i = date.fromisoformat(ini_chat)
+            d_t = date.fromisoformat(ter_chat)
+            d_tot = max(1, (d_t - d_i).days)
+            d_dec = min(d_tot, max(0, (_ref_chat_date - d_i).days))
+            pct_esp_c = round(d_dec / d_tot * 100)
+            delta_c = round(pct_chat - pct_esp_c)
+            dia_c = d_dec + 1
+            status_c = "ADIANT" if delta_c > 5 else "OK" if delta_c >= -5 else "ATRAS"
+            ritmo_chat = f" | dia {dia_c}/{d_tot+1} | esp={pct_esp_c}% delta={delta_c:+d}% [{status_c}]"
+        except Exception:
+            pass
+
         if vel.get("velocity_real", 0) > 0:
-            vel_txt = f", vel_real={vel['velocity_real']}/dia, EAC={vel.get('eac_date','?')}"
+            vel_txt = f" | vel={vel['velocity_real']}/dia(plan={vel.get('producao_planejada_dia',0)}) EAC={vel.get('eac_date','?')} saldo={vel.get('saldo',0):.0f} {a.get('unidade','')}"
         elif total_qty > 0:
-            # Taxa planejada: total_qty / dias_planejados do contrato
-            ini_s = str(a.get("inicio_previsto",""))[:10]
-            ter_s = str(a.get("termino_previsto",""))[:10]
-            if ini_s and ter_s:
-                try:
-                    dp = max(1, (date.fromisoformat(ter_s) - date.fromisoformat(ini_s)).days)
-                    taxa_plan = round(total_qty / dp, 1)
-                    vel_txt = f", vel_real=0(sem RDO), taxa_plan={taxa_plan}/dia, saldo={total_qty - exec_qty:.0f}"
-                except Exception:
-                    vel_txt = f", vel_real=0(sem histórico), saldo={total_qty - exec_qty:.0f}"
-            else:
+            try:
+                dp = max(1, (date.fromisoformat(ter_chat) - date.fromisoformat(ini_chat)).days)
+                taxa_plan = round(total_qty / dp, 1)
+                vel_txt = f" | plan={taxa_plan}/dia saldo={total_qty - exec_qty:.0f} {a.get('unidade','')}"
+            except Exception:
                 vel_txt = ""
         else:
             vel_txt = ""
-        ini_chat = str(a.get("inicio_previsto",""))[:10]
-        futura_txt = " [FUTURA]" if ini_chat > _ref_chat.isoformat() else ""
-        ativ_resumo.append(
-            f"  {a.get('atividade','?')[:45]}: {a.get('conclusao_pct',0)}%"
-            f", ini={ini_chat}, prazo={str(a.get('termino_previsto','?'))[:10]}"
-            f", exec={a.get('exec_qty',0)}/{a.get('total_qty',0)} {a.get('unidade','')}"
-            f"{vel_txt}{futura_txt}"
+
+        linha_chat = (
+            f"  {a.get('atividade','?')[:45]}: {pct_chat:.0f}%"
+            f" | ini={ini_chat} prazo={ter_chat}"
+            f"{ritmo_chat}{vel_txt}"
         )
+        if ini_chat > _ref_chat:
+            ativ_futuras_chat.append(linha_chat)
+        else:
+            ativ_iniciadas_chat.append(linha_chat)
 
-    system_ctx = f"""Você é o Agente de IA da obra {contrato} na plataforma Bomtempo.
-Responda perguntas do gestor com base nos dados reais abaixo. Seja direto, cite números reais.
+    if kpis["spi"] >= 1.0 and kpis["desvio_pct"] >= 0:
+        saude_chat = "✅ SAUDÁVEL — adiantado/no ritmo. Não afirme atrasos."
+    elif kpis["desvio_pct"] < -5:
+        saude_chat = "🔴 ATRASADO — foco em recuperação."
+    else:
+        saude_chat = "🟡 NO RITMO — monitoramento."
 
-ESTADO DA OBRA (data ref: {_ref_chat} | hoje: {today.isoformat()}):
-  SPI={kpis['spi']} | Progresso={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}%
-  Atrasadas={len(atrasadas)} (prazo vencido na ref + já iniciadas) | Vencendo 7d={len(proximos_7d)}
-  {"✅ OBRA ADIANTADA — SPI>1 e desvio positivo" if kpis['spi'] >= 1.0 and kpis['desvio_pct'] >= 0 else "⚠️ OBRA ATRASADA" if kpis['desvio_pct'] < -5 else "🟡 OBRA NO RITMO"}
+    system_ctx = f"""Você é o Agente de IA da obra {contrato} — Bomtempo.
+Responda o gestor com precisão cirúrgica. Cite números reais. Seja direto e propositivo.
 
-ATIVIDADES (top 15 por risco | FUTURA = não iniciada ainda):
-{chr(10).join(ativ_resumo)}
+OBRA: {saude_chat}
+SPI={kpis['spi']:.2f} | Progresso={kpis['progress_pct']}% | Esperado={kpis['prazo_decorrido_pct']}% | Desvio={kpis['desvio_pct']:+.1f}%
+Ref={_ref_chat} | {len(atrasadas)} com prazo vencido | {len(proximos_7d)} vencendo em 7d
+
+ATIVIDADES EM ANDAMENTO (dia atual/total | delta | ritmo):
+{chr(10).join(ativ_iniciadas_chat) if ativ_iniciadas_chat else '  Nenhuma em andamento'}
+
+ATIVIDADES FUTURAS (não iniciadas — só mencione se perguntado sobre antecipação):
+{chr(10).join(ativ_futuras_chat) if ativ_futuras_chat else '  Nenhuma'}
 
 ANOMALIAS: {'; '.join(a['title'] for a in anomalias) if anomalias else 'Nenhuma'}
+RDOs RECENTES: {'; '.join(f"{str(r.get('data',''))[:10]}({r.get('equipe_alocada','?')}p)" for r in rdos[:3])}
 
-RDOs RECENTES: {'; '.join(f"{str(r.get('data',''))[:10]}(equipe={r.get('equipe_alocada','?')}p)" for r in rdos[:3])}
-
-REGRAS DO AGENTE:
-- Atividades marcadas como "FUTURA" não têm atraso, risco ou pendência — são futuras por design.
-- Se SPI ≥ 1.0 e desvio ≥ 0%: obra saudável. Não afirme atrasos sem evidência.
-- Quando perguntarem "adicionar X pessoas": saldo / (velocity_atual × (1 + X/equipe_atual)) = dias_necessários.
-- Quando perguntarem "o que antecipar": liste atividades FUTURAS com predecessores concluídos.
-- Se vel_real=0 mas taxa_plan existe: use taxa_plan e informe que é estimativa do planejamento.
-- Se não houver RDOs: não afirme atrasos. Diga que sem RDOs o progresso não é mensurável.
-- Para alocação: se velocity_real < taxa_plan, sugira reforço e calcule o delta necessário."""
+REGRAS:
+- FUTURAS: nunca gere alarme sobre elas proativamente. Se perguntado, indique como oportunidade de antecipação.
+- Atraso real = termino_previsto < ref E já iniciou E pct < 100%.
+- Obra saudável → fale sobre oportunidades, não invenções de risco.
+- Alocação: saldo ÷ (vel_atual × fator_reforço) = dias p/ conclusão.
+- Antecipação: atividade futura com predecessores 100% = candidata a iniciar antes.
+- Sem RDOs: não afirme progresso, diga que não há dados de campo.
+- Se vel_real=0 mas taxa_plan existe: use como referência e diga que é estimativa."""
 
     # Gerencia sessão
     if not session_id:

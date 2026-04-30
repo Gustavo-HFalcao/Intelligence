@@ -767,17 +767,19 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             total_qty = float(ha.get("total_qty") or 0)
             critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
 
-            # Calcula % esperado acumulado na data do RDO
+            # Calcula % esperado acumulado na data do RDO + posição dia X/Y
             pct_esp_txt = ""
             try:
                 d_ini = _date.fromisoformat(ini)
                 d_ter = _date.fromisoformat(ter)
-                d_total = max(1, (d_ter - d_ini).days)
-                d_dec = min(d_total, max(0, (today_rdo - d_ini).days + 1))
-                pct_esp = round(d_dec / d_total * 100)
+                d_total_cal = max(1, (d_ter - d_ini).days)
+                d_dec = min(d_total_cal, max(0, (today_rdo - d_ini).days + 1))
+                pct_esp = round(d_dec / d_total_cal * 100)
                 delta = round(pct_atual - pct_esp)
-                status_prod = "ACIMA DO ESPERADO" if delta >= 0 else "ABAIXO DO ESPERADO"
-                pct_esp_txt = f", esp={pct_esp}%, delta={delta:+d}% ({status_prod})"
+                status_prod = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
+                dia_num = max(1, (today_rdo - d_ini).days + 1)
+                dias_tot = d_total_cal + 1  # inclusive
+                pct_esp_txt = f", dia {dia_num}/{dias_tot}, esp={pct_esp}%, acum={pct_atual:.0f}%, delta={delta:+d}% [{status_prod}]"
             except Exception:
                 pass
 
@@ -797,26 +799,33 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
 
         ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
 
-        prompt = f"""Você é um gestor sênior de obras analisando o Relatório Diário de Obra (RDO).
+        prompt = f"""Você é um gestor sênior de obras escrevendo a análise executiva do RDO para o cliente.
 
-REGRAS DE ANÁLISE — leia antes de escrever:
-1. Se delta ≥ 0% (ACIMA DO ESPERADO): a atividade está no ritmo ou adiantada. NÃO alerte risco de prazo.
-2. Se uma atividade está ACIMA DO ESPERADO no dia 1 de 2, mencione positivamente — no dia 2 haverá folga.
-3. Só alerte risco de atraso quando: delta < 0% E prazo está próximo E a recuperação exigiria aceleração real.
-4. Equipe, clima, interrupções: mencione apenas se impactaram negativamente. Não descreva o óbvio.
-5. Recomendação: seja específica — se tudo está bem, diga isso e sugira ações proativas (antecipar, otimizar equipe).
+REGRAS ABSOLUTAS:
+1. delta ≥ 0% = atividade ADIANTADA ou NO RITMO → NUNCA alerte risco de prazo nesse caso.
+2. "dia X de Y com delta positivo" = ritmo acima do esperado → mencione como ponto forte.
+   Ex: "dia 1 de 2 com 60% real e 50% esperado" → está adiantado, no dia 2 haverá folga.
+3. Se velocity_real > planejado/dia → a atividade terminará antes do prazo → diga isso.
+4. Só alerte risco quando: delta < 0% E prazo restante não comporta a recuperação natural.
+5. Equipe, clima, interrupções: mencione apenas se impactaram negativamente e de forma concreta.
+6. Tom executivo: direto, sem alarmismo, sem linguagem de relatório burocrático.
+7. Se tudo está bem → diga isso claramente e sugira o que pode ser feito proativamente.
 
 DATA: {data_rdo}  |  CONTRATO: {contrato}
 CLIMA: {clima}  |  CHUVA: {chuva}  |  ACIDENTE: {acidente}
 EQUIPE: {equipe} pessoas  |  HORÁRIO: {hora_i}–{hora_f}
 INTERRUPÇÃO: {interrupcao}
-OBSERVAÇÕES DO ENGENHEIRO: {observacoes}
+OBSERVAÇÕES DO CAMPO: {observacoes}
 ORIENTAÇÃO PARA AMANHÃ: {orientacao}
 
-ATIVIDADES (acumulado=% total realizado até hoje, esp=% esperado no cronograma, delta=acumulado-esp):
+ATIVIDADES DO DIA:
+(acumulado=% total realizado | esp=% esperado hoje pelo cronograma | delta=acumulado-esp | dia X/Y=posição na atividade)
 {ativ_text}
 
-Gere análise executiva em 3-5 frases: produtividade real do dia, situação vs cronograma, recomendação objetiva. Texto corrido, sem bullet points, em português."""
+Escreva análise executiva em 3-5 frases corridas, em português:
+- Frase 1: como foi o dia (produtividade, equipe, condições)
+- Frase 2-3: situação de cada atividade vs cronograma — seja preciso com os números
+- Frase 4-5: recomendação objetiva — se positivo, indique o que pode ser antecipado; se negativo, o que precisa de ação."""
 
         client_ai = openai.OpenAI(api_key=Config.OPENAI_API_KEY, timeout=60.0)
         resp = client_ai.chat.completions.create(
