@@ -1093,9 +1093,10 @@ function ProdutividadeSection({ allRows }: { allRows: any[] }) {
 
               const totalQty = Number(a.total_qty || 0)
               const execQty = Number(a.exec_qty || 0)
-              const prodPlan = diasPlan > 0 && totalQty > 0 ? totalQty / diasPlan : 0
-              const prodReal = daysElapsed > 0 && execQty > 0 ? execQty / Math.max(1, daysElapsed) : 0
-              const prodPct = prodPlan > 0 ? Math.round((prodReal / prodPlan) * 100) : null
+              // Usa valores calculados pelo backend (dias úteis) — fallback local se ausente
+              const prodPlan = Number(a._prod_plan) || (diasPlan > 0 && totalQty > 0 ? totalQty / diasPlan : 0)
+              const prodReal = Number(a._prod_real) || 0
+              const prodPct = prodPlan > 0 && execQty > 0 ? Math.round((prodReal / prodPlan) * 100) : null
 
               const tendCfg = TENDENCIA_CONFIG[a._tendencia || 'sem_dados'] || TENDENCIA_CONFIG.sem_dados
 
@@ -1116,9 +1117,19 @@ function ProdutividadeSection({ allRows }: { allRows: any[] }) {
                   </td>
                   <td className="px-4 py-2.5">
                     {prodPct !== null ? (
-                      <span style={{ color: prodPct >= 100 ? TEAL : prodPct >= 70 ? COPPER : RED, fontWeight: 700, fontSize: 10 }}>
-                        {prodPct}% do planejado
-                      </span>
+                      <div>
+                        <span style={{ color: prodPct >= 100 ? TEAL : prodPct >= 70 ? COPPER : RED, fontWeight: 700, fontSize: 10 }}>
+                          {prodPct}% do planejado
+                        </span>
+                        <div className="text-[9px] text-text-muted font-mono mt-0.5">
+                          {prodReal.toFixed(1)} / {prodPlan.toFixed(1)} {a.unidade}/dia
+                        </div>
+                      </div>
+                    ) : totalQty > 0 ? (
+                      <div>
+                        <span className="text-[10px] text-text-muted">Aguard. produção</span>
+                        <div className="text-[9px] text-text-muted font-mono mt-0.5">plan: {prodPlan.toFixed(1)} {a.unidade}/dia</div>
+                      </div>
                     ) : (
                       <span className="text-[10px] text-text-muted">—</span>
                     )}
