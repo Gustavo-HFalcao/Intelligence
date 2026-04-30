@@ -1916,7 +1916,9 @@ async def get_hub_dashboard(
                 if hist_map:
                     if aid in hist_map:
                         for dt, pct in hist_map[aid]:
-                            if dt.date() <= d_end.date():
+                            # dt é datetime.date (via _build_hist_map), d_end é pd.Timestamp
+                            dt_d = dt if isinstance(dt, date) else dt.date()
+                            if dt_d <= d_end.date():
                                 val = float(pct)
                             else:
                                 break
