@@ -156,19 +156,28 @@ def _calc_progress_spi(
     pct_real_pond = 0.0
     pct_esp_pond = 0.0
 
+    # Pré-calcula pct_real de todas as folhas para enforcing da regra depende_progresso (QS 1:1)
+    ativ_by_id = {str(a["id"]): a for a in atividades}
+    pct_real_pre: dict = {}
+    for a in folhas:
+        if hist_map:
+            hv = _hist_pct_at(hist_map, str(a["id"]), ref)
+            pct_real_pre[str(a["id"])] = hv if hv is not None else 0.0
+        else:
+            pct_real_pre[str(a["id"])] = float(a.get("conclusao_pct") or 0)
+    # Aplica cap QS: avanço do sucessor ≤ avanço do antecessor (regra 1:1 de produção)
+    for a in folhas:
+        if a.get("dep_tipo") == "depende_progresso" and a.get("dependencia_id"):
+            dep_id = str(a["dependencia_id"])
+            dep_pct = pct_real_pre.get(dep_id, 0.0)
+            pct_real_pre[str(a["id"])] = min(pct_real_pre[str(a["id"])], dep_pct)
+
     for a in folhas:
         ini_s = str(a.get("inicio_previsto") or "")[:10]
         ter_s = str(a.get("termino_previsto") or "")[:10]
         peso = float(a.get("peso_pct") or 1)
 
-        # Realizado: usa hist_map quando disponível E não-vazio.
-        # hist_map vazio = histórico ainda não populado (contrato novo ou dados migrados)
-        # → fallback para conclusao_pct para não zerar tudo.
-        if hist_map:
-            hist_val = _hist_pct_at(hist_map, str(a["id"]), ref)
-            pct_real = hist_val if hist_val is not None else 0.0
-        else:
-            pct_real = float(a.get("conclusao_pct") or 0)
+        pct_real = pct_real_pre[str(a["id"])]
 
         pct_esp = 0.0
         if ini_s and ter_s:
@@ -183,6 +192,18 @@ def _calc_progress_spi(
                     total_du = max(_count_working_days(ini_s, ter_s, working_days), 1)
                     decorridos_du = _count_working_days(ini_s, ref.isoformat(), working_days)
                     pct_esp = min(100.0, decorridos_du / total_du * 100)
+                    # QS: o progresso esperado também é cap pelo antecessor (pct_esp 1:1)
+                    if a.get("dep_tipo") == "depende_progresso" and a.get("dependencia_id"):
+                        dep_id = str(a["dependencia_id"])
+                        dep_a = ativ_by_id.get(dep_id)
+                        if dep_a:
+                            dep_ter_s = str(dep_a.get("termino_previsto") or "")[:10]
+                            dep_ini_s = str(dep_a.get("inicio_previsto") or "")[:10]
+                            if dep_ter_s and dep_ini_s:
+                                dep_total = max(_count_working_days(dep_ini_s, dep_ter_s, working_days), 1)
+                                dep_dec = _count_working_days(dep_ini_s, ref.isoformat(), working_days)
+                                dep_esp = min(100.0, dep_dec / dep_total * 100)
+                                pct_esp = min(pct_esp, dep_esp)
             except ValueError:
                 pass
 

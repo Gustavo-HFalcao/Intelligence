@@ -820,7 +820,7 @@ function AtivRow({
   const hasChildren = allRows.some(a => a.parent_id === row.id)
   const depRef  = row.dependencia_id ? allRows.find(a => a.id === row.dependencia_id) : null
   const depName = depRef?.atividade?.slice(0, 22) ?? null
-  const depTipoLabel = row.dep_tipo === 'depende_inicio' ? 'SS' : row.dep_tipo === 'depende_termino' ? 'FS' : null
+  const depTipoLabel = row.dep_tipo === 'depende_inicio' ? 'SS' : row.dep_tipo === 'depende_termino' ? 'FS' : row.dep_tipo === 'depende_progresso' ? 'QS' : null
 
   const pct = Number(row.conclusao_pct || 0)
   const status = row.status || 'pendente'

@@ -318,17 +318,37 @@ export default function ActivityModal({ isOpen, onClose, contrato, editingActivi
                       {depOptions.map((a: any) => <option key={a.id} value={a.id}>{a.atividade}</option>)}
                     </select>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 col-span-2">
                     <label className="text-[10px] font-black text-white/40 uppercase tracking-widest">Tipo de Dependência</label>
-                    <div className="grid grid-cols-3 gap-1 bg-black/40 p-1 rounded-xl border border-white/5">
+                    <div className="grid grid-cols-2 gap-1.5 bg-black/40 p-1.5 rounded-xl border border-white/5">
                       {[
-                        { v: 'sem_dependencia', l: 'Sem dep.' },
-                        { v: 'depende_termino', l: 'FS — Fim→Início' },
-                        { v: 'depende_inicio',  l: 'SS — Início→Início' },
-                      ].map(({ v, l }) => (
-                        <button key={v} type="button" onClick={() => handleChange('dep_tipo', v)} disabled={!form.dependencia_id && v !== 'sem_dependencia'} className={`py-2 px-1 text-[8px] font-black uppercase rounded-lg transition-all leading-tight ${form.dep_tipo === v ? 'bg-copper text-void' : 'text-white/20 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed'}`}>{l}</button>
+                        { v: 'sem_dependencia',  l: 'Sem Dep.',          sub: 'Independente' },
+                        { v: 'depende_termino',  l: 'FS · Fim→Início',   sub: 'Só inicia após término' },
+                        { v: 'depende_inicio',   l: 'SS · Início→Início',sub: 'Inicia junto com a anterior' },
+                        { v: 'depende_progresso',l: 'QS · Produção 1:1', sub: 'Avanço limitado pelo executado' },
+                      ].map(({ v, l, sub }) => (
+                        <button key={v} type="button"
+                          onClick={() => handleChange('dep_tipo', v)}
+                          disabled={!form.dependencia_id && v !== 'sem_dependencia'}
+                          className={`py-2.5 px-3 text-left rounded-lg transition-all ${form.dep_tipo === v ? 'bg-copper text-void' : 'text-white/30 hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed'}`}
+                        >
+                          <div className="text-[9px] font-black uppercase leading-tight">{l}</div>
+                          <div className={`text-[8px] mt-0.5 leading-tight ${form.dep_tipo === v ? 'text-void/60' : 'text-white/20'}`}>{sub}</div>
+                        </button>
                       ))}
                     </div>
+                    {/* Descrição do tipo selecionado */}
+                    {form.dep_tipo === 'depende_progresso' && form.dependencia_id && (
+                      <p className="text-[9px] text-copper/80 font-bold italic">
+                        O avanço desta atividade fica limitado ao percentual executado da predecessora (regra 1:1).
+                        Ex: se foram perfurados 500 de 1000 furos, só se pode vedar até 500.
+                      </p>
+                    )}
+                    {form.dependencia_id && form.dep_tipo === 'sem_dependencia' && (
+                      <p className="text-[9px] text-amber-400/80 font-bold">
+                        ⚠ Antecessora selecionada mas sem tipo de dependência. Selecione FS, SS ou QS para ativar a restrição.
+                      </p>
+                    )}
                   </div>
                   <div className="col-span-2 p-6 bg-white/[0.02] border border-white/10 rounded-2xl flex items-center justify-between">
                     <div>
