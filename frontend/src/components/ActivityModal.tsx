@@ -21,8 +21,20 @@ interface ActivityModalProps {
 const DISCIPLINAS = ['Civil', 'Elétrica', 'Hidráulica', 'Estrutural', 'Mecânica', 'Terraplanagem', 'Infraestrutura', 'Geral', 'Licenciamento', 'Aprovações']
 const SECTIONS = ['Geral', 'Engenharia', 'Quantitativos', 'Análise']
 
-function workingDaysBetween(a: string, b: string): number {
+// Mapeia string "seg,ter,qua,qui,sex,sab,dom" → set de números JS (getDay: 0=Dom,1=Seg,...,6=Sab)
+function parseWorkingDays(diasUteis: string): Set<number> {
+  const MAP: Record<string, number> = { seg:1, ter:2, qua:3, qui:4, sex:5, sab:6, sáb:6, dom:0 }
+  const result = new Set<number>()
+  for (const d of (diasUteis || '').split(',')) {
+    const n = MAP[d.trim().toLowerCase()]
+    if (n !== undefined) result.add(n)
+  }
+  return result.size > 0 ? result : new Set([1,2,3,4,5]) // fallback Mon-Fri
+}
+
+function workingDaysBetween(a: string, b: string, wdSet?: Set<number>): number {
   if (!a || !b) return 0
+  const allowed = wdSet ?? new Set([1,2,3,4,5,6]) // padrão seg-sab quando não informado
   try {
     let d0 = new Date(a + 'T12:00:00')
     let d1 = new Date(b + 'T12:00:00')
@@ -30,22 +42,22 @@ function workingDaysBetween(a: string, b: string): number {
     let count = 0
     const cur = new Date(d0)
     while (cur <= d1) {
-      const wd = cur.getDay()
-      if (wd !== 0 && wd !== 6) count++
+      if (allowed.has(cur.getDay())) count++
       cur.setDate(cur.getDate() + 1)
     }
     return count
   } catch { return 0 }
 }
 
-function addWorkingDays(start: string, days: number): string {
+function addWorkingDays(start: string, days: number, wdSet?: Set<number>): string {
   if (!start || days <= 0) return start
+  const allowed = wdSet ?? new Set([1,2,3,4,5,6])
   try {
     const d = new Date(start + 'T12:00:00')
     let added = 0
     while (added < days - 1) {
       d.setDate(d.getDate() + 1)
-      if (d.getDay() !== 0 && d.getDay() !== 6) added++
+      if (allowed.has(d.getDay())) added++
     }
     return d.toISOString().slice(0, 10)
   } catch { return start }
@@ -95,19 +107,36 @@ export default function ActivityModal({ isOpen, onClose, contrato, editingActivi
     enabled: isOpen
   })
 
+  // Dias úteis configurados no contrato (ex: "seg,ter,qua,qui,sex,sab")
+  const { data: contratoCfg } = useQuery({
+    queryKey: ['contrato-cfg', contrato],
+    queryFn: () => api.get(`/hub/contratos?search=${encodeURIComponent(contrato)}`).then(r => {
+      const found = (r.data?.contratos ?? []).find((c: any) => c.contrato === contrato)
+      return found?.dias_uteis_semana ?? 'seg,ter,qua,qui,sex,sab'
+    }),
+    enabled: isOpen && !!contrato,
+    staleTime: Infinity,
+  })
+  const wdSet = parseWorkingDays(contratoCfg ?? 'seg,ter,qua,qui,sex,sab')
+
   useEffect(() => {
     if (editingActivity) {
       const tm = editingActivity.tipo_medicao || (
         editingActivity.unidade === 'marco' ? 'marco' :
         editingActivity.unidade === '%' ? 'porcentagem' : 'quantidade'
       )
+      const ini = editingActivity.inicio_previsto ? editingActivity.inicio_previsto.slice(0, 10) : ''
+      const ter = editingActivity.termino_previsto ? editingActivity.termino_previsto.slice(0, 10) : ''
+      const diasSalvo = Number(editingActivity.dias_planejados) || 0
+      // Se dias_planejados não foi salvo (importação Reflex / bug antigo), recalcula das datas
+      const diasComputed = diasSalvo > 0 ? diasSalvo : workingDaysBetween(ini, ter, wdSet)
       setForm({
         ...editingActivity,
         tipo_medicao: tm,
         dep_tipo: editingActivity.dep_tipo || 'sem_dependencia',
-        inicio_previsto: editingActivity.inicio_previsto ? editingActivity.inicio_previsto.slice(0, 10) : '',
-        termino_previsto: editingActivity.termino_previsto ? editingActivity.termino_previsto.slice(0, 10) : '',
-        dias_planejados: editingActivity.dias_planejados || 0,
+        inicio_previsto: ini,
+        termino_previsto: ter,
+        dias_planejados: diasComputed,
       })
     } else {
       setForm({
@@ -149,6 +178,10 @@ export default function ActivityModal({ isOpen, onClose, contrato, editingActivi
       } else if (payload.tipo_medicao === 'porcentagem') {
         payload.unidade = '%'
       }
+      // Garante dias_planejados sempre calculado antes de enviar
+      if ((!payload.dias_planejados || payload.dias_planejados === 0) && payload.inicio_previsto && payload.termino_previsto) {
+        payload.dias_planejados = workingDaysBetween(payload.inicio_previsto, payload.termino_previsto, wdSet)
+      }
       if (isEditing) {
         return api.patch(`/hub/cronograma/${editingActivity.id}`, payload).then(r => r.data)
       }
@@ -165,13 +198,13 @@ export default function ActivityModal({ isOpen, onClose, contrato, editingActivi
   function handleChange(k: string, v: any) {
     setForm((prev: any) => {
       const next = { ...prev, [k]: v }
-      // Dias planejados calculado dinamicamente
+      // Dias planejados calculado dinamicamente usando os dias úteis do contrato
       if (k === 'inicio_previsto' && next.termino_previsto) {
-        next.dias_planejados = workingDaysBetween(v, next.termino_previsto)
+        next.dias_planejados = workingDaysBetween(v, next.termino_previsto, wdSet)
       } else if (k === 'termino_previsto' && next.inicio_previsto) {
-        next.dias_planejados = workingDaysBetween(next.inicio_previsto, v)
+        next.dias_planejados = workingDaysBetween(next.inicio_previsto, v, wdSet)
       } else if (k === 'dias_planejados' && next.inicio_previsto && v > 0) {
-        next.termino_previsto = addWorkingDays(next.inicio_previsto, Number(v))
+        next.termino_previsto = addWorkingDays(next.inicio_previsto, Number(v), wdSet)
       }
       return next
     })

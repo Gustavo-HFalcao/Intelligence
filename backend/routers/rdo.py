@@ -735,9 +735,27 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
         acidente = str(rdo.get("descricao_acidente") or "") if rdo.get("houve_acidente") else "Não houve"
         observacoes = str(rdo.get("observacoes") or "")
         orientacao = str(rdo.get("orientacao") or "")
-        equipe = rdo.get("equipe_alocada", "?")
+        equipe = int(rdo.get("equipe_alocada") or 0)
         hora_i = str(rdo.get("hora_inicio") or "")[:5]
         hora_f = str(rdo.get("hora_termino") or "")[:5]
+
+        # Prazo e valor do contrato (Tier 1)
+        dias_restantes_rdo = ""
+        valor_contrato_rdo = ""
+        try:
+            cinfo = sb_select("contratos", filters={"contrato": contrato}, limit=1) or []
+            if cinfo:
+                ci = cinfo[0]
+                dt_fim = ci.get("data_termino") or ci.get("data_fim")
+                if dt_fim:
+                    d_fim_r = _date.fromisoformat(str(dt_fim)[:10])
+                    dr = (d_fim_r - today_rdo).days
+                    dias_restantes_rdo = f"{dr} dias até o prazo final ({d_fim_r.isoformat()})"
+                v = float(ci.get("valor_contratado") or 0)
+                if v > 0:
+                    valor_contrato_rdo = f"R$ {v:,.0f}"
+        except Exception:
+            pass
 
         # Enriquece atividades com dados do cronograma
         hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, limit=500) or []
@@ -792,9 +810,24 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             else:
                 status_str = f"{qty}{unit} executado"
 
+            # Produtividade por pessoa (Tier 1)
+            prod_pessoa_txt = ""
+            if efetivo and qty and unit not in ("%", "marco", ""):
+                try:
+                    pp = round(float(qty) / int(efetivo), 1)
+                    prod_pessoa_txt = f", {pp} {unit}/pessoa"
+                except Exception:
+                    pass
+
+            # Observação do campo por atividade (Tier 1 — ouro)
+            obs_campo = str(at.get("observacao") or "").strip()
+            obs_txt = f"\n      Obs campo: \"{obs_campo[:120]}\"" if obs_campo else ""
+
+            efetivo_txt = f" ({efetivo}p{prod_pessoa_txt})" if efetivo else ""
+
             ativ_lines.append(
-                f"  - {nome}: {status_str}{pct_esp_txt}, prazo={ter}"
-                f"{' [CRÍTICO]' if critico else ''}"
+                f"  - {nome}{efetivo_txt}: {status_str}{pct_esp_txt}, prazo={ter}"
+                f"{' [CRÍTICO]' if critico else ''}{obs_txt}"
             )
 
         ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
@@ -805,27 +838,28 @@ REGRAS ABSOLUTAS:
 1. delta ≥ 0% = atividade ADIANTADA ou NO RITMO → NUNCA alerte risco de prazo nesse caso.
 2. "dia X de Y com delta positivo" = ritmo acima do esperado → mencione como ponto forte.
    Ex: "dia 1 de 2 com 60% real e 50% esperado" → está adiantado, no dia 2 haverá folga.
-3. Se velocity_real > planejado/dia → a atividade terminará antes do prazo → diga isso.
-4. Só alerte risco quando: delta < 0% E prazo restante não comporta a recuperação natural.
-5. Equipe, clima, interrupções: mencione apenas se impactaram negativamente e de forma concreta.
-6. Tom executivo: direto, sem alarmismo, sem linguagem de relatório burocrático.
-7. Se tudo está bem → diga isso claramente e sugira o que pode ser feito proativamente.
+3. "Obs campo" por atividade = nota do engenheiro de campo — use para contextualizar desvios.
+4. Produtividade por pessoa: se acima do esperado, é eficiência da equipe — destaque.
+5. Só alerte risco quando: delta < 0% E prazo restante não comporta a recuperação natural.
+6. Tom executivo: direto, sem alarmismo, sem linguagem burocrática.
+7. Se tudo está bem → diga claramente e sugira o que pode ser antecipado ou otimizado.
 
 DATA: {data_rdo}  |  CONTRATO: {contrato}
+PRAZO: {dias_restantes_rdo or 'não informado'} | VALOR: {valor_contrato_rdo or 'não informado'}
 CLIMA: {clima}  |  CHUVA: {chuva}  |  ACIDENTE: {acidente}
-EQUIPE: {equipe} pessoas  |  HORÁRIO: {hora_i}–{hora_f}
+EQUIPE TOTAL: {equipe} pessoas  |  HORÁRIO: {hora_i}–{hora_f}
 INTERRUPÇÃO: {interrupcao}
-OBSERVAÇÕES DO CAMPO: {observacoes}
+OBSERVAÇÕES GERAIS DO CAMPO: {observacoes}
 ORIENTAÇÃO PARA AMANHÃ: {orientacao}
 
 ATIVIDADES DO DIA:
-(acumulado=% total realizado | esp=% esperado hoje pelo cronograma | delta=acumulado-esp | dia X/Y=posição na atividade)
+(efetivo=pessoas nessa atividade | prod/pessoa | dia X/Y | esp%=esperado pelo cronograma | delta=[ADIANTADO/OK/ATRASADO])
 {ativ_text}
 
 Escreva análise executiva em 3-5 frases corridas, em português:
-- Frase 1: como foi o dia (produtividade, equipe, condições)
-- Frase 2-3: situação de cada atividade vs cronograma — seja preciso com os números
-- Frase 4-5: recomendação objetiva — se positivo, indique o que pode ser antecipado; se negativo, o que precisa de ação."""
+- Frase 1: como foi o dia — produtividade, eficiência da equipe, condições
+- Frase 2-3: situação de cada atividade com os números reais — dia X/Y, delta, obs de campo
+- Frase 4-5: recomendação objetiva — se positivo, o que pode ser antecipado; se negativo, ação concreta"""
 
         client_ai = openai.OpenAI(api_key=Config.OPENAI_API_KEY, timeout=60.0)
         resp = client_ai.chat.completions.create(
@@ -856,11 +890,13 @@ def _trigger_insights(contrato: str, rdo_id: str, client_id: Optional[str]):
         atividades   = sb_select("hub_atividades",          filters={"contrato": contrato}, limit=500) or []
         rdo_recentes = sb_select("rdo_master",              filters={"contrato": contrato, "status": "Submetido"}, order="data.desc", limit=7) or []
         historico    = sb_select("hub_atividade_historico", filters={"contrato": contrato}, limit=300) or []
+        contrato_rows_t = sb_select("contratos",           filters={"contrato": contrato}, limit=1) or []
+        contrato_info_t = contrato_rows_t[0] if contrato_rows_t else {}
 
         existing     = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []
         insights_ant = (existing[0].get("insights") or []) if existing else []
 
-        insights = _build_insights_llm(atividades, rdo_recentes, contrato, today, historico, insights_ant)
+        insights = _build_insights_llm(atividades, rdo_recentes, contrato, today, historico, insights_ant, contrato_info=contrato_info_t)
 
         # Persiste no agente_insights (upsert por contrato)
         existing = sb_select("agente_insights", filters={"contrato": contrato}, limit=1) or []

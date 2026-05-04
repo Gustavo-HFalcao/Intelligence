@@ -139,8 +139,8 @@ export default function ProjectModal({ isOpen, onClose, editingProject }: Projec
         data_termino: data.termino,
       }
       const url = editingProject
-        ? `/api/hub/contratos/${encodeURIComponent(editingProject.contrato)}`
-        : '/api/hub/contratos'
+        ? `/hub/contratos/${encodeURIComponent(editingProject.contrato)}`
+        : '/hub/contratos'
       if (editingProject) {
         const result = await api.patch(url, payload).then(r => r.data)
         // Backend pode retornar 200 com {ok:false, error:"..."} — trata como erro

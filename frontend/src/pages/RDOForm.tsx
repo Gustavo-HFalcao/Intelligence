@@ -993,7 +993,7 @@ export default function RDOForm() {
                   {atividadesCronograma
                     .filter(a => Number(a.conclusao_pct || 0) < 100)
                     .map((a: any) => {
-                      const today = new Date().toISOString().slice(0, 10)
+                      const today = form.data || new Date().toISOString().slice(0, 10)
                       const isLate = (a.termino_previsto?.slice(0, 10) ?? '') < today && (a.termino_previsto?.slice(0, 10) ?? '') !== ''
                       const isToday = !isLate && a.inicio_previsto?.slice(0, 10) <= today && a.termino_previsto?.slice(0, 10) >= today
                       return (
@@ -1026,7 +1026,7 @@ export default function RDOForm() {
 
         {/* Previstas para hoje — micros/subs agrupadas por macro pai */}
         {previstasHoje.length > 0 && (() => {
-          const today = new Date().toISOString().slice(0, 10)
+          const today = form.data || new Date().toISOString().slice(0, 10)
           // Agrupar por macro pai
           const grupos: Record<string, { macroLabel: string; items: any[] }> = {}
           for (const a of previstasHoje) {
@@ -1103,7 +1103,7 @@ export default function RDOForm() {
         {selectedCronAt && (() => {
           const totalQty   = Number(selectedCronAt.total_qty || 0)
           const execQty    = Number(selectedCronAt.exec_qty  || 0)
-          const today      = new Date().toISOString().slice(0, 10)
+          const today      = form.data || new Date().toISOString().slice(0, 10)
           const inicio     = selectedCronAt.inicio_previsto?.slice(0, 10)
           const termino    = selectedCronAt.termino_previsto?.slice(0, 10)
           const isLate     = termino && termino < today

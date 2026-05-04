@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 
 import httpx
 from backend.integrations.supabase import (
@@ -343,19 +343,23 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_day
     exec_qty = float(r.get("exec_qty", 0) or 0)
     dias_plan = int(r.get("dias_planejados", 0) or 0)
     pct = float(r.get("conclusao_pct", 0) or 0)
-    
+
     d_inicio = None
     if r.get("inicio_previsto"):
         try: d_inicio = datetime.fromisoformat(r["inicio_previsto"].split("T")[0]).date()
         except Exception: pass
-        
+
     d_termino = None
     if r.get("termino_previsto"):
         try: d_termino = datetime.fromisoformat(r["termino_previsto"].split("T")[0]).date()
         except Exception: pass
-    
+
     if not d_inicio or not d_termino:
         return r
+
+    # Auto-compute dias_plan from dates when not explicitly set (importações sem esse campo)
+    if dias_plan == 0:
+        dias_plan = max(1, _working_days_between(d_inicio, d_termino + timedelta(days=1), working_days))
 
     # Se a atividade foi iniciada antes do previsto (antecipação), usar a data real de início
     # do progresso para não gerar falsos atrasos. A referência é hoje vs prazo planejado.
@@ -388,14 +392,13 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_day
             else:
                 desvio_dias = -_working_days_between(fim_prev, d_termino)
 
-    # Tendency Logic — atividades antecipadas (iniciadas antes do previsto) são "acima"
-    prazo_estourado = desvio_dias > 0
+    # Tendency Logic — velocidade diária tem precedência; prazo estourado só pesa se atraso > 1d
     antecipada = today < d_inicio and pct > 0
     if exec_qty == 0 and not antecipada: tendencia = "sem_dados"
     elif pct >= 100: tendencia = "concluida"
-    elif antecipada: tendencia = "acima"  # iniciou antes — sempre positivo
-    elif desvio_pct >= 10.0 and not prazo_estourado: tendencia = "acima"
-    elif desvio_pct <= -10.0 or prazo_estourado: tendencia = "abaixo"
+    elif antecipada: tendencia = "acima"
+    elif desvio_pct >= 10.0: tendencia = "acima"          # produz acima do plano diário
+    elif desvio_pct <= -10.0 or desvio_dias > 1: tendencia = "abaixo"   # lento ou > 1d atrasado
     else: tendencia = "dentro"
 
     # pct_esperado: se hoje ainda está antes do início previsto, esperado = 0 (é adiantamento)
@@ -493,7 +496,7 @@ def _calculate_risk_score(df_proj: Any, financeiro_df: Any, contrato_info: Dict[
 # MOTOR DE INTELIGÊNCIA — Velocity, Anomalias, Risk Score, Caminho Crítico, Delta
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _calc_velocity(atividade: dict, historico: list) -> dict:
+def _calc_velocity(atividade: dict, historico: list, working_days: set = None) -> dict:
     """Calcula produtividade real por DIA TRABALHADO (não por dia corrido).
     Retorna velocity_real, dias_trabalhados, saldo, dias_restantes_projetados, eac_date."""
     aid = str(atividade.get("id", ""))
@@ -514,7 +517,7 @@ def _calc_velocity(atividade: dict, historico: list) -> dict:
     saldo = max(0.0, total_qty - exec_qty)
     dias_restantes = round(saldo / velocity_real) if velocity_real > 0 else None
 
-    _wd = {0, 1, 2, 3, 4, 5}  # seg–sab (padrão do contrato)
+    _wd = working_days if working_days is not None else {0, 1, 2, 3, 4, 5}
     eac_date = None
     if dias_restantes is not None:
         current = date.today()
@@ -663,7 +666,7 @@ def _build_dependency_chain(atividade_id: str, atividades: list, depth: int = 0)
     return chain
 
 
-def _calc_risk_score(atividade: dict, velocity: dict, today: date) -> float:
+def _calc_risk_score(atividade: dict, velocity: dict, today: date, working_days: set = None) -> float:
     """Score de risco 0-10 por atividade.
     Fatores: desvio de progresso (40%), dias até prazo (30%), caminho crítico (20%), trend (10%)."""
     score = 0.0
@@ -683,7 +686,7 @@ def _calc_risk_score(atividade: dict, velocity: dict, today: date) -> float:
     except ValueError:
         return 2.0
 
-    _wd = {0, 1, 2, 3, 4, 5}  # seg–sab
+    _wd = working_days if working_days is not None else {0, 1, 2, 3, 4, 5}
 
     # Fator 1: desvio de progresso vs esperado (40%) — usa dias úteis
     total_du = max(_count_working_days(ini_s, ter_s, _wd), 1)
@@ -1679,6 +1682,8 @@ async def get_cronograma(
     # Historico de produção para velocity e risk score
     hist_rows = sb_select("hub_atividade_historico", filters={"contrato": contrato}, client_id=client_id, limit=500) or []
     today_d    = date.today()
+    # Dias úteis configurados no contrato (ex: seg-sab, ter-dom)
+    _wd        = _get_working_days(contrato, client_id)
     # Referência para atraso: apenas após RDO submetido do dia
     last_rdo_d = _get_last_rdo_date(contrato, client_id)
     ref_d      = last_rdo_d if last_rdo_d is not None else today_d
@@ -1686,8 +1691,8 @@ async def get_cronograma(
     # Map to list and apply forecast
     atividades = []
     for r in rows:
-        # Apply parity forecast
-        f = _compute_forecast(r, today=today_d)
+        # Apply parity forecast usando os dias úteis reais do contrato
+        f = _compute_forecast(r, today=ref_d, working_days=_wd)
 
         # Format for display
         f["inicio_br"] = _iso_to_br(str(r.get("inicio_previsto", ""))[:10])
@@ -1720,8 +1725,8 @@ async def get_cronograma(
         # Risk score e velocity por atividade
         vel = {}
         if float(r.get("total_qty") or 0) > 0:
-            vel = _calc_velocity(r, hist_rows)
-        f["_risk_score"]    = _calc_risk_score(r, vel, today_d)
+            vel = _calc_velocity(r, hist_rows, working_days=_wd)
+        f["_risk_score"]    = _calc_risk_score(r, vel, today_d, working_days=_wd)
         f["_velocity"]      = vel.get("velocity_real", 0)
         f["_eac_date"]      = vel.get("eac_date")
         f["_trend"]         = vel.get("trend", "estavel")
@@ -1793,12 +1798,13 @@ async def update_atividade(
         "total_qty", "exec_qty", "unidade", "dias_planejados",
         "status_atividade", "fase_macro", "fase",
         "dep_tipo", "dependencia_id", "atividade", "parent_id",
+        "tipo_medicao", "nivel",
     }
     data = {k: v for k, v in body.items() if k in allowed}
     if not data:
         return {"ok": False, "error": "Nenhum campo válido para atualizar"}
 
-    _normalize_atividade_payload(data)
+    _normalize_atividade_payload(data, working_days=_get_working_days(body.get("contrato", ""), client_id))
     updated = sb_update("hub_atividades", filters={"id": atividade_id}, data=data, client_id=client_id)
     
     updated_dict = updated if isinstance(updated, dict) else {}
@@ -1830,8 +1836,8 @@ async def update_atividade(
     return {"ok": True, "row": updated_dict}
 
 
-def _normalize_atividade_payload(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Normaliza valores de enum antes de persistir no banco."""
+def _normalize_atividade_payload(data: Dict[str, Any], working_days: set = None) -> Dict[str, Any]:
+    """Normaliza valores de enum e garante campos calculados antes de persistir no banco."""
     # Frontend envia 'porcentagem', banco aceita 'percentual'
     if data.get("tipo_medicao") == "porcentagem":
         data["tipo_medicao"] = "percentual"
@@ -1846,6 +1852,15 @@ def _normalize_atividade_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         data["status_atividade"] = _status_map.get(
             str(data["status_atividade"]).lower(), data["status_atividade"]
         )
+    # Garante dias_planejados calculado a partir das datas quando não preenchido
+    # Cobre importações do Reflex e casos onde o frontend não recalculou
+    if not int(data.get("dias_planejados") or 0) and data.get("inicio_previsto") and data.get("termino_previsto"):
+        try:
+            d_ini = date.fromisoformat(str(data["inicio_previsto"])[:10])
+            d_ter = date.fromisoformat(str(data["termino_previsto"])[:10])
+            data["dias_planejados"] = max(1, _working_days_between(d_ini, d_ter + timedelta(days=1), working_days))
+        except (ValueError, TypeError):
+            pass
     return data
 
 
@@ -1856,7 +1871,7 @@ async def create_atividade(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     body["client_id"] = client_id
-    _normalize_atividade_payload(body)
+    _normalize_atividade_payload(body, working_days=_get_working_days(body.get("contrato", ""), client_id))
     row = sb_insert("hub_atividades", body, client_id=client_id)
     if row and row.get("parent_id"):
         _recalc_parent_dates(row["parent_id"], row.get("contrato", ""), client_id or "")
@@ -1904,6 +1919,7 @@ async def recalcular_datas(
         return {"ok": False, "error": "Contrato obrigatório"}
 
     rows = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=1000) or []
+    _wd_rec = _get_working_days(contrato, client_id)
 
     # Para cada atividade com dependencia_id: ajusta inicio baseado no término da dependência
     updated = 0
@@ -1917,31 +1933,42 @@ async def recalcular_datas(
         if not dep:
             continue
 
+        def _get_dias(r: dict) -> int:
+            d = int(r.get("dias_planejados") or 0)
+            if d == 0 and r.get("inicio_previsto") and r.get("termino_previsto"):
+                try:
+                    d_i = date.fromisoformat(str(r["inicio_previsto"])[:10])
+                    d_t = date.fromisoformat(str(r["termino_previsto"])[:10])
+                    d = max(1, _working_days_between(d_i, d_t + timedelta(days=1), _wd_rec))
+                except (ValueError, TypeError):
+                    d = 1
+            return d or 1
+
         if dep_tipo == "depende_termino" and dep.get("termino_previsto") and row.get("inicio_previsto"):
-            # início deve ser >= término da dependência (FS — Finish-to-Start)
             dep_ter = dep["termino_previsto"][:10]
             row_ini = row["inicio_previsto"][:10]
             if row_ini < dep_ter:
-                dias = int(row.get("dias_planejados") or 0)
+                dias = _get_dias(row)
                 new_ini = dep_ter
-                new_ter = _add_working_days(new_ini, dias) if dias > 0 else new_ini
+                new_ter = _add_working_days(new_ini, dias, _wd_rec)
                 sb_update("hub_atividades", filters={"id": row["id"]}, data={
                     "inicio_previsto": new_ini,
                     "termino_previsto": new_ter,
+                    "dias_planejados": dias,
                 }, client_id=client_id)
                 updated += 1
 
         elif dep_tipo == "depende_inicio" and dep.get("inicio_previsto") and row.get("inicio_previsto"):
-            # início deve ser >= início da dependência (SS — Start-to-Start)
             dep_ini = dep["inicio_previsto"][:10]
             row_ini = row["inicio_previsto"][:10]
             if row_ini < dep_ini:
-                dias = int(row.get("dias_planejados") or 0)
+                dias = _get_dias(row)
                 new_ini = dep_ini
-                new_ter = _add_working_days(new_ini, dias) if dias > 0 else new_ini
+                new_ter = _add_working_days(new_ini, dias, _wd_rec)
                 sb_update("hub_atividades", filters={"id": row["id"]}, data={
                     "inicio_previsto": new_ini,
                     "termino_previsto": new_ter,
+                    "dias_planejados": dias,
                 }, client_id=client_id)
                 updated += 1
 
@@ -1950,6 +1977,46 @@ async def recalcular_datas(
         cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
 
     return {"ok": True, "recalculadas": updated, "total": len(rows)}
+
+
+@router.post("/cronograma/fix-dias-planejados")
+async def fix_dias_planejados(
+    body: Dict[str, Any] = Body(...),
+    _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Corrige atividades com dias_planejados=0 calculando a partir das datas.
+    Roda uma vez para sanar dados importados do Reflex ou criados com bug."""
+    contrato = body.get("contrato", "")
+    filters: Dict[str, Any] = {}
+    if contrato:
+        filters["contrato"] = contrato
+    if client_id:
+        filters["client_id"] = client_id
+
+    rows = sb_select("hub_atividades", filters=filters, limit=5000, client_id=client_id) or []
+    _wd_cache: Dict[str, set] = {}
+    fixed = 0
+    for row in rows:
+        dias = int(row.get("dias_planejados") or 0)
+        if dias == 0 and row.get("inicio_previsto") and row.get("termino_previsto"):
+            try:
+                ct = row.get("contrato", contrato)
+                if ct not in _wd_cache:
+                    _wd_cache[ct] = _get_working_days(ct, client_id)
+                d_ini = date.fromisoformat(str(row["inicio_previsto"])[:10])
+                d_ter = date.fromisoformat(str(row["termino_previsto"])[:10])
+                novo_dias = max(1, _working_days_between(d_ini, d_ter + timedelta(days=1), _wd_cache[ct]))
+                sb_update("hub_atividades", filters={"id": row["id"]}, data={"dias_planejados": novo_dias}, client_id=client_id)
+                fixed += 1
+            except (ValueError, TypeError):
+                pass
+
+    if fixed > 0 and contrato:
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
+
+    return {"ok": True, "fixed": fixed, "total": len(rows)}
 
 
 # ── Aba: Auditoria ────────────────────────────────────────────────────────────
@@ -2052,6 +2119,24 @@ async def get_timeline(
         "entry_types": ENTRY_TYPES,
         "total": len(entries),
     }
+
+
+@router.post("/timeline/upload")
+async def upload_timeline_file(
+    file: UploadFile = File(...),
+    _user=Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Faz upload de anexo da timeline para diretório local e retorna URL."""
+    import uuid, os
+    upload_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".bin"
+    fname = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(upload_dir, fname)
+    content = await file.read()
+    with open(dest, "wb") as f:
+        f.write(content)
+    return {"ok": True, "url": f"/uploads/{fname}", "nome": file.filename or fname}
 
 
 @router.post("/timeline")

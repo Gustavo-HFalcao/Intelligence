@@ -28,8 +28,9 @@ export default function Usuarios() {
   const [roleForm, setRoleForm] = useState<Record<string,any>>({ modulos: [] })
   const qc = useQueryClient()
 
-  const { data: userData } = useQuery({ queryKey:['usuarios'], queryFn:()=>api('/api/usuarios') })
-  const { data: rolesData } = useQuery({ queryKey:['roles'], queryFn:()=>api('/api/usuarios/roles') })
+  const { data: userData }    = useQuery({ queryKey:['usuarios'],        queryFn:()=>api('/api/usuarios') })
+  const { data: rolesData }   = useQuery({ queryKey:['roles'],           queryFn:()=>api('/api/usuarios/roles') })
+  const { data: contratosData } = useQuery({ queryKey:['contratos-select'], queryFn:()=>api('/api/hub/contratos') })
 
   // User Mutations
   const createUserMut = useMutation({
@@ -63,6 +64,7 @@ export default function Usuarios() {
   const roles = rolesData?.roles ?? []
   const availableModules = rolesData?.modules ?? []
   const landingOptions = rolesData?.landing_options ?? []
+  const contratosList: any[] = contratosData?.contratos ?? []
 
   const toggleModule = (slug: string) => {
     setRoleForm(prev => {
@@ -151,20 +153,21 @@ export default function Usuarios() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                    <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Perfil Operacional (RBAC)</label>
-                   <select 
+                   <select
                     value={userForm.role || ''}
                     onChange={e => setUserForm(prev => ({...prev, role: e.target.value}))}
                     className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all appearance-none"
+                    style={{ colorScheme: 'dark' }}
                    >
-                     <option value="" className="bg-void text-white">Selecione um Perfil...</option>
+                     <option value="">Selecione um Perfil...</option>
                      {roles.map((r: any) => (
-                       <option key={r.id} value={r.nome} className="bg-void text-white">{r.nome}</option>
+                       <option key={r.id} value={r.nome}>{r.nome}</option>
                      ))}
                    </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
                    <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Nome Completo</label>
-                   <input 
+                   <input
                     value={userForm.nome || ''}
                     onChange={e => setUserForm(prev => ({...prev, nome: e.target.value}))}
                     className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
@@ -172,7 +175,7 @@ export default function Usuarios() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                    <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Email Corporativo</label>
-                   <input 
+                   <input
                     value={userForm.email || ''}
                     onChange={e => setUserForm(prev => ({...prev, email: e.target.value}))}
                     className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
@@ -180,11 +183,17 @@ export default function Usuarios() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                    <label className="text-[9px] font-black text-text-muted uppercase tracking-widest">Unidade / Contrato</label>
-                   <input 
+                   <select
                     value={userForm.contrato || ''}
                     onChange={e => setUserForm(prev => ({...prev, contrato: e.target.value}))}
-                    className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all"
-                   />
+                    className="bg-void/50 border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-copper outline-none transition-all appearance-none"
+                    style={{ colorScheme: 'dark' }}
+                   >
+                     <option value="">Selecione um Contrato...</option>
+                     {contratosList.map((c: any) => (
+                       <option key={c.contrato} value={c.contrato}>{c.projeto ? `${c.projeto} (${c.contrato})` : c.contrato}</option>
+                     ))}
+                   </select>
                 </div>
               </div>
 

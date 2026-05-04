@@ -32,6 +32,7 @@ interface WeatherData {
     windspeed: number;
     weathercode: number;
     rain: number;
+    rainProb: number;
   };
   forecast: any[];
 }
@@ -85,10 +86,14 @@ export default function LTDemo() {
   const [selectedElement, setSelectedElement] = useState<any>(null)
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null)
   const [weatherLoading, setWeatherLoading] = useState(false)
-  const [windyError, setWindyError] = useState(false)
   const [windyReady, setWindyReady] = useState(false)
-  const [activeLayer, setActiveLayer] = useState('wind')
+  const [fallbackMode, setFallbackMode] = useState(false)
+  const [activeLayer, setActiveLayer] = useState('rain')
   
+  // Controle da Timeline Customizada
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [playProgress, setPlayProgress] = useState(0) // 0 a 100%
+
   // Filter State
   const [filterStatus, setFilterStatus] = useState<string>('Todos')
   const [filterTeam, setFilterTeam] = useState<string>('Todas')
@@ -97,20 +102,21 @@ export default function LTDemo() {
   const leafletMap = useRef<any>(null)
   const windyStore = useRef<any>(null)
   const markersRef = useRef<any[]>([])
+  const rainLayerRef = useRef<any>(null)
 
-  // 1. Injetar Windy API
+  // 1. Carregar Leaflet + Windy API
   useEffect(() => {
-    const loadWindy = async () => {
-      if (!document.getElementById('windy-leaflet-css')) {
+    const loadScripts = async () => {
+      if (!document.getElementById('leaflet-css')) {
         const link = document.createElement('link')
-        link.id = 'windy-leaflet-css'
+        link.id = 'leaflet-css'
         link.rel = 'stylesheet'
         link.href = 'https://unpkg.com/leaflet@1.4.0/dist/leaflet.css'
         document.head.appendChild(link)
       }
-      if (!document.getElementById('windy-leaflet-js')) {
+      if (!document.getElementById('leaflet-js')) {
         const script = document.createElement('script')
-        script.id = 'windy-leaflet-js'
+        script.id = 'leaflet-js'
         script.src = 'https://unpkg.com/leaflet@1.4.0/dist/leaflet.js'
         document.head.appendChild(script)
         await new Promise(r => script.onload = r)
@@ -124,10 +130,10 @@ export default function LTDemo() {
       }
       setMapLoaded(true)
     }
-    loadWindy()
+    loadScripts()
   }, [])
 
-  // 2. Inicializar Windy API
+  // 2. Inicializar Windy API (base) + RainViewer (chuva overlay)
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || leafletMap.current) return
 
@@ -136,29 +142,51 @@ export default function LTDemo() {
       lat: -12.5,
       lon: -38.5,
       zoom: 7,
-    };
-
-    const errorTimer = setTimeout(() => {
-      if (!leafletMap.current) setWindyError(true)
-    }, 15000)
-
-    try {
-      (window as any).windyInit(options, (windyAPI: any) => {
-        clearTimeout(errorTimer)
-        setWindyError(false)
-        const { map, store } = windyAPI;
-        leafletMap.current = map;
-        windyStore.current = store;
-        setWindyReady(true);
-      });
-    } catch (e) {
-      clearTimeout(errorTimer)
-      setWindyError(true)
-      console.error("Erro ao inicializar Windy API", e)
     }
 
-    return () => clearTimeout(errorTimer)
+    let initialized = false
+
+    try {
+      ;(window as any).windyInit(options, (windyAPI: any) => {
+        initialized = true
+        const { map, store } = windyAPI
+        leafletMap.current = map
+        windyStore.current = store
+
+        try {
+          store.set('overlay', 'wind')
+          store.set('particles', true)
+        } catch {}
+
+        setWindyReady(true)
+
+        // Iniciar com camada de chuva via RainViewer
+        setTimeout(() => applyRainLayer(map), 800)
+      })
+    } catch (e) {
+      console.error('Windy init error', e)
+    }
+
+    // Fallback: se Windy falhar, inicializa Leaflet simples
+    setTimeout(() => {
+      if (!initialized && !leafletMap.current && mapRef.current) {
+        setFallbackMode(true)
+        const L = (window as any).L
+        const map = L.map(mapRef.current).setView([-12.5, -38.5], 7)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; CARTO',
+          maxZoom: 19,
+        }).addTo(map)
+        leafletMap.current = map
+        setWindyReady(true)
+        setTimeout(() => applyRainLayer(map), 500)
+      }
+    }, 4000)
+
   }, [mapLoaded])
+
+
+
 
   // Função Auxiliar: Renderizar Torres no Mapa
   const renderTowersOnMap = (towers: TowerData[]) => {
@@ -197,7 +225,7 @@ export default function LTDemo() {
 
     // Render Segmentos (Linha da LT)
     kmlData.segments.forEach(seg => {
-      const polyline = L.polyline(seg.coords, {
+      L.polyline(seg.coords, {
         color: 'rgba(255, 255, 255, 0.3)',
         weight: 2,
         dashArray: '5, 5',
@@ -206,10 +234,10 @@ export default function LTDemo() {
       }).addTo(map)
     })
 
-    // Zoom extent apenas na primeira carga
-    if (displayTowers.length === 0) {
+    // Zoom extent (fitBounds)
+    if (kmlData.towers.length > 0) {
       const bounds = L.latLngBounds()
-      kmlData.towers.forEach(t => bounds.extend(t.coords))
+      kmlData.towers.forEach((t: TowerData) => bounds.extend(t.coords))
       map.fitBounds(bounds, { padding: [50, 50] })
     }
 
@@ -224,12 +252,30 @@ export default function LTDemo() {
     setDisplayTowers(filtered)
   }, [kmlData, filterStatus, filterTeam])
 
-  // 4. Re-renderizar Torres quando displayTowers mudar
+  // Re-renderizar Torres quando displayTowers mudar
   useEffect(() => {
-    if (displayTowers.length > 0 || kmlData) {
+    if (displayTowers.length > 0 && windyReady) {
       renderTowersOnMap(displayTowers)
     }
-  }, [displayTowers])
+  }, [displayTowers, windyReady])
+
+  // Player de Previsão de Tempo (Anima o mapa via Windy timestamp)
+  useEffect(() => {
+    if (!isPlaying || !windyReady) return
+    const interval = setInterval(() => {
+      setPlayProgress(prev => {
+        const next = prev >= 100 ? 0 : prev + 2
+        const now = new Date().getTime()
+        const futureOffset = (next / 100) * (5 * 24 * 60 * 60 * 1000)
+        // Avança o timestamp no Windy se disponível
+        if (windyStore.current) {
+          try { windyStore.current.set('timestamp', now + futureOffset) } catch {}
+        }
+        return next
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isPlaying, windyReady])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -287,22 +333,25 @@ export default function LTDemo() {
   const fetchWeatherData = async (lat: number, lng: number) => {
     setWeatherLoading(true)
     try {
-      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&daily=temperature_2m_max,precipitation_sum,weathercode&timezone=auto`)
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,wind_speed_10m,precipitation,precipitation_probability,weather_code&daily=temperature_2m_max,precipitation_sum,precipitation_probability_max,windspeed_10m_max,weathercode&timezone=auto`)
       const data = await res.json()
       
       const forecast = data.daily.time.map((t: string, i: number) => ({
         date: t,
         tempMax: data.daily.temperature_2m_max[i],
         rain: data.daily.precipitation_sum[i],
-        code: data.daily.weathercode[i]
+        rainProb: data.daily.precipitation_probability_max[i],
+        code: data.daily.weathercode[i],
+        wind: data.daily.windspeed_10m_max[i]
       }))
 
       setWeatherData({
         current: {
-          temperature: data.current_weather.temperature,
-          windspeed: data.current_weather.windspeed,
-          weathercode: data.current_weather.weathercode,
-          rain: data.daily.precipitation_sum[0]
+          temperature: data.current.temperature_2m,
+          windspeed: data.current.wind_speed_10m,
+          weathercode: data.current.weather_code,
+          rain: data.current.precipitation,
+          rainProb: data.current.precipitation_probability
         },
         forecast
       })
@@ -323,10 +372,50 @@ export default function LTDemo() {
     }
   }
 
+  // Aplica tiles de radar RainViewer no mapa (grátis, radar real, cinza onde não chove)
+  const applyRainLayer = async (map?: any) => {
+    const L = (window as any).L;
+    const targetMap = map || leafletMap.current;
+    if (!L || !targetMap) return;
+
+    // Remove layer anterior se existir
+    if (rainLayerRef.current) {
+      targetMap.removeLayer(rainLayerRef.current);
+      rainLayerRef.current = null;
+    }
+
+    try {
+      const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+      const data = await res.json();
+      const latestPath = data?.radar?.past?.at(-1)?.path;
+      if (!latestPath) return;
+
+      const tileUrl = `https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`;
+      rainLayerRef.current = L.tileLayer(tileUrl, {
+        opacity: 0.85,
+        zIndex: 5,
+        maxZoom: 13,    // RainViewer não suporta zoom maior — evita "Not Supported"
+        maxNativeZoom: 13,
+      });
+      rainLayerRef.current.addTo(targetMap);
+    } catch (e) {
+      console.warn('RainViewer indisponível', e);
+    }
+  };
+
+  const removeRainLayer = () => {
+    if (rainLayerRef.current && leafletMap.current) {
+      leafletMap.current.removeLayer(rainLayerRef.current);
+      rainLayerRef.current = null;
+    }
+  };
+
   const handleLayerChange = (layer: string) => {
     setActiveLayer(layer)
-    if (windyStore.current) {
-      windyStore.current.set('overlay', layer)
+    if (layer === 'rain') {
+      applyRainLayer()
+    } else {
+      removeRainLayer()
     }
   }
 
@@ -386,6 +475,15 @@ export default function LTDemo() {
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+        /* Restaura estilos nativos do Windy sobrepostos pelo Tailwind Preflight */
+        #windy button, #windy select, #windy input,
+        #plugins button, #bottom button,
+        .windy-plugin button {
+          background-color: revert;
+          border: revert;
+          color: revert;
+        }
+        #bottom, #plugin-mobile-menu { z-index: 40 !important; }
       `}</style>
 
       {/* HEADER: COMMAND CENTER KPIs */}
@@ -439,6 +537,8 @@ export default function LTDemo() {
             <input type="file" accept=".kml,.xml" className="hidden" onChange={handleFileUpload} />
           </label>
         </div>
+
+
       </header>
 
       {/* Main Content Area */}
@@ -447,29 +547,6 @@ export default function LTDemo() {
         {/* Painel Lateral Esquerdo (Filtros & IA) */}
         {windyReady && kmlData && (
           <div className="absolute left-6 top-[94px] z-20 flex flex-col gap-4 w-[280px]">
-            {/* Camadas do Windy */}
-            <div className="bg-[#0a0f0e]/80 backdrop-blur-2xl border border-white/5 rounded-2xl p-2 flex gap-1 shadow-2xl">
-              {[
-                { id: 'wind', label: 'Vento', icon: Wind },
-                { id: 'rain', label: 'Chuva', icon: CloudRain },
-                { id: 'temp', label: 'Temp', icon: Thermometer },
-              ].map(layer => {
-                const Icon = layer.icon
-                const isActive = activeLayer === layer.id
-                return (
-                  <button
-                    key={layer.id}
-                    onClick={() => handleLayerChange(layer.id)}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl transition-all text-[10px] font-bold uppercase tracking-widest ${
-                      isActive ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <Icon size={12} />
-                    {layer.label}
-                  </button>
-                )
-              })}
-            </div>
 
             {/* Command Panel (Filtros e Insights) */}
             <div className="bg-[#0a0f0e]/80 backdrop-blur-2xl border border-copper/20 rounded-2xl p-4 shadow-[0_0_30px_rgba(201,139,42,0.1)] flex flex-col relative overflow-hidden">
@@ -532,28 +609,75 @@ export default function LTDemo() {
         )}
 
         {/* Mapa Container do Windy */}
-        <div id="windy" ref={mapRef} className="flex-1 h-full w-full bg-[#050808] z-0 absolute inset-0 pt-[70px]"></div>
+        <div id="windy" ref={mapRef} style={{ width: '100vw', height: 'calc(100vh - 70px)' }} className="z-0 absolute bottom-0 left-0"></div>
           
+        {/* Botões Flutuantes de Camadas */}
+        <div className={`absolute top-[94px] z-20 flex flex-col gap-2 pointer-events-auto transition-all duration-500 ease-in-out ${selectedElement ? 'right-[420px]' : 'right-6'}`}>
+          <button onClick={() => handleLayerChange('rain')} className={`p-3 rounded-xl border backdrop-blur-md transition-all flex items-center justify-center ${activeLayer === 'rain' ? 'bg-blue-500/20 border-blue-500 text-blue-400' : 'bg-[#0a0f0e]/80 border-white/10 text-white/50 hover:text-white'}`} title="Chuva e Vento">
+            <CloudRain size={20} />
+          </button>
+          <button onClick={() => handleLayerChange('temp')} className={`p-3 rounded-xl border backdrop-blur-md transition-all flex items-center justify-center ${activeLayer === 'temp' ? 'bg-copper/20 border-copper text-copper' : 'bg-[#0a0f0e]/80 border-white/10 text-white/50 hover:text-white'}`} title="Temperatura">
+            <Thermometer size={20} />
+          </button>
+        </div>
+
+        {/* Custom Premium Timeline (Substitui a nativa bloqueada pela API JS) */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-4xl bg-[#0a0f0e]/90 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center p-3 shadow-2xl pointer-events-auto">
+          <button 
+            onClick={() => setIsPlaying(!isPlaying)}
+            className={`w-12 h-12 rounded-xl border flex items-center justify-center transition-colors shrink-0 ${isPlaying ? 'bg-copper border-copper text-black shadow-[0_0_15px_rgba(201,139,42,0.5)]' : 'bg-copper/20 border-copper/50 text-copper hover:bg-copper hover:text-black'}`}
+          >
+            {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} className="ml-1" fill="currentColor" />}
+          </button>
+          <div className="flex-1 mx-6 flex flex-col justify-center">
+            <div className="flex justify-between text-[10px] text-white/50 font-bold uppercase tracking-widest mb-2 relative">
+              <span className={playProgress < 20 ? "text-copper" : ""}>Hoje</span>
+              <span className={playProgress >= 20 && playProgress < 40 ? "text-copper" : ""}>Amanhã</span>
+              <span className={playProgress >= 40 && playProgress < 60 ? "text-copper" : ""}>Sexta</span>
+              <span className={playProgress >= 60 && playProgress < 80 ? "text-copper" : ""}>Sábado</span>
+              <span className={playProgress >= 80 ? "text-copper" : ""}>Domingo</span>
+            </div>
+            <div className="w-full h-1.5 bg-white/10 rounded-full relative overflow-hidden">
+              <div 
+                className="absolute top-0 left-0 h-full bg-gradient-to-r from-copper/50 to-copper rounded-full transition-all duration-1000 ease-linear"
+                style={{ width: `${playProgress}%` }}
+              ></div>
+            </div>
+          </div>
+          <div className="shrink-0 flex items-center gap-3 border-l border-white/10 pl-6">
+            <div className="flex flex-col items-end">
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Legenda {activeLayer}</span>
+              <div className="flex gap-1 mt-1">
+                {activeLayer === 'rain' ? (
+                  <>
+                    <div className="w-4 h-2 rounded-sm bg-blue-300/30" title="1.5 mm"></div>
+                    <div className="w-4 h-2 rounded-sm bg-blue-400/60" title="3 mm"></div>
+                    <div className="w-4 h-2 rounded-sm bg-blue-500" title="10 mm"></div>
+                    <div className="w-4 h-2 rounded-sm bg-purple-500" title="30+ mm"></div>
+                  </>
+                ) : activeLayer === 'wind' ? (
+                  <>
+                    <div className="w-4 h-2 rounded-sm bg-green-500/40" title="10 kt"></div>
+                    <div className="w-4 h-2 rounded-sm bg-yellow-400" title="20 kt"></div>
+                    <div className="w-4 h-2 rounded-sm bg-orange-500" title="30 kt"></div>
+                    <div className="w-4 h-2 rounded-sm bg-red-600" title="40+ kt"></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-4 h-2 rounded-sm bg-blue-400" title="15°C"></div>
+                    <div className="w-4 h-2 rounded-sm bg-green-400" title="22°C"></div>
+                    <div className="w-4 h-2 rounded-sm bg-yellow-400" title="28°C"></div>
+                    <div className="w-4 h-2 rounded-sm bg-red-500" title="35°C+"></div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Overlays posicionados por cima do mapa */}
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center pt-[70px]">
-          {windyError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#050808]/95 backdrop-blur-md z-50 pointer-events-auto">
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center max-w-lg text-center p-8 border border-red-500/20 bg-red-500/5 rounded-3xl relative">
-                <button onClick={() => setWindyError(false)} className="absolute top-4 right-4 p-2 text-white/40 hover:text-white bg-white/5 rounded-full transition-colors">
-                  <X size={16} />
-                </button>
-                <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-6">
-                  <ShieldAlert size={32} className="text-red-400" />
-                </div>
-                <h2 className="text-xl font-black uppercase tracking-widest mb-2 text-white">Aviso de Conexão Windy</h2>
-                <p className="text-sm text-white/60 leading-relaxed mb-6">
-                  Rate Limit: Aguarde uns segundos e tente novamente.
-                </p>
-              </motion.div>
-            </div>
-          )}
-
-          {!kmlData && !loading && !windyError && (
+          {!kmlData && !loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#050808]/60 backdrop-blur-sm pointer-events-none">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center max-w-md text-center p-8 border border-white/5 bg-white/[0.02] rounded-3xl">
                 <div className="w-16 h-16 rounded-2xl bg-copper/10 border border-copper/20 flex items-center justify-center mb-6">
@@ -657,6 +781,21 @@ export default function LTDemo() {
                           <div className="text-sm font-black">{weatherData.current.windspeed} <span className="text-[9px] text-white/50">km/h</span></div>
                         </div>
                       </div>
+                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-3 flex items-center gap-3 col-span-2">
+                        <Droplets size={14} className="text-blue-400" />
+                        <div className="flex-1 flex items-center justify-between">
+                          <div>
+                            <div className="text-[8px] text-white/40 font-bold uppercase tracking-widest" title="Soma total de precipitação prevista para as 24h do dia">Acumulado Diário</div>
+                            <div className="text-sm font-black flex items-end gap-1">
+                              {weatherData.current.rain} <span className="text-[9px] text-white/50 mb-0.5">mm</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[8px] text-white/40 font-bold uppercase tracking-widest">Probabilidade</div>
+                            <div className="text-sm font-black text-blue-400">{weatherData.current.rainProb}%</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Janela Operacional IA */}
@@ -688,19 +827,36 @@ export default function LTDemo() {
 
                     {/* Mini Forecast */}
                     <div className="pt-2">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Calendar size={12} className="text-teal-400" />
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Previsão 5 Dias</h4>
+                      </div>
                       <div className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden divide-y divide-white/5">
-                        {weatherData.forecast.slice(0, 4).map((f: any, i: number) => {
+                        {weatherData.forecast.slice(0, 5).map((f: any, i: number) => {
                           const d = new Date(f.date)
                           const dayName = i === 0 ? 'Hoje' : d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')
                           return (
                             <div key={i} className={`flex items-center justify-between p-2.5 ${i === 0 ? 'bg-white/5' : ''}`}>
                               <div className="w-12 text-[10px] font-bold uppercase text-white/80">{dayName}</div>
-                              <div className="flex items-center gap-1.5 text-right">
-                                <Droplets size={10} className={f.rain > 0 ? "text-blue-400" : "text-white/20"} />
-                                <span className="text-[10px] text-white/60 font-mono w-8">{f.rain.toFixed(1)}</span>
+                              
+                              {/* Chuva em mm + Probabilidade */}
+                              <div className="flex flex-col gap-0.5 w-16">
+                                <div className="flex items-center gap-1.5">
+                                  <Droplets size={10} className={f.rain > 0 ? "text-blue-400" : "text-white/20"} />
+                                  <span className="text-[10px] text-white/60 font-mono">{f.rain.toFixed(1)} <span className="text-[8px] text-white/30">mm</span></span>
+                                </div>
+                                <span className="text-[8px] text-blue-400/80 font-bold pl-4">{f.rainProb}% prob.</span>
                               </div>
-                              <div className="flex items-center gap-1.5 justify-end">
-                                <span className="text-[11px] font-bold">{Math.round(f.tempMax)}°</span>
+
+                              {/* Vento em km/h */}
+                              <div className="flex items-center gap-1.5 w-16">
+                                <Wind size={10} className="text-teal-400" />
+                                <span className="text-[10px] text-white/60 font-mono">{Math.round(f.wind)} <span className="text-[8px] text-white/30">km/h</span></span>
+                              </div>
+
+                              {/* Temperatura */}
+                              <div className="flex items-center gap-1.5 justify-end w-8">
+                                <span className="text-[11px] font-bold text-copper">{Math.round(f.tempMax)}°</span>
                               </div>
                             </div>
                           )

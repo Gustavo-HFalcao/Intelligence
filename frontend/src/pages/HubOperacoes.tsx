@@ -1085,11 +1085,14 @@ function ProdutividadeSection({ allRows }: { allRows: any[] }) {
             )}
             {filtered.map((a: any) => {
               const pct = Number(a.conclusao_pct || 0)
-              const diasPlan = Number(a.dias_planejados || 0)
               const ini = a.inicio_previsto?.slice(0, 10)
               const ter = a.termino_previsto?.slice(0, 10)
+              // Fallback: calcula dias pelo intervalo de datas quando diasPlan não foi salvo
+              const diasPlanDB = Number(a.dias_planejados || 0)
+              const diasPlan = diasPlanDB > 0 ? diasPlanDB
+                : (ini && ter ? Math.max(1, Math.round((new Date(ter).getTime() - new Date(ini).getTime()) / 86400000) + 1) : 0)
               const daysElapsed = ini ? Math.max(0, Math.ceil((new Date(today).getTime() - new Date(ini).getTime()) / 86400000)) : 0
-              const dayText = ini && ter ? `Dia ${Math.min(daysElapsed + 1, diasPlan)} de ${diasPlan}` : '—'
+              const dayText = ini && ter && diasPlan > 0 ? `Dia ${Math.min(daysElapsed + 1, diasPlan)} de ${diasPlan}` : '—'
 
               const totalQty = Number(a.total_qty || 0)
               const execQty = Number(a.exec_qty || 0)
@@ -1575,7 +1578,7 @@ function TimelineTab({ contrato }: { contrato: string }) {
 
   const { data: usersData } = useQuery({
     queryKey: ['hub-users'],
-    queryFn: () => api.get('/users').then(r => r.data),
+    queryFn: () => api.get('/usuarios').then(r => r.data),
     staleTime: Infinity,
   })
   const userList: any[] = usersData?.users ?? []
