@@ -1715,9 +1715,9 @@ async def get_cronograma(
                     if ter_d and ter_d < ref_d and pct < 100:
                         if ini_d <= ref_d:
                             st = "atrasada"
-                elif ini_d <= today_d:
+                elif ini_d <= ref_d:
                     st = "em_execucao"
-                    if ter_d and ter_d < today_d:
+                    if ter_d and ter_d < ref_d:
                         st = "atrasada"
             except: pass
         f["status"] = st
@@ -1726,7 +1726,7 @@ async def get_cronograma(
         vel = {}
         if float(r.get("total_qty") or 0) > 0:
             vel = _calc_velocity(r, hist_rows, working_days=_wd)
-        f["_risk_score"]    = _calc_risk_score(r, vel, today_d, working_days=_wd)
+        f["_risk_score"]    = _calc_risk_score(r, vel, ref_d, working_days=_wd)
         f["_velocity"]      = vel.get("velocity_real", 0)
         f["_eac_date"]      = vel.get("eac_date")
         f["_trend"]         = vel.get("trend", "estavel")
@@ -1779,6 +1779,8 @@ async def get_cronograma(
         "gantt": gantt,
         "total": len(atividades),
         "kpis": kpis_cron,
+        "last_rdo_d": last_rdo_d.isoformat() if last_rdo_d else None,
+        "ref_d": ref_d.isoformat(),
     }
     cache_set(client_id or "global", cache_key, result, ttl=_CRONOGRAMA_TTL)
     return result

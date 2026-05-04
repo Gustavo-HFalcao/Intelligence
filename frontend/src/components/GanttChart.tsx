@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef } from 'react'
-import { format, differenceInDays, addDays, eachDayOfInterval, isWeekend, isSameDay, isToday } from 'date-fns'
+import { format, differenceInDays, addDays, eachDayOfInterval, isWeekend, isSameDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { AlertTriangle, CheckCircle, Clock, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 
@@ -19,6 +19,7 @@ interface GanttRow {
 
 interface GanttChartProps {
   data: GanttRow[]
+  referenceDate?: string
 }
 
 // Layout constants
@@ -61,9 +62,12 @@ interface TooltipState {
   desvio: number
 }
 
-export default function GanttChart({ data }: GanttChartProps) {
+export default function GanttChart({ data, referenceDate }: GanttChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+
+  // Use last_rdo_d as reference date when provided; fall back to real today only if absent
+  const refToday = referenceDate ? (safeDate(referenceDate) ?? new Date()) : new Date()
 
   // Filter rows with valid dates
   const validData = useMemo(() =>
@@ -76,7 +80,7 @@ export default function GanttChart({ data }: GanttChartProps) {
 
   // Compute timeline range
   const { startDate, daysCount, timelineDays } = useMemo(() => {
-    const today = new Date()
+    const today = refToday
     if (validData.length === 0) {
       const end = addDays(today, 30)
       return { startDate: today, daysCount: 31, timelineDays: eachDayOfInterval({ start: today, end }) }
@@ -129,7 +133,7 @@ export default function GanttChart({ data }: GanttChartProps) {
 
   const chartW  = daysCount * DAY_W
   const bodyH   = validData.length * ROW_HEIGHT
-  const todayX  = differenceInDays(new Date(), startDate) * DAY_W + DAY_W / 2
+  const todayX  = differenceInDays(refToday, startDate) * DAY_W + DAY_W / 2
 
   function handleMouseMove(e: React.MouseEvent, row: GanttRow, _rowIdx: number) {
     if (!containerRef.current) return
@@ -140,7 +144,7 @@ export default function GanttChart({ data }: GanttChartProps) {
     const e_real = safeDate(row.forecast_end ?? null) ?? e_plan
     const pct    = Math.min(100, Math.max(0, parseInt(row.pct) || 0))
     const isCrit = isCriticoFlag(row.critico)
-    const today  = new Date()
+    const today  = refToday
     const planned_days = differenceInDays(e_plan, s_plan) + 1
     const elapsed      = Math.max(0, differenceInDays(today, s_plan))
     const pct_esperado = planned_days > 0 ? Math.min(100, Math.round(elapsed / planned_days * 100)) : 0
@@ -304,7 +308,7 @@ export default function GanttChart({ data }: GanttChartProps) {
               <div style={{ display: 'flex', height: 36 }}>
                 {timelineDays.map((day: Date, i: number) => {
                   const weekend = isWeekend(day)
-                  const todayDay = isToday(day)
+                  const todayDay = isSameDay(day, refToday)
                   return (
                     <div key={i} style={{
                       width: DAY_W, flexShrink: 0, height: '100%',
@@ -407,7 +411,7 @@ export default function GanttChart({ data }: GanttChartProps) {
               {/* Vertical grid lines */}
               {timelineDays.map((day: Date, i: number) => {
                 const weekend = isWeekend(day)
-                const todayDay = isToday(day)
+                const todayDay = isSameDay(day, refToday)
                 if (!weekend && !todayDay && i % 7 !== 0) return null
                 return (
                   <div key={i} style={{
@@ -455,7 +459,7 @@ export default function GanttChart({ data }: GanttChartProps) {
                 const rowTop   = i * ROW_HEIGHT
 
                 const hasDelay = differenceInDays(e_real, e_plan) > 0
-                const isLate   = new Date() > e_plan && pct < 100
+                const isLate   = refToday > e_plan && pct < 100
 
                 return (
                   <div

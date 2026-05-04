@@ -746,9 +746,9 @@ function CronMenuBar({ allRows, kpisData, onCreateMacro, onImportIA, onRecalcula
 }
 
 // Popup de detalhe ao clicar num KPI
-function KpiDetailDialog({ type, activities, prefiltered, isOpen, onClose }: any) {
+function KpiDetailDialog({ type, activities, prefiltered, isOpen, onClose, refDate }: any) {
   if (!isOpen) return null
-  const today = new Date().toISOString().slice(0, 10)
+  const today = refDate || new Date().toISOString().slice(0, 10)
 
   const filtered = useMemo(() => {
     if (prefiltered) return prefiltered
@@ -950,8 +950,8 @@ function AtivRow({
 }
 
 // Seção Previsto vs Realizado do Dia
-function PrevistoRealizadoSection({ allRows, onKpiClick }: { allRows: any[]; onKpiClick: (t: string, rows: any[]) => void }) {
-  const today = new Date().toISOString().slice(0, 10)
+function PrevistoRealizadoSection({ allRows, refDate, onKpiClick }: { allRows: any[]; refDate?: string; onKpiClick: (t: string, rows: any[]) => void }) {
+  const today = refDate || new Date().toISOString().slice(0, 10)
 
   const { programadasHoje, realizadasHoje, atrasadas, emRisco, adiantadas } = useMemo(() => {
     // Apenas micros/subs na listagem do dia (macros são fruto das filhas)
@@ -1015,9 +1015,9 @@ function PrevistoRealizadoSection({ allRows, onKpiClick }: { allRows: any[]; onK
 }
 
 // Seção Produtividade & Forecast
-function ProdutividadeSection({ allRows }: { allRows: any[] }) {
+function ProdutividadeSection({ allRows, refDate }: { allRows: any[]; refDate?: string }) {
   const [filter, setFilter] = useState<'execucao' | 'concluidas' | 'previstas'>('execucao')
-  const today = new Date().toISOString().slice(0, 10)
+  const today = refDate || new Date().toISOString().slice(0, 10)
 
   // Apenas folhas (sem filhos) — macros são agrupamentos, não unidades mensuráveis
   const folhas = useMemo(() => allRows.filter(a => !allRows.some(b => b.parent_id === a.id)), [allRows])
@@ -1186,6 +1186,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
 
   const allRows: any[] = data?.atividades || []
   const ganttRows: any[] = data?.gantt || []
+  const refDate: string = data?.ref_d || new Date().toISOString().slice(0, 10)
 
   // Hierarquia: macros (sem parent), micros (parent = macro), subs (parent = micro)
   const macros = useMemo(() => allRows.filter(a => !a.parent_id), [allRows])
@@ -1369,7 +1370,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
             </h3>
           </div>
           <div className="p-2">
-            <GanttChart data={ganttRows.map((r: any) => ({
+            <GanttChart referenceDate={refDate} data={ganttRows.map((r: any) => ({
               label:        r.label,
               start_iso:    r.start_iso,
               end_iso:      r.end_iso,
@@ -1386,10 +1387,10 @@ function CronogramaTab({ contrato }: { contrato: string }) {
       )}
 
       {/* 4 — Previsto vs Realizado do Dia */}
-      <PrevistoRealizadoSection allRows={allRows} onKpiClick={(t, rows) => { setKpiDialogType(t); setKpiDialogRows(rows) }} />
+      <PrevistoRealizadoSection allRows={allRows} refDate={refDate} onKpiClick={(t, rows) => { setKpiDialogType(t); setKpiDialogRows(rows) }} />
 
       {/* 5 — Produtividade & Forecast */}
-      <ProdutividadeSection allRows={allRows} />
+      <ProdutividadeSection allRows={allRows} refDate={refDate} />
 
       {/* Legenda */}
       <div className="flex flex-wrap items-center gap-4 px-4 py-3 bg-white/[0.02] border border-white/5 rounded-2xl">
@@ -1420,6 +1421,7 @@ function CronogramaTab({ contrato }: { contrato: string }) {
             prefiltered={kpiDialogRows}
             isOpen={!!kpiDialogType}
             onClose={() => { setKpiDialogType(null); setKpiDialogRows(null) }}
+            refDate={refDate}
           />
         )}
       </AnimatePresence>
