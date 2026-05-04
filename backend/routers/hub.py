@@ -1621,14 +1621,22 @@ async def get_visao_geral(
         final_insights = _rule_based_insights(ativ_para_calc, rdos, today)
 
     # Nota de risco baseada em SPI e atividades atrasadas
-    atrasadas_count = sum(1 for a in ativ_para_calc if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < today.isoformat() and float(a.get("conclusao_pct") or 0) < 100)
-    risco_nota = round(min(10, max(0, (1 - kpis["spi"]) * 5 + atrasadas_count * 1.5)), 1)
+    ref_d_vg = last_rdo_date if last_rdo_date else today
+    atrasadas_count = sum(1 for a in ativ_para_calc if a.get("termino_previsto") and str(a["termino_previsto"])[:10] < ref_d_vg.isoformat() and float(a.get("conclusao_pct") or 0) < 100)
+    spi_val = kpis["spi"]
+    f_spi = round(min(10, max(0, (1 - spi_val) * 10)), 1)
+    f_atras = round(min(10, atrasadas_count * 1.5), 1)
+    risco_nota = round(min(10, max(0, f_spi * 0.6 + f_atras * 0.4)), 1)
     if risco_nota >= 7:
         risco_label, risco_color = "CRÍTICO", "#EF4444"
     elif risco_nota >= 4:
         risco_label, risco_color = "MODERADO", "#C98B2A"
     else:
         risco_label, risco_color = "CONTROLADO", "#2A9D8F"
+    risco_criterios = [
+        {"nome": "Desvio de Cronograma (SPI)", "nota": f_spi,  "peso": "60%"},
+        {"nome": "Atividades Atrasadas",        "nota": f_atras, "peso": "40%"},
+    ]
 
     return {
         "contrato_info": contrato_info,
@@ -1646,7 +1654,7 @@ async def get_visao_geral(
         "temperatura": temperatura,
         "clima_resumido": clima_resumido,
         "insights": final_insights,
-        "risk": {"nota": str(risco_nota), "label": risco_label, "color": risco_color},
+        "risk": {"nota": str(risco_nota), "label": risco_label, "color": risco_color, "criterios": risco_criterios},
     }
 
 
@@ -2301,9 +2309,25 @@ async def get_hub_dashboard(
             if d_key and len(d_key) == 10:
                 by_day_hist[d_key] += float(h.get("producao_dia") or 0)
 
-        # Previsto por dia: média da produção planejada das atividades ativas naquele período
-        # Simplificado: usamos a meta diária do cronograma (total_qty / dias_planejados)
-        ativ_com_qty = [a for a in valid.to_dict("records") if float(a.get("total_qty", 0) or 0) > 0 and int(a.get("dias_planejados", 0) or 0) > 0]
+        # Previsto por dia: meta diária = total_qty / dias_planejados
+        # Auto-computa dias_planejados a partir das datas quando está zerado no DB
+        _wd_dash_prod = _get_working_days(contrato, client_id)
+        ativ_com_qty = []
+        for _a in valid.to_dict("records"):
+            if not (float(_a.get("total_qty", 0) or 0) > 0):
+                continue
+            _dp = int(_a.get("dias_planejados", 0) or 0)
+            if _dp == 0:
+                _ini = str(_a.get("inicio_previsto") or "")[:10]
+                _ter = str(_a.get("termino_previsto") or "")[:10]
+                if _ini and _ter:
+                    try:
+                        _dp = max(1, _working_days_between(date.fromisoformat(_ini), date.fromisoformat(_ter) + timedelta(days=1), _wd_dash_prod))
+                    except Exception:
+                        pass
+            if _dp > 0:
+                _a2 = dict(_a); _a2["dias_planejados"] = _dp
+                ativ_com_qty.append(_a2)
 
         for d_key in sorted(by_day_hist.keys())[-14:]:
             try:

@@ -1614,7 +1614,7 @@ function TimelineTab({ contrato }: { contrato: string }) {
       if (anexo) {
         const fd = new FormData()
         fd.append('file', anexo)
-        const r = await api.post('/hub/timeline/upload', fd)
+        const r = await api.post('/hub/timeline/upload', fd, { headers: { 'Content-Type': undefined } })
         anexo_url  = r.data.url  ?? ''
         anexo_nome = r.data.nome ?? anexo.name
       }
