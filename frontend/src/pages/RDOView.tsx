@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ClipboardList, MapPin, Camera, Sparkles, AlertTriangle, CheckCircle } from 'lucide-react'
+import { useState } from 'react'
+import { ClipboardList, MapPin, Camera, Sparkles, AlertTriangle, CheckCircle, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const COPPER = '#C98B2A'
 const TEAL   = '#2A9D8F'
@@ -43,8 +44,60 @@ function InsightPill({ priority, title, body }: { priority: string; title: strin
   )
 }
 
+function PhotoLightbox({ imgs, idx, onClose, onPrev, onNext }: {
+  imgs: any[]; idx: number; onClose: () => void; onPrev: () => void; onNext: () => void
+}) {
+  const img = imgs[idx]
+  if (!img) return null
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.95)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+    >
+      {/* toolbar */}
+      <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'rgba(0,0,0,0.6)' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#e2c87a' }}>{img.legenda || 'Evidência'}</div>
+          {img.address && <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>📍 {img.address}</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <a href={img.foto_url} download target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: COPPER, color: '#fff', borderRadius: 6, textDecoration: 'none', fontSize: 11, fontWeight: 700 }}>
+            <Download size={12} /> Baixar
+          </a>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+      </div>
+      {/* image */}
+      <img
+        src={img.foto_url}
+        alt={img.legenda || ''}
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 4 }}
+      />
+      {/* nav */}
+      {idx > 0 && (
+        <button onClick={e => { e.stopPropagation(); onPrev() }}
+          style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', width: 40, height: 40, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronLeft size={20} />
+        </button>
+      )}
+      {idx < imgs.length - 1 && (
+        <button onClick={e => { e.stopPropagation(); onNext() }}
+          style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', width: 40, height: 40, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronRight size={20} />
+        </button>
+      )}
+      <div style={{ position: 'absolute', bottom: 16, fontSize: 11, color: '#555' }}>{idx + 1} / {imgs.length}</div>
+    </div>
+  )
+}
+
 export default function RDOView() {
   const { token } = useParams<{ token: string }>()
+  const [lbIdx, setLbIdx] = useState<number | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['rdo-view', token],
@@ -166,23 +219,60 @@ export default function RDOView() {
           <h3 style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.2em', display: 'flex', alignItems: 'center', gap: 6 }}>
             <CheckCircle size={12} style={{ color: COPPER }} /> Atividades Executadas
           </h3>
-          {ats.map((a: any) => (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)', background: GLASS, borderRadius: 8, marginBottom: 4 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, color: '#e2c87a', fontWeight: 600 }}>{a.descricao}</div>
-                {(a.qtd_executada || a.unidade) && (
-                  <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
-                    {a.qtd_executada} {a.unidade}
+          {ats.map((a: any) => {
+            const prodPct: number | null = a.prod_pct ?? null
+            const prodColor = prodPct === null ? '#666' : prodPct >= 100 ? TEAL : prodPct >= 70 ? COPPER : RED
+            const prodLabel = prodPct === null ? null : prodPct >= 100 ? 'Acima do plano' : prodPct >= 70 ? 'No ritmo' : 'Abaixo do plano'
+            const hasProdQty = a.total_qty > 0 && a.exec_qty !== undefined
+            return (
+              <div key={a.id} style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)', background: GLASS, borderRadius: 8, marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, color: '#e2c87a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {a.descricao}
+                      {a.critico && <span style={{ fontSize: 9, fontWeight: 800, color: RED, background: `${RED}15`, padding: '1px 6px', borderRadius: 4 }}>CRÍTICO</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                      {hasProdQty && (
+                        <span style={{ fontSize: 10, color: '#555', fontFamily: 'monospace' }}>
+                          {a.exec_qty?.toFixed(0)} / {a.total_qty?.toFixed(0)} {a.unidade}
+                        </span>
+                      )}
+                      {prodLabel && (
+                        <span style={{ fontSize: 10, color: prodColor, fontWeight: 700 }}>
+                          {prodPct}% do plano — {prodLabel}
+                        </span>
+                      )}
+                      {a.termino_previsto && (
+                        <span style={{ fontSize: 10, color: '#555' }}>
+                          📅 Prazo: {a.termino_previsto}
+                        </span>
+                      )}
+                    </div>
+                    {a.status && <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{a.status}</div>}
                   </div>
-                )}
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: 14, color: COPPER, fontWeight: 700 }}>{a.pct}%</div>
+                    {a.pct_esperado !== undefined && a.pct_esperado !== null && (
+                      <div style={{ fontSize: 9, color: '#555', marginTop: 1 }}>esp. {a.pct_esperado}%</div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: 13, color: COPPER, fontWeight: 700 }}>{a.pct}%</div>
-                <div style={{ fontSize: 10, color: '#555' }}>{a.status}</div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
+      )}
+
+      {/* Lightbox */}
+      {lbIdx !== null && (
+        <PhotoLightbox
+          imgs={evs}
+          idx={lbIdx}
+          onClose={() => setLbIdx(null)}
+          onPrev={() => setLbIdx(i => (i !== null && i > 0 ? i - 1 : i))}
+          onNext={() => setLbIdx(i => (i !== null && i < evs.length - 1 ? i + 1 : i))}
+        />
       )}
 
       {/* Evidências */}
@@ -191,10 +281,14 @@ export default function RDOView() {
           <h3 style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.2em', display: 'flex', gap: 6, alignItems: 'center' }}>
             <Camera size={12} style={{ color: COPPER }} /> Evidências Fotográficas
           </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-            {evs.map((e: any) => (
-              <div key={e.id} style={{ borderRadius: 10, overflow: 'hidden', background: GLASS, border: BORDER }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+            {evs.map((e: any, idx: number) => (
+              <div key={e.id} onClick={() => setLbIdx(idx)}
+                style={{ borderRadius: 10, overflow: 'hidden', background: GLASS, border: BORDER, cursor: 'zoom-in', position: 'relative' }}>
                 <img src={e.foto_url} alt={e.legenda || ''} style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', display: 'block' }} />
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0)', transition: 'background 0.2s' }}
+                  onMouseEnter={ev => (ev.currentTarget.style.background = 'rgba(0,0,0,0.25)')}
+                  onMouseLeave={ev => (ev.currentTarget.style.background = 'rgba(0,0,0,0)')} />
                 {(e.legenda || e.address) && (
                   <div style={{ padding: '8px 10px' }}>
                     {e.legenda && <div style={{ fontSize: 11, color: '#888' }}>{e.legenda}</div>}

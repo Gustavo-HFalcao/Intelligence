@@ -133,7 +133,7 @@ export default function GanttChart({ data, referenceDate }: GanttChartProps) {
 
   const chartW  = daysCount * DAY_W
   const bodyH   = validData.length * ROW_HEIGHT
-  const todayX  = differenceInDays(refToday, startDate) * DAY_W + DAY_W / 2
+  const todayX  = differenceInDays(refToday, startDate) * DAY_W + DAY_W
 
   function handleMouseMove(e: React.MouseEvent, row: GanttRow, _rowIdx: number) {
     if (!containerRef.current) return

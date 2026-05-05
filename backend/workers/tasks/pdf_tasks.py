@@ -278,7 +278,7 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
         elif local_path:
             logger.warning(f"PDF storage upload falhou — PDF disponível localmente: {local_path}")
 
-        return {"ok": bool(pdf_bytes), "pdf_url": pdf_url, "pdf_path": local_path}
+        return {"ok": bool(pdf_bytes), "pdf_url": pdf_url, "pdf_path": local_path, "pdf_bytes": pdf_bytes}
 
     except Exception as e:
         logger.error(f"generate_rdo_pdf error: {e}")

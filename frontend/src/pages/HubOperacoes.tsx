@@ -1096,10 +1096,15 @@ function ProdutividadeSection({ allRows, refDate }: { allRows: any[]; refDate?: 
 
               const totalQty = Number(a.total_qty || 0)
               const execQty = Number(a.exec_qty || 0)
-              // Usa valores calculados pelo backend (dias úteis) — fallback local se ausente
               const prodPlan = Number(a._prod_plan) || (diasPlan > 0 && totalQty > 0 ? totalQty / diasPlan : 0)
               const prodReal = Number(a._prod_real) || 0
-              const prodPct = prodPlan > 0 && execQty > 0 ? Math.round((prodReal / prodPlan) * 100) : null
+              // Acumulado planejado até hoje: total_qty × % esperado pelo backend (dias úteis)
+              const pctEsperado = Number(a._pct_esperado || 0)
+              const cumPlan = totalQty > 0 && pctEsperado > 0 ? totalQty * pctEsperado / 100 : 0
+              // prodPct: compara acumulado real vs acumulado planejado se tiver qty; senão usa taxa diária
+              const prodPct = cumPlan > 0
+                ? Math.round(execQty / cumPlan * 100)
+                : (prodPlan > 0 && prodReal > 0 ? Math.round(prodReal / prodPlan * 100) : null)
 
               const tendCfg = TENDENCIA_CONFIG[a._tendencia || 'sem_dados'] || TENDENCIA_CONFIG.sem_dados
 
@@ -1125,7 +1130,9 @@ function ProdutividadeSection({ allRows, refDate }: { allRows: any[]; refDate?: 
                           {prodPct}% do planejado
                         </span>
                         <div className="text-[9px] text-text-muted font-mono mt-0.5">
-                          {prodReal.toFixed(1)} / {prodPlan.toFixed(1)} {a.unidade}/dia
+                          {cumPlan > 0
+                            ? `${execQty.toFixed(0)} / ${cumPlan.toFixed(0)} ${a.unidade} acum.`
+                            : `${prodReal.toFixed(1)} / ${prodPlan.toFixed(1)} ${a.unidade}/dia`}
                         </div>
                       </div>
                     ) : totalQty > 0 ? (

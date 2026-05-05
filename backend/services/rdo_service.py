@@ -158,18 +158,18 @@ def apply_watermark(img_bytes: bytes, meta: Dict[str, Any], content_type: str = 
         W, H = img.size
 
         # ── dimensions ─────────────────────────────────────────────────────
-        strip_h  = max(80, int(H * 0.20))   # overlay strip height
-        map_w    = int(W * 0.28)
+        strip_h  = max(56, int(H * 0.13))   # strip fino — não obstrui imagem
+        map_w    = int(W * 0.20)
         map_h    = strip_h
-        pad      = 10
-        line_gap = 14
+        pad      = 8
+        line_gap = 12
 
-        # ── semi-transparent dark overlay (full width) ─────────────────────
-        overlay = Image.new("RGBA", (W, strip_h), (10, 14, 20, 195))
+        # ── overlay muito sutil — auditoria, não obstrução ─────────────────
+        overlay = Image.new("RGBA", (W, strip_h), (8, 10, 14, 85))  # ~33% opacidade
         img.paste(overlay, (0, H - strip_h), overlay)
 
-        # ── thin copper top-border of the strip ───────────────────────────
-        copper_bar = Image.new("RGBA", (W, 3), (201, 139, 42, 220))
+        # ── thin copper top-border (sutil) ────────────────────────────────
+        copper_bar = Image.new("RGBA", (W, 2), (201, 139, 42, 100))
         img.paste(copper_bar, (0, H - strip_h), copper_bar)
 
         draw = ImageDraw.Draw(img)
@@ -201,9 +201,8 @@ def apply_watermark(img_bytes: bytes, meta: Dict[str, Any], content_type: str = 
         for line in lines:
             if not line:
                 continue
-            # subtle shadow
-            draw.text((pad + 1, y + 1), line, fill=(0, 0, 0, 160), font=font_sm)
-            draw.text((pad, y), line, fill=(220, 205, 160, 255), font=font_sm)
+            # texto cinza claro semi-transparente — visível no zoom, discreto ao natural
+            draw.text((pad, y), line, fill=(180, 180, 180, 160), font=font_sm)
             y += line_gap
 
         # ── map thumbnail (bottom-right inset) ────────────────────────────
@@ -212,13 +211,14 @@ def apply_watermark(img_bytes: bytes, meta: Dict[str, Any], content_type: str = 
             try:
                 map_img = Image.open(io.BytesIO(map_bytes)).convert("RGBA").resize((map_w, map_h))
 
-                # thin white border around map
-                border = Image.new("RGBA", (map_w + 2, map_h + 2), (255, 255, 255, 180))
-                border.paste(map_img, (1, 1))
+                # aplica transparência ao mapa — sutil, visível no zoom
+                r2, g2, b2, a2 = map_img.split()
+                a2 = a2.point(lambda x: int(x * 0.45))  # 45% opacidade
+                map_img.putalpha(a2)
 
-                mx = W - map_w - 2 - pad
-                my = H - map_h - 1
-                img.paste(border, (mx, my), border)
+                mx = W - map_w - pad
+                my = H - map_h
+                img.paste(map_img, (mx, my), map_img)
             except Exception:
                 pass
 

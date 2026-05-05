@@ -619,8 +619,9 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
                 except ValueError:
                     pass
 
-    # 3. Dias sem RDO (projeto iniciado e sem registro há 2+ dias úteis)
-    if rdo_recentes:
+    # 3. Dias sem RDO — só gera se não há "critica_parada" com mesmo gap (seria redundante)
+    has_critica_parada = any(a.get("tipo") == "critica_parada" for a in anomalies)
+    if not has_critica_parada and rdo_recentes:
         try:
             ultimo = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
             gap = _working_days_between(ultimo, today)
@@ -907,14 +908,14 @@ def _build_insights_llm(
                 if d_ini > _ref_rdo:
                     is_futura = True
                 else:
-                    # Quantos dias úteis decorridos vs planejados
-                    d_decorrido_cal = min(d_total_dias, max(0, (_ref_rdo - d_ini).days))
-                    dia_atual = d_decorrido_cal + 1  # dia 1-based
-                    pct_esp = round(d_decorrido_cal / d_total_dias * 100)
+                    # Dias úteis decorridos vs planejados (consistente com _compute_forecast)
+                    d_total_wd = max(1, _working_days_between(d_ini, d_ter + timedelta(days=1)))
+                    d_dec_wd   = min(d_total_wd, max(0, _working_days_between(d_ini, _ref_rdo + timedelta(days=1))))
+                    pct_esp = round(d_dec_wd / d_total_wd * 100)
                     delta = round(pct_real - pct_esp)
                     status_ritmo = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
                     ritmo_txt = (
-                        f" | dia {dia_atual}/{d_total_dias}"
+                        f" | dia {d_dec_wd}/{d_total_wd}"
                         f" | esp={pct_esp}% real={pct_real:.0f}% delta={delta:+d}% [{status_ritmo}]"
                     )
             except Exception:
@@ -2053,17 +2054,47 @@ async def get_auditoria(
         cat = img.get("categoria", "gerais")
         if cat in by_cat:
             by_cat[cat].append({
-                "id":          img.get("id"),
-                "url":         img.get("url", ""),
-                "legenda":     img.get("legenda", ""),
+                "id":           img.get("id"),
+                "url":          img.get("url", ""),
+                "legenda":      img.get("legenda", ""),
                 "data_captura": img.get("data_captura", ""),
-                "autor":       img.get("autor", ""),
+                "autor":        img.get("autor", ""),
+                "source":       "hub",
             })
 
+    # Inclui evidências fotográficas dos RDOs submetidos para este contrato
+    _tipo_to_cat = {"epi": "equipe", "ferramentas": "ferramentas", "evidencia": "gerais"}
+    rdo_rows = sb_select(
+        "rdo_master",
+        filters={"contrato": contrato, "status": "Submetido"},
+        order="data.desc",
+        limit=50,
+        client_id=client_id or None,
+    ) or []
+    for rdo in rdo_rows:
+        evs = sb_select("rdo_evidencias", filters={"rdo_id": rdo["id"]}, limit=50) or []
+        rdo_date = str(rdo.get("data", ""))[:10]
+        for ev in evs:
+            foto_url = ev.get("foto_url", "")
+            if not foto_url:
+                continue
+            cat = _tipo_to_cat.get(str(ev.get("tipo", "evidencia")), "gerais")
+            if cat in by_cat:
+                by_cat[cat].append({
+                    "id":           str(ev.get("id", "")),
+                    "url":          foto_url,
+                    "legenda":      ev.get("legenda", "") or "",
+                    "data_captura": rdo_date,
+                    "autor":        "",
+                    "source":       "rdo",
+                    "rdo_id":       str(rdo.get("id", "")),
+                })
+
+    total = sum(len(v) for v in by_cat.values())
     return {
         "categories": AUDIT_CATEGORIES,
         "por_categoria": by_cat,
-        "total": len(imgs),
+        "total": total,
     }
 
 

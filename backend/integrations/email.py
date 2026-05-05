@@ -163,6 +163,7 @@ def send_rdo_executivo(
     ai_summary: str = "",
     view_url: str = "",
     pdf_path: str = "",
+    pdf_bytes: Optional[bytes] = None,
 ) -> bool:
     """
     Email executivo RDO — KPIs, tabela de atividades, alertas, análise IA, link online, PDF anexo.
@@ -412,14 +413,25 @@ def send_rdo_executivo(
     alt.attach(MIMEText(html_body, "html", "utf-8"))
     msg.attach(alt)
 
-    if pdf_path:
+    _attach_bytes: Optional[bytes] = None
+    _attach_name = "RDO.pdf"
+    if pdf_bytes:
+        _attach_bytes = pdf_bytes
+        if pdf_path:
+            _attach_name = Path(pdf_path).name or "RDO.pdf"
+    elif pdf_path:
         try:
             p = Path(pdf_path)
             if p.exists():
-                with open(p, "rb") as f:
-                    att = MIMEApplication(f.read(), _subtype="pdf")
-                    att.add_header("Content-Disposition", "attachment", filename=p.name)
-                    msg.attach(att)
+                _attach_bytes = p.read_bytes()
+                _attach_name = p.name
+        except Exception as e:
+            logger.warning(f"PDF local read falhou: {e}")
+    if _attach_bytes:
+        try:
+            att = MIMEApplication(_attach_bytes, _subtype="pdf")
+            att.add_header("Content-Disposition", "attachment", filename=_attach_name)
+            msg.attach(att)
         except Exception as e:
             logger.warning(f"PDF anexo falhou: {e}")
 

@@ -666,12 +666,14 @@ async def submit_rdo(
                 _log.getLogger("rdo").warning(f"Insights falhou: {_e}")
 
             # 3. PDF — gera com ai_summary já disponível no banco
+            _pdf_bytes_bg: bytes = b""
             try:
                 from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _pdf_task
                 _result = _pdf_task.run(rdo_id=_rdo_id_bg, client_id=_client_id_bg or "")
                 if isinstance(_result, dict):
-                    _pdf_url  = _result.get("pdf_url", "")
-                    _pdf_path = _result.get("pdf_path", "")  # caminho local salvo pelo pdf_task
+                    _pdf_url       = _result.get("pdf_url", "")
+                    _pdf_path      = _result.get("pdf_path", "")
+                    _pdf_bytes_bg  = _result.get("pdf_bytes") or b""
             except Exception as _e:
                 import logging as _log
                 _log.getLogger("rdo").warning(f"PDF falhou: {_e}")
@@ -688,6 +690,7 @@ async def submit_rdo(
                         ai_summary=_ai_summary,
                         view_url=_view_url,
                         pdf_path=_pdf_path,
+                        pdf_bytes=_pdf_bytes_bg or None,
                     )
                 except Exception as _e:
                     import logging as _log
@@ -785,19 +788,19 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             total_qty = float(ha.get("total_qty") or 0)
             critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
 
-            # Calcula % esperado acumulado na data do RDO + posição dia X/Y
+            # Calcula % esperado acumulado na data do RDO + posição dia X/Y (dias úteis)
             pct_esp_txt = ""
             try:
+                from backend.routers.hub import _working_days_between as _wdb
+                from datetime import timedelta as _td
                 d_ini = _date.fromisoformat(ini)
                 d_ter = _date.fromisoformat(ter)
-                d_total_cal = max(1, (d_ter - d_ini).days)
-                d_dec = min(d_total_cal, max(0, (today_rdo - d_ini).days + 1))
-                pct_esp = round(d_dec / d_total_cal * 100)
+                d_total_wd = max(1, _wdb(d_ini, d_ter + _td(days=1)))
+                d_dec_wd   = min(d_total_wd, max(0, _wdb(d_ini, today_rdo + _td(days=1))))
+                pct_esp = round(d_dec_wd / d_total_wd * 100)
                 delta = round(pct_atual - pct_esp)
                 status_prod = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
-                dia_num = max(1, (today_rdo - d_ini).days + 1)
-                dias_tot = d_total_cal + 1  # inclusive
-                pct_esp_txt = f", dia {dia_num}/{dias_tot}, esp={pct_esp}%, acum={pct_atual:.0f}%, delta={delta:+d}% [{status_prod}]"
+                pct_esp_txt = f", dia {d_dec_wd}/{d_total_wd}, esp={pct_esp}%, acum={pct_atual:.0f}%, delta={delta:+d}% [{status_prod}]"
             except Exception:
                 pass
 
@@ -1129,13 +1132,41 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
             if ha:
                 conclusao_pct = int(ha.get("conclusao_pct") or 0)
                 status_at = _norm(ha.get("status_atividade"))
-                fmt["conclusao_pct"]    = conclusao_pct
+                exec_qty  = float(ha.get("exec_qty") or 0)
+                total_qty = float(ha.get("total_qty") or 0)
+                fmt["conclusao_pct"]     = conclusao_pct
                 fmt["status_cronograma"] = status_at
-                # pct exibido = conclusao_pct do cronograma (fonte da verdade)
-                fmt["pct"] = conclusao_pct
-                fmt["exec_qty"]  = float(ha.get("exec_qty") or 0)
-                fmt["total_qty"] = float(ha.get("total_qty") or 0)
-                fmt["unidade"]   = _norm(ha.get("unidade")) or fmt["unidade"]
+                fmt["pct"]               = conclusao_pct
+                fmt["exec_qty"]          = exec_qty
+                fmt["total_qty"]         = total_qty
+                fmt["unidade"]           = _norm(ha.get("unidade")) or fmt["unidade"]
+                fmt["termino_previsto"]  = _norm(ha.get("termino_previsto"))
+                fmt["critico"]           = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
+                # Produtividade: desvio simples exec_qty vs pct_esperado×total_qty
+                try:
+                    from datetime import date as _d, timedelta as _td
+                    from backend.routers.hub import _working_days_between as _wdb
+                    _ini = str(ha.get("inicio_previsto") or "")[:10]
+                    _ter = str(ha.get("termino_previsto") or "")[:10]
+                    _today = _d.today()
+                    if _ini and _ter:
+                        _d_ini = _d.fromisoformat(_ini)
+                        _d_ter = _d.fromisoformat(_ter)
+                        _total_wd = max(1, _wdb(_d_ini, _d_ter + _td(days=1)))
+                        _dec_wd   = min(_total_wd, max(0, _wdb(_d_ini, _today + _td(days=1))))
+                        _pct_esp  = round(_dec_wd / _total_wd * 100)
+                        fmt["pct_esperado"] = _pct_esp
+                        if total_qty > 0 and _pct_esp > 0:
+                            cum_plan = total_qty * _pct_esp / 100
+                            fmt["prod_pct"] = round(exec_qty / cum_plan * 100) if cum_plan > 0 else None
+                        else:
+                            fmt["prod_pct"] = None
+                    else:
+                        fmt["pct_esperado"] = None
+                        fmt["prod_pct"] = None
+                except Exception:
+                    fmt["pct_esperado"] = None
+                    fmt["prod_pct"] = None
             else:
                 # Atividade extra (não mapeada): usa o pct do próprio RDO
                 raw_pct = int(float(at.get("quantidade") or 0)) if _is_pct(at) else 0
