@@ -76,9 +76,9 @@ async def login(body: LoginRequest, response: Response):
         key=SESSION_COOKIE,
         value=session_id,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         max_age=60 * 60 * 24 * 7,  # 7 dias
-        secure=False,  # True em produção (HTTPS)
+        secure=True,
     )
 
     return {
@@ -112,7 +112,7 @@ async def logout(
         )
     if session_id:
         destroy_session(session_id)
-    response.delete_cookie(SESSION_COOKIE, samesite="lax")
+    response.delete_cookie(SESSION_COOKIE, samesite="strict")
     return {"ok": True}
 
 

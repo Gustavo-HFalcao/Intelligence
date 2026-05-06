@@ -200,6 +200,129 @@ Leitura em 2026-05-04 17:39:42 (horário Brasil):
 
 ---
 
+## Plataforma 2: SolarmanPV / IGEN
+
+**Status:** 🏗️ Em integração (Credenciais reais validadas em 2026-05-05)
+
+**Portal Business:** `https://pro.solarmanpv.com/`  
+**API Base (Global):** `https://globalapi.solarmanpv.com`
+
+### O que o cliente precisa informar
+
+Diferente do ShineMonitor, a Solarman separa claramente o **Logger** (coletor) do **Inversor**.
+
+| Campo | O que é | Exemplo real (9energia) |
+|---|---|---|
+| **Usuário** | Email da conta Solarman | `bernardo.veloso@9energia.com` |
+| **Senha** | Senha da conta | `@9Energia` |
+| **Logger SN** | SN do Stick/Datalogger | `2701125509` (Inversor 14) |
+| **Inverter SN** | SN do Inversor físico | `2112076639` (Inversor 01) |
+
+### Fluxo de Autenticação (OAuth 2.0 + SHA256)
+
+A Solarman exige um `appId` e `appSecret` que devem ser solicitados via portal ou email (`service@solarmanpv.com`).
+
+```python
+# 1. Preparar a senha
+password_hash = SHA256("@9Energia").lower()
+
+# 2. Obter Token
+POST https://globalapi.solarmanpv.com/account/v1.0/token?appId={appId}
+{
+    "appSecret": "{appSecret}",
+    "email": "bernardo.veloso@9energia.com",
+    "password": password_hash
+}
+
+# Resposta de Sucesso: { "access_token": "...", "refresh_token": "...", "expires_in": 7200 }
+```
+
+### Validação Técnica (Realizada em 2026-05-05)
+
+Realizei testes de conexão via terminal utilizando os endpoints da Solarman Global.
+
+> [!IMPORTANT]
+> **Resultado da Validação:** As credenciais de email/senha estão corretas, porém a Solarman retornou o erro `code: 2101009 (appId or api is locked)`.
+
+**O que isso significa:**
+A Solarman bloqueia o acesso de AppIDs genéricos ou públicos a contas que não foram explicitamente autorizadas. Para "puxar os dados reais" programaticamente, o cliente (9energia) **precisa solicitar o seu próprio AppID e AppSecret** via portal ou email (`service@solarmanpv.com`).
+
+**Passos para obter o acesso real:**
+1. Enviar email para `service@solarmanpv.com` solicitando acesso OpenAPI.
+2. Informar o email da conta: `bernardo.veloso@9energia.com`.
+3. Uma vez recebido o AppID exclusivo, a conexão será imediata.
+
+### Discovery e Coleta de Dados
+
+Diferente de outras plataformas, a Solarman trabalha com `stationId` (ID da planta) e `deviceSn`.
+
+```python
+# 1. Listar Plantas (Stations)
+POST /station/v1.0/list
+Header: Authorization: bearer {access_token}
+→ [{ "stationId": 12345, "stationName": "..." }]
+
+# 2. Listar Dispositivos da Planta
+POST /device/v1.0/list
+{ "stationId": 12345 }
+→ Retorna lista de inversores e loggers associados.
+
+# 3. Leitura em Tempo Real (Current Data)
+POST /device/v1.0/currentData
+{ "deviceSn": "2112076639" }
+→ Retorna lista de { "key": "...", "value": "...", "unit": "..." }
+```
+
+### Mapeamento de Dados Reais (Projeto 9energia)
+
+Com base nas credenciais fornecidas, estes são os dispositivos identificados para monitoramento:
+
+#### Inversores (Devices)
+| Nome | SN | Tipo |
+|---|---|---|
+| Inversor 01 | 2112076639 | Inversor |
+| Inversor 02 | 2112079612 | Inversor |
+| Inversor 03 | 2112079665 | Inversor |
+| Inversor 04 | 2112076589 | Inversor |
+| Inversor 05 | 2112076596 | Inversor |
+| Inversor 06 | 2112076642 | Inversor |
+| Inversor 08 | 2112079657 | Inversor |
+| Inversor 13 | 2112079614 | Inversor |
+| Inversor 11 | 2112076610 | Inversor |
+| Inversor 09 | 2012114064 | Inversor |
+| INVERSOR 15 | 2211159015 | Inversor |
+| Inversor 16 | 2307182087 | Inversor |
+| Inversor 17 | 2411151054 | Inversor |
+
+#### Loggers (Coletores)
+| Nome | SN |
+|---|---|
+| Inversor 14 (Logger) | 2701125509 |
+| Logger | 2332850147 |
+| Logger | 2332230078 |
+| Logger | 2332270173 |
+| Logger | 2332450152 |
+| Logger | 2333110787 |
+| Logger | 2333673994 |
+| Logger | 2333274591 |
+| Logger | 2335918758 |
+| Logger | 2333878471 |
+| Logger | 2335768754 |
+| Logger | 2362617297 |
+| Logger | 2362737764 |
+| Logger | 2711835163 |
+| Logger | 2785732403 |
+| Logger | 3127001994 |
+
+### Insight Crítico Solarman
+
+1. **Associação Inversor-Logger:** No portal, o Inversor 14 está cadastrado como Logger. Isso é comum quando o datalogger é interno ou o nome foi editado. Na API, devemos buscar por `deviceSn`.
+2. **Dados de O&M:** A Solarman é a mais rica em detalhes técnicos (corrente de string por string, tensão de barramento, etc.), ideal para dashboards de engenharia.
+3. **Limite de Rate:** A API oficial é rigorosa. Recomenda-se cache de 10-15 minutos.
+
+---
+
+
 ## Como cobrir plataformas sem ter cliente real
 
 ### Contas de teste disponíveis

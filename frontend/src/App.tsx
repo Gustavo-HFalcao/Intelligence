@@ -25,6 +25,8 @@ import MasterConsole   from '@/pages/MasterConsole'
 import Analytics       from '@/pages/Analytics'
 import Previsoes       from '@/pages/Previsoes'
 import OM              from '@/pages/OM'
+import GestaoInversores from '@/pages/GestaoInversores'
+import InversorDetalhe  from '@/pages/InversorDetalhe'
 import LogsAuditoria   from '@/pages/LogsAuditoria'
 import Observabilidade from '@/pages/Observabilidade'
 import Projetos        from '@/pages/Projetos'
@@ -135,6 +137,8 @@ export default function App() {
       <Route path="/alertas"            element={<WithLayout module="alertas"><Alertas /></WithLayout>} />
       <Route path="/relatorios"         element={<WithLayout module="relatorios"><Relatorios /></WithLayout>} />
       <Route path="/om"                 element={<WithLayout module="om"><OM /></WithLayout>} />
+      <Route path="/inversores"         element={<WithLayout module="om"><GestaoInversores /></WithLayout>} />
+      <Route path="/inversores/:id"     element={<WithLayout module="om"><InversorDetalhe /></WithLayout>} />
       <Route path="/chat-ia"            element={<WithLayout module="chat_ia"><ChatIA /></WithLayout>} />
       <Route path="/usuarios"           element={<WithLayout module="gerenciar_usuarios"><Usuarios /></WithLayout>} />
       <Route path="/perfil"             element={<WithLayout><Perfil /></WithLayout>} />

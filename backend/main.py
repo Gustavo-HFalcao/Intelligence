@@ -2,25 +2,32 @@
 Entry point FastAPI — Bomtempo Intelligence Backend
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.config import Config
 
-
+# Sync interval: 10 minutes (600s). Adjust here for all platforms.
+INVERSOR_SYNC_INTERVAL = 600
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
+    from backend.routers.inversores import run_periodic_sync
+    sync_task = asyncio.create_task(run_periodic_sync(INVERSOR_SYNC_INTERVAL))
     yield
-    # shutdown
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -41,8 +48,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in Config.CORS_ORIGINS if o],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 # ── Routers (registrados dinamicamente conforme são criados) ───────────────────
@@ -81,11 +88,17 @@ app.include_router(relatorios.router)
 from backend.routers import om  # noqa: E402
 app.include_router(om.router)
 
+from backend.routers import inversores  # noqa: E402
+app.include_router(inversores.router)
+
 from backend.routers import observabilidade  # noqa: E402
 app.include_router(observabilidade.router)
 
 from backend.routers import ai  # noqa: E402
 app.include_router(ai.router)
+
+from backend.routers import maintenance  # noqa: E402
+app.include_router(maintenance.router)
 
 
 @app.get("/api/health")

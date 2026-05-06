@@ -37,7 +37,8 @@ const CLIENT_SECTIONS = [
     label: 'OPERACIONAL',
     items: [
       { label: 'FINANCEIRO',        icon: Wallet,          path: '/financeiro',         module: 'financeiro' },
-      { label: 'O&M',               icon: Zap,             path: '/om',                 module: 'om' },
+      { label: 'INVERSORES',        icon: Zap,             path: '/inversores',          module: 'om' },
+      { label: 'O&M LEGADO',        icon: Activity,        path: '/om',                 module: 'om' },
       { label: 'ANALYTICS',         icon: BarChart3,       path: '/analytics',          module: 'analytics' },
       { label: 'PREVISÕES ML',      icon: TrendingUp,      path: '/previsoes',          module: 'previsoes' },
       { label: 'RELATÓRIOS',        icon: FileText,        path: '/relatorios',         module: 'relatorios' },
