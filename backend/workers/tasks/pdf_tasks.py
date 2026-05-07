@@ -14,6 +14,20 @@ from backend.integrations.supabase import sb_select, sb_update
 logger = get_logger(__name__)
 
 
+def _safe(text: str) -> str:
+    """Substitui caracteres fora do Latin-1 por equivalentes ASCII para fpdf2/Helvetica."""
+    replacements = {
+        '—': '-', '–': '-',   # em dash, en dash
+        '‘': "'", '’': "'",   # aspas simples curvas
+        '“': '"', '”': '"',   # aspas duplas curvas
+        '…': '...', '•': '*', # reticências, bullet
+        '°': 'o', '·': '.',   # grau, ponto médio
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return text.encode('latin-1', errors='replace').decode('latin-1')
+
+
 def _build_html(report: Dict, data: Dict) -> str:
     """Monta HTML do relatório para conversão PDF."""
     tipo    = report.get("tipo","executive")
@@ -266,17 +280,17 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(180, 180, 180)
         pdf.set_xy(15, 18)
-        contrato = str(rdo.get("contrato") or "—")
-        data_rdo = str(rdo.get("data") or rdo.get("data_rdo") or "—")[:10]
+        contrato = _safe(str(rdo.get("contrato") or "-"))
+        data_rdo = _safe(str(rdo.get("data") or rdo.get("data_rdo") or "-")[:10])
         pdf.cell(0, 6, f"Contrato: {contrato}   |   Data: {data_rdo}   |   Status: {rdo.get('status','')}")
 
         pdf.set_y(36)
         pdf.set_text_color(*DARK_RGB)
 
         # ── KPIs ─────────────────────────────────────────────────────────────────
-        equipe  = str(rdo.get("equipe_alocada") or "—")
-        clima   = str(rdo.get("condicao_climatica") or rdo.get("clima") or "—")
-        turno   = str(rdo.get("turno") or "—")
+        equipe  = _safe(str(rdo.get("equipe_alocada") or "-"))
+        clima   = _safe(str(rdo.get("condicao_climatica") or rdo.get("clima") or "-"))
+        turno   = _safe(str(rdo.get("turno") or "-"))
         kpis    = [("Equipe", equipe + " pess."), ("Clima", clima), ("Turno", turno)]
 
         for i, (lbl, val) in enumerate(kpis):
@@ -306,14 +320,14 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*DARK_RGB)
         for idx, at in enumerate(atividades[:30]):
-            nome    = str(at.get("atividade") or at.get("descricao") or "—")[:55]
+            nome    = _safe(str(at.get("atividade") or at.get("descricao") or "-"))[:55]
             unidade = str(at.get("unidade") or "")
             qty     = at.get("quantidade") or 0
-            efet    = str(at.get("efetivo") or "—")
-            obs_v   = str(at.get("observacao") or "")[:30]
+            efet    = _safe(str(at.get("efetivo") or "-"))
+            obs_v   = _safe(str(at.get("observacao") or ""))[:30]
             is_m    = bool(at.get("is_marco"))
             if is_m:
-                qty_str = "✓ Concluído" if at.get("marco_concluido") else "Pendente"
+                qty_str = "Concluido" if at.get("marco_concluido") else "Pendente"
             elif unidade == "%":
                 qty_str = f"{int(qty)}%"
             else:
@@ -340,7 +354,7 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*DARK_RGB)
             if rdo.get("houve_interrupcao"):
-                mot = str(rdo.get("motivo_interrupcao") or "Não especificado")[:80]
+                mot = _safe(str(rdo.get("motivo_interrupcao") or "Nao especificado"))[:80]
                 pdf.cell(0, 5, f"  Interrupcao: {mot}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             if rdo.get("houve_chuva"):
                 pdf.cell(0, 5, f"  Chuva registrada", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -348,35 +362,35 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
                 pdf.cell(0, 5, "  ACIDENTE REGISTRADO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         # ── Observações ───────────────────────────────────────────────────────────
-        obs = str(rdo.get("observacoes") or "")
+        obs = _safe(str(rdo.get("observacoes") or ""))
         if obs:
             pdf.ln(4)
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(*COPPER_RGB)
-            pdf.cell(0, 6, "OBSERVAÇÕES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 6, "OBSERVACOES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*DARK_RGB)
             pdf.multi_cell(0, 5, obs[:400])
 
         # ── Orientação p/ amanhã ──────────────────────────────────────────────────
-        ori = str(rdo.get("orientacao") or "")
+        ori = _safe(str(rdo.get("orientacao") or ""))
         if ori:
             pdf.ln(2)
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(*TEAL_RGB)
-            pdf.cell(0, 6, "ORIENTAÇÃO PARA AMANHÃ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 6, "ORIENTACAO PARA AMANHA", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*DARK_RGB)
             pdf.multi_cell(0, 5, ori[:400])
 
         # ── AI Summary ────────────────────────────────────────────────────────────
-        ai = str(rdo.get("ai_summary") or "")
+        ai = _safe(str(rdo.get("ai_summary") or ""))
         if ai:
             pdf.ln(4)
             pdf.set_fill_color(240, 250, 248)
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(*TEAL_RGB)
-            pdf.cell(0, 6, "ANÁLISE DE INTELIGÊNCIA ARTIFICIAL", fill=False, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 6, "ANALISE DE INTELIGENCIA ARTIFICIAL", fill=False, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*DARK_RGB)
             pdf.multi_cell(0, 5, ai[:800])
