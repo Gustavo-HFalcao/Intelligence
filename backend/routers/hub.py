@@ -904,8 +904,9 @@ def _build_insights_llm(
         if dt:
             d_fim = date.fromisoformat(str(dt)[:10])
             dias_rest = (d_fim - today).days
-            dias_uteis_rest = _working_days_between(today, d_fim)
-            dias_restantes_txt = f"{dias_rest} dias corridos ({dias_uteis_rest} úteis) até {d_fim.isoformat()}"
+            # Conta dias úteis APÓS hoje (hoje já está em andamento)
+            dias_uteis_rest = _working_days_between(today + timedelta(days=1), d_fim + timedelta(days=1))
+            dias_restantes_txt = f"{dias_rest} dias corridos ({dias_uteis_rest} úteis) após hoje até {d_fim.isoformat()}"
     except Exception:
         pass
     try:

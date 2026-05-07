@@ -839,8 +839,9 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
                 # Saldo físico para cálculo de efetivo mínimo pelo LLM
                 if total_qty > 0 and delta < 0:
                     saldo = max(0.0, total_qty - exec_qty)
-                    dias_restantes_at = max(1, _wdb(today_rdo, d_ter))
-                    saldo_txt = f", saldo={saldo:.0f}{unit}, prazo em {dias_restantes_at}du"
+                    # Conta dias úteis APÓS o dia do RDO até a data de término (inclusive)
+                    dias_restantes_at = _wdb(today_rdo + _td(days=1), d_ter + _td(days=1))
+                    saldo_txt = f", saldo={saldo:.0f}{unit}, prazo em {dias_restantes_at}du restantes após hoje"
             except Exception:
                 pass
 
@@ -890,6 +891,7 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             "  a) Prod/pessoa/dia (informada no contexto como 'X un/pessoa')\n"
             "  b) Efetivo mínimo: ceil(saldo / (dias_restantes_úteis × prod/pessoa))\n"
             "  c) Fonte: há atividade adiantada que pode ceder pessoas? Recomende a realocação.\n"
+            "  d) Use EXATAMENTE o campo 'prazo em Xdu restantes após hoje' — NUNCA recalcule dias a partir das datas brutas.\n"
             f"  {_ex_neg}\n\n"
             "FORMATO: 3-5 frases corridas em português:\n"
             "  Frase 1: balanço do dia (produtividade geral, condições, eficiência)\n"

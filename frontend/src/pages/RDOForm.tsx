@@ -567,7 +567,8 @@ export default function RDOForm() {
     if (!form.contrato) errors.push('Contrato é obrigatório')
     if (!form.data) errors.push('Data é obrigatória')
     if (!form.turno) errors.push('Turno é obrigatório')
-    if (!form.equipe_alocada || Number(form.equipe_alocada) <= 0) errors.push('Equipe alocada é obrigatória (informe o número de pessoas no campo)')
+    const _equipeNum = Number(form.equipe_alocada)
+    if (!form.equipe_alocada || isNaN(_equipeNum) || _equipeNum <= 0) errors.push('Equipe alocada é obrigatória (informe o número de pessoas no campo)')
     if (atividadesRDO.length === 0) errors.push('Adicione ao menos uma atividade executada')
     if (!form.signatory_name.trim()) errors.push('Nome do responsável pela assinatura é obrigatório')
 

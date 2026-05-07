@@ -50,7 +50,21 @@ export default function RDOHistorico() {
   const [emailContrato, setEmailContrato] = useState(userContrato)
   const [newEmail, setNewEmail]   = useState('')
   const [subError, setSubError]   = useState('')
+  const [pdfLoading, setPdfLoading] = useState<Record<string, boolean>>({})
   const PAGE_SIZE = 20
+
+  async function requestPdf(rdoId: string) {
+    setPdfLoading(prev => ({ ...prev, [rdoId]: true }))
+    try {
+      await api.post(`/rdo/${rdoId}/generate-pdf`)
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['rdo-historico'] })
+        setPdfLoading(prev => ({ ...prev, [rdoId]: false }))
+      }, 6000)
+    } catch {
+      setPdfLoading(prev => ({ ...prev, [rdoId]: false }))
+    }
+  }
 
   // ── Histórico principal ─────────────────────────────────────────────────────
   const { data, isLoading } = useQuery({
@@ -391,6 +405,17 @@ export default function RDOHistorico() {
                         >
                           <Download size={11} /> PDF
                         </a>
+                      )}
+                      {(r.status === 'Submetido' || r.status === 'Aprovado') && !r.pdf_url && (
+                        <button
+                          onClick={() => requestPdf(r.id)}
+                          disabled={pdfLoading[r.id]}
+                          style={{ background: `${TEAL}08`, border: `1px solid ${TEAL}20`, color: `${TEAL}99`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 600, cursor: pdfLoading[r.id] ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                          title="Gerar PDF do RDO"
+                        >
+                          {pdfLoading[r.id] ? <Loader2 size={11} className="animate-spin" /> : <FileText size={11} />}
+                          {pdfLoading[r.id] ? '...' : 'PDF'}
+                        </button>
                       )}
                     </div>
                   </td>
