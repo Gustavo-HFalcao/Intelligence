@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -1822,8 +1822,8 @@ function fmtBRL(v: any) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(isNaN(n) ? 0 : n)
 }
 
-function BrlInput({ value, onChange, placeholder, className }: {
-  value: number; onChange: (v: number) => void; placeholder?: string; className?: string
+function BrlInput({ value, onChange, placeholder, className, style }: {
+  value: number; onChange: (v: number) => void; placeholder?: string; className?: string; style?: React.CSSProperties
 }) {
   const fmt = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
   const [display, setDisplay] = useState(() => fmt(value))
@@ -1843,6 +1843,7 @@ function BrlInput({ value, onChange, placeholder, className }: {
       }}
       placeholder={placeholder ?? '0,00'}
       className={className}
+      style={style}
       inputMode="decimal"
     />
   )

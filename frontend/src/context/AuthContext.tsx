@@ -5,7 +5,7 @@
  */
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import api, { setLoggingOut } from '@/services/api'
+import api, { setLoggingOut, storeSessionToken, clearSessionToken } from '@/services/api'
 
 export interface User {
   user_id: string
@@ -47,7 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await api.post<User>('/auth/login', { email, password })
+    const res = await api.post<User & { session_token?: string }>('/auth/login', { email, password })
+
+    // Guarda token desta aba em sessionStorage — isola sessões por aba
+    if (res.data.session_token) {
+      storeSessionToken(res.data.session_token)
+    }
 
     // Limpa cache antigo de outro usuário antes de setar o novo
     queryClient.clear()
@@ -64,6 +69,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     // Sinaliza ao interceptor para ignorar 401s durante o logout
     setLoggingOut(true)
+    // Remove token desta aba — não afeta outras abas
+    clearSessionToken()
     // Seta null imediatamente — evita race com requests pendentes
     setUser(null)
     setIsPremiumLoading(false)

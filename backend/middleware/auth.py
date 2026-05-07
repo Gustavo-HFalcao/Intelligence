@@ -191,11 +191,29 @@ _fallback: dict[str, dict] = {}
 
 async def get_current_user(
     request: Request,
-    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
+    cookie_sid: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> dict:
-    """Dependency: lê usuário da sessão. Lança 401 se não autenticado."""
+    """Dependency: lê usuário da sessão.
+
+    Prioridade de autenticação:
+    1. Authorization: Bearer <token> header (isolado por aba — sessionStorage)
+    2. Cookie bomtempo_session (global ao browser — fallback legado)
+
+    O header tem prioridade porque é armazenado em sessionStorage (por aba),
+    enquanto o cookie é compartilhado por todas as abas do mesmo browser.
+    """
+    session_id: Optional[str] = None
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        session_id = auth_header[7:].strip() or None
+
+    if not session_id:
+        session_id = cookie_sid
+
     if not session_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autenticado")
+
     user = get_session(session_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão expirada")

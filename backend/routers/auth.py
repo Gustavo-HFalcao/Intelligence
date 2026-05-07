@@ -81,7 +81,11 @@ async def login(body: LoginRequest, response: Response):
         secure=True,
     )
 
+    # session_token retornado no body para que o frontend possa guardar
+    # em sessionStorage (isolado por aba) e enviá-lo via Authorization header,
+    # evitando que logins em outras abas sobrescrevam a sessão desta.
     return {
+        "session_token": session_id,
         "user_id": user["user_id"],
         "login": user.get("login", ""),
         "email": user["email"],
