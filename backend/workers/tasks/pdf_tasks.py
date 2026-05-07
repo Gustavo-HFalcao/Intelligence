@@ -205,7 +205,20 @@ def _build_fin_pdf_fpdf(report: Dict, data: Dict) -> Optional[bytes]:
 
         pdf.set_font("Helvetica", "", 7)
         pdf.set_text_color(*DARK_RGB)
-        for idx, c in enumerate(data.get("custos", [])):
+        custos_list = data.get("custos", [])[:50]
+        for idx, c in enumerate(custos_list):
+            if pdf.get_y() > 260:
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.set_fill_color(*COPPER_RGB)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(60, 7, "CATEGORIA", fill=True)
+                pdf.cell(65, 7, "DESCRIÇÃO", fill=True)
+                pdf.cell(28, 7, "PREVISTO", fill=True, align="R")
+                pdf.cell(28, 7, "EXECUTADO", fill=True, align="R")
+                pdf.cell(0,  7, "STATUS", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", "", 7)
+                pdf.set_text_color(*DARK_RGB)
             fill = idx % 2 == 0
             pdf.set_fill_color(250, 248, 243) if fill else pdf.set_fill_color(255, 255, 255)
             pdf.cell(60, 5, str(c.get("categoria_nome", "—"))[:28], fill=fill)
@@ -213,6 +226,8 @@ def _build_fin_pdf_fpdf(report: Dict, data: Dict) -> Optional[bytes]:
             pdf.cell(28, 5, str(c.get("valor_previsto_fmt", "—"))[:14], fill=fill, align="R")
             pdf.cell(28, 5, str(c.get("valor_executado_fmt", "—"))[:14], fill=fill, align="R")
             pdf.cell(0,  5, str(c.get("status", "—"))[:12], fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        if len(data.get("custos", [])) > 50:
+            pdf.cell(0, 5, f"... {len(data['custos']) - 50} itens omitidos. Ver relatório completo no sistema.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         # Rodapé
         pdf.set_y(-15)
@@ -313,7 +328,10 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
             pdf.cell(20, 6, efet,    fill=fill, align="C")
             pdf.cell(0,  6, obs_v,   fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-        # ── Alertas ───────────────────────────────────────────────────────────────
+        # ── Alertas / Obs / AI — nova página se necessário ───────────────────────
+        if pdf.get_y() > 230:
+            pdf.add_page()
+
         if rdo.get("houve_interrupcao") or rdo.get("houve_chuva") or rdo.get("houve_acidente"):
             pdf.ln(4)
             pdf.set_font("Helvetica", "B", 9)

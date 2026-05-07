@@ -1240,10 +1240,11 @@ def _rule_based_insights(
         insights.append({"title": a["title"], "body": a["body"], "priority": a["priority"], "tipo": "anomalia"})
 
     # Atividades atrasadas somente se há RDO (ref_date preenchida)
+    # Usa <= para incluir deadline exatamente no dia do último RDO (mesma regra do top_risco)
     _ref_iso = (_last_rdo or today).isoformat()
     atrasadas = [a for a in atividades
                  if a.get("termino_previsto")
-                 and str(a["termino_previsto"])[:10] < _ref_iso
+                 and str(a["termino_previsto"])[:10] <= _ref_iso
                  and float(a.get("conclusao_pct") or 0) < 100]
     proximos_7d = []
     antecipadas = []

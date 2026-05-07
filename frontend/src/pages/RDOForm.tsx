@@ -1342,13 +1342,21 @@ export default function RDOForm() {
             </div>
           )}
 
-          <button
-            onClick={addAtividade}
-            disabled={!newAt.descricao.trim()}
-            style={{ background: newAt.descricao ? COPPER : 'rgba(201,139,42,0.2)', color: newAt.descricao ? '#0d1117' : '#888', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: newAt.descricao ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}
-          >
-            <Plus size={13} /> {newAt.atividade_id ? 'Registrar no RDO' : 'Adicionar Atividade Não Mapeada'}
-          </button>
+          {(() => {
+            const tq = Number(selectedCronAt?.total_qty || 0)
+            const eq = Number(selectedCronAt?.exec_qty  || 0)
+            const overMax = tq > 0 && Number(newAt.qtd_executada || 0) > Math.max(0, tq - eq)
+            const canAdd  = !!newAt.descricao.trim() && !overMax
+            return (
+              <button
+                onClick={addAtividade}
+                disabled={!canAdd}
+                style={{ background: canAdd ? COPPER : 'rgba(201,139,42,0.2)', color: canAdd ? '#0d1117' : '#888', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: canAdd ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}
+              >
+                <Plus size={13} /> {newAt.atividade_id ? 'Registrar no RDO' : 'Adicionar Atividade Não Mapeada'}
+              </button>
+            )
+          })()}
         </div>
 
         {/* Lista de atividades adicionadas */}

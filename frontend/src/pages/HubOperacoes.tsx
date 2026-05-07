@@ -2296,6 +2296,7 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/financeiro/${id}`).then(r => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fin', contrato] }); showToast('Item excluído') },
+    onError:   () => showToast('Erro ao excluir item'),
   })
 
   if (isLoading) return <Skeleton />
@@ -2321,8 +2322,8 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
     grupos[cat].push(r)
   }
 
-  const totalPrev = custos.reduce((s, r) => s + r.valor_previsto, 0)
-  const totalExec = custos.reduce((s, r) => s + r.valor_executado, 0)
+  const totalPrev = custos.reduce((s, r) => s + (r.valor_previsto ?? 0), 0)
+  const totalExec = custos.reduce((s, r) => s + (r.valor_executado ?? 0), 0)
   const burnPct   = totalPrev > 0 ? Math.min(100, (totalExec / totalPrev) * 100) : 0
 
   return (
