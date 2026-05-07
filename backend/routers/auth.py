@@ -13,7 +13,7 @@ Rotas:
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from backend.integrations.supabase import sb_delete, sb_insert, sb_select, sb_update
@@ -101,11 +101,21 @@ async def login(body: LoginRequest, response: Response):
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     response: Response,
-    session_id: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    cookie_sid: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ):
-    # Não requer autenticação — idempotente: chamadas repetidas são seguras
+    # Mesma prioridade do get_current_user: Bearer header > cookie
+    # Garante que a aba que faz logout destrói sua própria sessão,
+    # não a sessão de outra aba que possa ter sobrescrito o cookie.
     from backend.middleware.auth import get_session
+    session_id: str | None = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        session_id = auth_header[7:].strip() or None
+    if not session_id:
+        session_id = cookie_sid
+
     user = get_session(session_id) if session_id else None
     if user:
         audit_log(
