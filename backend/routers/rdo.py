@@ -987,7 +987,9 @@ async def generate_rdo_pdf(
         None,
         lambda: _gen.run(rdo_id=rdo_id, client_id=client_id or ""),
     )
-    return result
+    if isinstance(result, dict):
+        result.pop("pdf_bytes", None)  # bytes não são JSON-serializáveis
+    return result or {"ok": False, "error": "generation failed"}
 
 
 # ── Histórico ─────────────────────────────────────────────────────────────────
