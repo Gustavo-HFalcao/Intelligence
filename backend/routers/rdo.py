@@ -980,24 +980,14 @@ async def generate_rdo_pdf(
     user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Enfileira geração de PDF do RDO via Celery (WeasyPrint)."""
-    try:
-        from backend.workers.celery_app import celery_app
-        celery_app.send_task(
-            "backend.workers.tasks.pdf_tasks.generate_rdo_pdf",
-            kwargs={"rdo_id": rdo_id, "client_id": client_id or ""},
-        )
-        return {"ok": True, "status": "queued", "rdo_id": rdo_id}
-    except Exception as e:
-        # Fallback: run inline if Celery unavailable
-        logger.warning(f"Celery unavailable for PDF: {e} — running inline")
-        loop = asyncio.get_event_loop()
-        from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _gen
-        result = await loop.run_in_executor(
-            None,
-            lambda: _gen.run(rdo_id=rdo_id, client_id=client_id or ""),
-        )
-        return result
+    """Gera PDF do RDO inline (fpdf2 é rápido, sem overhead de fila)."""
+    loop = asyncio.get_event_loop()
+    from backend.workers.tasks.pdf_tasks import generate_rdo_pdf as _gen
+    result = await loop.run_in_executor(
+        None,
+        lambda: _gen.run(rdo_id=rdo_id, client_id=client_id or ""),
+    )
+    return result
 
 
 # ── Histórico ─────────────────────────────────────────────────────────────────
