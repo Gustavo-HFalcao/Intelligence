@@ -51,17 +51,29 @@ export default function RDOHistorico() {
   const [newEmail, setNewEmail]   = useState('')
   const [subError, setSubError]   = useState('')
   const [pdfLoading, setPdfLoading] = useState<Record<string, boolean>>({})
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const PAGE_SIZE = 20
+
+  function showToast(msg: string, ok = true) {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   async function requestPdf(rdoId: string) {
     setPdfLoading(prev => ({ ...prev, [rdoId]: true }))
+    showToast('Gerando PDF, aguarde…', true)
     try {
-      await api.post(`/rdo/${rdoId}/generate-pdf`)
-      setTimeout(() => {
+      const res = await api.post(`/rdo/${rdoId}/generate-pdf`)
+      const ok = res.data?.ok !== false
+      if (ok) {
+        showToast('PDF gerado! O botão de download já está disponível.', true)
         qc.invalidateQueries({ queryKey: ['rdo-historico'] })
-        setPdfLoading(prev => ({ ...prev, [rdoId]: false }))
-      }, 6000)
+      } else {
+        showToast('Falha ao gerar PDF. Tente novamente.', false)
+      }
     } catch {
+      showToast('Erro ao gerar PDF. Tente novamente.', false)
+    } finally {
       setPdfLoading(prev => ({ ...prev, [rdoId]: false }))
     }
   }
@@ -443,6 +455,20 @@ export default function RDOHistorico() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+          background: toast.ok ? 'rgba(42,157,143,0.95)' : 'rgba(239,68,68,0.95)',
+          color: '#fff', borderRadius: 10, padding: '10px 18px',
+          fontSize: 13, fontWeight: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          animation: 'fadeInUp 0.2s ease',
+        }}>
+          {toast.msg}
         </div>
       )}
     </div>
