@@ -116,15 +116,7 @@ def generate_pdf(self, report_id: str, client_id: str = "", params: Dict = None)
                 for c in custos[:50]
             ]
 
-        html = _build_html(report, data)
-
-        # Convert HTML → PDF via WeasyPrint (best-effort)
-        pdf_bytes: Optional[bytes] = None
-        try:
-            from weasyprint import HTML
-            pdf_bytes = HTML(string=html).write_pdf()
-        except Exception as e:
-            logger.warning(f"WeasyPrint não disponível: {e} — salvando HTML como fallback")
+        pdf_bytes = _build_fin_pdf_fpdf(report, data)
 
         # Upload to Supabase storage
         pdf_url = ""
@@ -147,6 +139,241 @@ def generate_pdf(self, report_id: str, client_id: str = "", params: Dict = None)
             sb_update("relatorios", filters={"id": report_id}, data={"status": "Erro"})
         except Exception:
             pass
+
+
+def _build_fin_pdf_fpdf(report: Dict, data: Dict) -> Optional[bytes]:
+    """Gera PDF de relatório financeiro usando fpdf2."""
+    try:
+        from fpdf import FPDF, XPos, YPos
+
+        COPPER_RGB = (201, 139, 42)
+        DARK_RGB   = (26, 26, 46)
+
+        pdf = FPDF()
+        pdf.set_margins(15, 15, 15)
+        pdf.add_page()
+
+        # Cabeçalho
+        pdf.set_fill_color(*DARK_RGB)
+        pdf.rect(0, 0, 210, 28, "F")
+        pdf.set_text_color(201, 139, 42)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_xy(15, 7)
+        pdf.cell(0, 7, "RELATÓRIO FINANCEIRO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(180, 180, 180)
+        pdf.set_xy(15, 16)
+        contrato = str(report.get("contrato") or "—")
+        now      = datetime.now().strftime("%d/%m/%Y %H:%M")
+        pdf.cell(0, 5, f"Contrato: {contrato}   |   Gerado em: {now}")
+
+        pdf.set_y(34)
+        pdf.set_text_color(*DARK_RGB)
+
+        # KPIs
+        kpis = data.get("kpis", {})
+        kpi_items = [
+            ("Previsto",   kpis.get("total_previsto", "—")),
+            ("Executado",  kpis.get("total_executado", "—")),
+            ("Saldo",      kpis.get("saldo", "—")),
+            ("% Exec.",    f"{kpis.get('pct_executado', 0)}%"),
+        ]
+        for i, (lbl, val) in enumerate(kpi_items):
+            x = 15 + i * 45
+            pdf.set_fill_color(245, 243, 238)
+            pdf.rect(x, 34, 41, 16, "F")
+            pdf.set_xy(x + 2, 36)
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_text_color(150, 130, 80)
+            pdf.cell(37, 4, lbl.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_xy(x + 2, 41)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*DARK_RGB)
+            pdf.cell(37, 4, str(val)[:16])
+
+        pdf.set_y(56)
+
+        # Tabela de custos
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(*COPPER_RGB)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(60, 7, "CATEGORIA", fill=True)
+        pdf.cell(65, 7, "DESCRIÇÃO", fill=True)
+        pdf.cell(28, 7, "PREVISTO", fill=True, align="R")
+        pdf.cell(28, 7, "EXECUTADO", fill=True, align="R")
+        pdf.cell(0,  7, "STATUS", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(*DARK_RGB)
+        for idx, c in enumerate(data.get("custos", [])):
+            fill = idx % 2 == 0
+            pdf.set_fill_color(250, 248, 243) if fill else pdf.set_fill_color(255, 255, 255)
+            pdf.cell(60, 5, str(c.get("categoria_nome", "—"))[:28], fill=fill)
+            pdf.cell(65, 5, str(c.get("descricao", "—"))[:32], fill=fill)
+            pdf.cell(28, 5, str(c.get("valor_previsto_fmt", "—"))[:14], fill=fill, align="R")
+            pdf.cell(28, 5, str(c.get("valor_executado_fmt", "—"))[:14], fill=fill, align="R")
+            pdf.cell(0,  5, str(c.get("status", "—"))[:12], fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # Rodapé
+        pdf.set_y(-15)
+        pdf.set_font("Helvetica", "I", 7)
+        pdf.set_text_color(170, 170, 170)
+        pdf.cell(0, 5, f"Bomtempo Intelligence  |  {now}  |  {contrato}", align="C")
+
+        return bytes(pdf.output())
+
+    except Exception as e:
+        logger.error(f"_build_fin_pdf_fpdf error: {e}")
+        return None
+
+
+def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
+    """Gera PDF de RDO usando fpdf2 (pure Python — sem dependências nativas).
+    Layout executivo: cabeçalho, KPIs, tabela de atividades, observações, AI summary."""
+    try:
+        from fpdf import FPDF, XPos, YPos
+
+        COPPER_RGB = (201, 139, 42)
+        TEAL_RGB   = (42, 157, 143)
+        DARK_RGB   = (26, 26, 46)
+
+        pdf = FPDF()
+        pdf.set_margins(15, 15, 15)
+        pdf.add_page()
+
+        # ── Cabeçalho ────────────────────────────────────────────────────────────
+        pdf.set_fill_color(*DARK_RGB)
+        pdf.rect(0, 0, 210, 30, "F")
+        pdf.set_text_color(201, 139, 42)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_xy(15, 8)
+        pdf.cell(0, 8, "RELATÓRIO DIÁRIO DE OBRA", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(180, 180, 180)
+        pdf.set_xy(15, 18)
+        contrato = str(rdo.get("contrato") or "—")
+        data_rdo = str(rdo.get("data") or rdo.get("data_rdo") or "—")[:10]
+        pdf.cell(0, 6, f"Contrato: {contrato}   |   Data: {data_rdo}   |   Status: {rdo.get('status','')}")
+
+        pdf.set_y(36)
+        pdf.set_text_color(*DARK_RGB)
+
+        # ── KPIs ─────────────────────────────────────────────────────────────────
+        equipe  = str(rdo.get("equipe_alocada") or "—")
+        clima   = str(rdo.get("condicao_climatica") or rdo.get("clima") or "—")
+        turno   = str(rdo.get("turno") or "—")
+        kpis    = [("Equipe", equipe + " pess."), ("Clima", clima), ("Turno", turno)]
+
+        for i, (lbl, val) in enumerate(kpis):
+            x = 15 + i * 60
+            pdf.set_fill_color(245, 243, 238)
+            pdf.rect(x, 36, 56, 18, "F")
+            pdf.set_xy(x + 2, 38)
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_text_color(150, 130, 80)
+            pdf.cell(52, 4, lbl.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_xy(x + 2, 43)
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(*DARK_RGB)
+            pdf.cell(52, 5, val[:20])
+
+        pdf.set_y(60)
+
+        # ── Atividades ────────────────────────────────────────────────────────────
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(*COPPER_RGB)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(95, 7, "ATIVIDADE", fill=True)
+        pdf.cell(25, 7, "QTD / PCT", fill=True, align="C")
+        pdf.cell(20, 7, "EFETIVO", fill=True, align="C")
+        pdf.cell(0,  7, "OBS", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*DARK_RGB)
+        for idx, at in enumerate(atividades[:30]):
+            nome    = str(at.get("atividade") or at.get("descricao") or "—")[:55]
+            unidade = str(at.get("unidade") or "")
+            qty     = at.get("quantidade") or 0
+            efet    = str(at.get("efetivo") or "—")
+            obs_v   = str(at.get("observacao") or "")[:30]
+            is_m    = bool(at.get("is_marco"))
+            if is_m:
+                qty_str = "✓ Concluído" if at.get("marco_concluido") else "Pendente"
+            elif unidade == "%":
+                qty_str = f"{int(qty)}%"
+            else:
+                qty_str = f"{qty} {unidade}"
+            fill = idx % 2 == 0
+            if fill:
+                pdf.set_fill_color(250, 248, 243)
+            else:
+                pdf.set_fill_color(255, 255, 255)
+            pdf.cell(95, 6, nome,    fill=fill)
+            pdf.cell(25, 6, qty_str, fill=fill, align="C")
+            pdf.cell(20, 6, efet,    fill=fill, align="C")
+            pdf.cell(0,  6, obs_v,   fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # ── Alertas ───────────────────────────────────────────────────────────────
+        if rdo.get("houve_interrupcao") or rdo.get("houve_chuva") or rdo.get("houve_acidente"):
+            pdf.ln(4)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*COPPER_RGB)
+            pdf.cell(0, 6, "OCORRÊNCIAS", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*DARK_RGB)
+            if rdo.get("houve_interrupcao"):
+                mot = str(rdo.get("motivo_interrupcao") or "Não especificado")[:80]
+                pdf.cell(0, 5, f"  Interrupcao: {mot}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if rdo.get("houve_chuva"):
+                pdf.cell(0, 5, f"  Chuva registrada", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if rdo.get("houve_acidente"):
+                pdf.cell(0, 5, "  ACIDENTE REGISTRADO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # ── Observações ───────────────────────────────────────────────────────────
+        obs = str(rdo.get("observacoes") or "")
+        if obs:
+            pdf.ln(4)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*COPPER_RGB)
+            pdf.cell(0, 6, "OBSERVAÇÕES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*DARK_RGB)
+            pdf.multi_cell(0, 5, obs[:400])
+
+        # ── Orientação p/ amanhã ──────────────────────────────────────────────────
+        ori = str(rdo.get("orientacao") or "")
+        if ori:
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*TEAL_RGB)
+            pdf.cell(0, 6, "ORIENTAÇÃO PARA AMANHÃ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*DARK_RGB)
+            pdf.multi_cell(0, 5, ori[:400])
+
+        # ── AI Summary ────────────────────────────────────────────────────────────
+        ai = str(rdo.get("ai_summary") or "")
+        if ai:
+            pdf.ln(4)
+            pdf.set_fill_color(240, 250, 248)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*TEAL_RGB)
+            pdf.cell(0, 6, "ANÁLISE DE INTELIGÊNCIA ARTIFICIAL", fill=False, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*DARK_RGB)
+            pdf.multi_cell(0, 5, ai[:800])
+
+        # ── Rodapé ────────────────────────────────────────────────────────────────
+        pdf.set_y(-15)
+        pdf.set_font("Helvetica", "I", 7)
+        pdf.set_text_color(170, 170, 170)
+        pdf.cell(0, 5, f"Bomtempo Intelligence  |  Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  {contrato}", align="C")
+
+        return bytes(pdf.output())
+
+    except Exception as e:
+        logger.error(f"_build_rdo_pdf_fpdf error: {e}")
+        return None
 
 
 def _build_rdo_html(rdo: Dict, atividades: list, evidencias: list) -> str:
@@ -237,17 +464,10 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
         rdo = rows[0]
 
         atividades = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
-        evidencias = sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or []
 
-        html_str = _build_rdo_html(rdo, atividades, evidencias)
-
-        pdf_bytes = None
-        try:
-            from weasyprint import HTML
-            pdf_bytes = HTML(string=html_str).write_pdf()
-        except Exception as e:
-            logger.warning(f"WeasyPrint error: {e}")
-            return {"ok": False, "error": f"WeasyPrint: {e}"}
+        pdf_bytes = _build_rdo_pdf_fpdf(rdo, atividades)
+        if not pdf_bytes:
+            return {"ok": False, "error": "PDF generation failed"}
 
         from backend.core.config import Config as _Cfg
         contrato = str(rdo.get("contrato") or "rdo").replace("/", "-").replace(" ", "_")

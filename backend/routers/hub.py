@@ -940,9 +940,11 @@ def _build_insights_llm(
     kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
     _ref_rdo = _last_rdo_ref or today
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
-    # Atrasada: prazo vencido na data do último RDO E atividade já deveria ter iniciado
+    # Atrasada: prazo vencido NA data do último RDO ou antes (<=) E atividade já deveria ter iniciado.
+    # Usar <= porque _ref_rdo é o último DIA TRABALHADO — se o prazo era exatamente _ref_rdo e a
+    # atividade não foi concluída, ela está oficialmente atrasada ao final daquele dia.
     atrasadas    = [a for a in atividades if a.get("termino_previsto")
-                    and str(a["termino_previsto"])[:10] < _ref_rdo.isoformat()
+                    and str(a["termino_previsto"])[:10] <= _ref_rdo.isoformat()
                     and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
                     and float(a.get("conclusao_pct") or 0) < 100]
     # proximos_7d: só atividades que já iniciaram ou iniciam até a data do RDO
@@ -955,9 +957,12 @@ def _build_insights_llm(
                     and float(a.get("conclusao_pct") or 0) > 0]
     concluidas   = [a for a in atividades if float(a.get("conclusao_pct") or 0) >= 100]
 
-    # Atividades por risk score (mais críticas primeiro)
+    # Atividades por risk score (mais críticas primeiro) — EXCLUI macros/grupos
+    # Macros são rollups calculados; insights devem focar nas atividades folha (micro/etapa)
     top_risco = sorted(
-        [a for a in atividades if float(a.get("conclusao_pct") or 0) < 100],
+        [a for a in atividades if float(a.get("conclusao_pct") or 0) < 100
+         and str(a.get("nivel", "")).lower() not in ("macro", "grupo", "fase")
+         and not any(str(c.get("parent_id", "")) == str(a.get("id", "")) for c in atividades)],
         key=lambda a: a.get("_risk_score", 0), reverse=True
     )[:6]
 
@@ -999,12 +1004,13 @@ def _build_insights_llm(
 
         vel_txt = ""
         if vel.get("velocity_real", 0) > 0:
-            plan = vel.get("producao_planejada_dia", 0)
-            real = vel["velocity_real"]
-            trend_v = vel.get("trend", "")
-            # Calcula produtividade por pessoa usando último RDO
+            real      = vel["velocity_real"]
+            trend_v   = vel.get("trend", "")
+            efet_at   = max(1, int(a.get("efetivo_alocado") or 1))
+            prod_pess = round(real / efet_at, 1)
+            # prod/pessoa/dia explícito — LLM deve usar este valor, não velocity_real
             vel_txt = (
-                f" | vel={real}/dia(plan={plan}) [{trend_v}]"
+                f" | vel={real}/dia·equipe={efet_at}p→prod/pessoa={prod_pess}/dia [{trend_v}]"
                 f" | EAC={vel.get('eac_date','?')}"
                 f" | saldo={vel.get('saldo',0):.0f} {a.get('unidade','')}"
             )
@@ -1031,7 +1037,7 @@ def _build_insights_llm(
     for r in rdo_recentes[:5]:
         rdo_ctx.append(
             f"  - {str(r.get('data',''))[:10]}: clima={r.get('condicao_climatica','?')},"
-            f" equipe={r.get('equipe_alocada','?')}p,"
+            f" equipe_total={r.get('equipe_alocada','?')}p (POOL DISPONÍVEL para realloc),"
             f" chuva={r.get('houve_chuva',False)},"
             f" interr={r.get('houve_interrupcao',False)},"
             f" acid={r.get('houve_acidente',False)},"
@@ -1128,22 +1134,26 @@ R7. CLIMA: Se PREVISÃO DO TEMPO indica ≥ 3 dias de chuva OU chuva máxima ≥
 
 ════ OBRIGATÓRIO NOS INSIGHTS DE RISCO/EQUIPE ════
 Para cada atividade com delta negativo, CALCULE e APRESENTE:
-  a) Saldo restante: total_qty − exec_qty
-  b) Produção média por pessoa/dia: velocity_real ÷ efetivo do último RDO
-  c) Dias restantes no prazo
-  d) Efetivo mínimo para concluir no prazo: ceil(saldo ÷ (dias_restantes × prod/pessoa))
-  e) Fonte de efetivo extra: outra atividade com delta ≥ 0% pode liberar pessoas?
-     Se sim → "Recomendo alocar N pessoas da atividade X (delta=+Y%) para cobrir o déficit."
-     Se não → "Necessário contratar N pessoa(s) extra."
+  a) Saldo: total_qty − exec_qty
+  b) Produção por pessoa/dia: use o valor "prod/pessoa" que está na linha de contexto da atividade
+     (NUNCA use velocity/dia como se fosse prod/pessoa — velocity já inclui a equipe toda)
+  c) Dias úteis restantes (após a data do último RDO)
+  d) Efetivo mínimo: saldo ÷ (dias_restantes × prod/pessoa), arredonde para cima
+  e) Pool disponível: equipe total do último RDO (campo EQUIPE no contexto)
+  f) Fonte de reforço: atividade com delta ≥ 0% pode liberar pessoas?
+
+FORMATO DE SAÍDA — escreva de forma executiva, em português, SEM notação matemática crua:
+  ✓ "Saldo de 670 un. Com produção de 161 un/pessoa/dia, são necessárias 5 pessoas para concluir amanhã (3 atuais + 2 de reforço)."
+  ✗ "ceil(670 / (1 * 161)) = 5 pessoas"  ← PROIBIDO este formato
 
 EXEMPLO CORRETO:
-  "Vedação: dia 2/3, real=54% (786/1456), esp=67%, delta=-13%, saldo=670un.
-   Prod/pessoa=161un/dia. Para concluir amanhã: ceil(670/161)=5 pessoas (3 atuais +2 extra).
+  "Vedação atrasada: dia 2/3, real=54% (786/1456), esp=67%, delta=−13%.
+   Saldo: 670 un. Produção: 161 un/pessoa/dia. Para concluir amanhã: 5 pessoas (3 atuais + 2 de reforço).
    Fixação está adiantada (delta=+3%) — realoque 2 pessoas para cobrir sem custo adicional."
 
 EXEMPLO ADIANTADO:
-  "Fixação: dia 2/3, real=65%, esp=67%, delta=+3% — concluirá no prazo.
-   Após conclusão (amanhã), 3 pessoas ficam livres para reforçar vedação se necessário."
+  "Fixação: dia 2/3, real=65%, esp=67%, delta=+3% — no prazo.
+   Após conclusão amanhã, 3 pessoas ficam disponíveis para reforçar Vedação."
 
 ════ HIERARQUIA ════
 1. Anomalia factual grave (dados inválidos, crítica parada com evidência)

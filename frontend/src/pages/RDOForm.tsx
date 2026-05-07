@@ -1198,14 +1198,31 @@ export default function RDOForm() {
                     <label className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
                       Quantidade feita hoje
                     </label>
-                    <input
-                      type="number" min={0}
-                      placeholder="Ex: 80"
-                      value={newAt.qtd_executada}
-                      onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
-                      style={{ ...inputStyle, fontSize: 14, fontWeight: 700 }}
-                      autoFocus
-                    />
+                    {(() => {
+                      const totalQty = Number(selectedCronAt?.total_qty || 0)
+                      const execQty  = Number(selectedCronAt?.exec_qty  || 0)
+                      const saldo    = Math.max(0, totalQty - execQty)
+                      const entered  = Number(newAt.qtd_executada || 0)
+                      const overMax  = totalQty > 0 && entered > saldo
+                      return (
+                        <>
+                          <input
+                            type="number" min={0}
+                            max={totalQty > 0 ? saldo : undefined}
+                            placeholder={totalQty > 0 ? `Máx. ${saldo}` : 'Ex: 80'}
+                            value={newAt.qtd_executada}
+                            onChange={e => setNewAt(a => ({ ...a, qtd_executada: e.target.value }))}
+                            style={{ ...inputStyle, fontSize: 14, fontWeight: 700, borderColor: overMax ? '#EF4444' : undefined }}
+                            autoFocus
+                          />
+                          {totalQty > 0 && (
+                            <div className="text-[9px] mt-1" style={{ color: overMax ? '#EF4444' : 'rgba(255,255,255,0.2)' }}>
+                              {overMax ? `⚠ Excede o saldo (${saldo} ${selectedCronAt?.unidade || ''})` : `Saldo: ${saldo} ${selectedCronAt?.unidade || ''}`}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
