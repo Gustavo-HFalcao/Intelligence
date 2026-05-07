@@ -100,6 +100,14 @@ function Section({ title, icon: Icon, children, accent = COPPER }: {
   )
 }
 
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function RDOForm() {
@@ -225,22 +233,11 @@ export default function RDOForm() {
           // Só mostra o warning se não veio de um link direto (urlDraftId vazio)
           if (!urlDraftId) setDraftWarning(true)
         } else if (!urlDraftId) {
-          // Sem rascunho: busca último RDO submetido e calcula próximo dia útil
-          api.get(`/rdo/historico?contrato=${encodeURIComponent(form.contrato)}&page_size=1`)
-            .then(hr => {
-              const lastRdos: any[] = hr.data?.rdos ?? []
-              if (lastRdos.length > 0) {
-                const lastDate = lastRdos[0].data?.slice(0, 10)
-                if (lastDate) {
-                  const next = new Date(lastDate + 'T12:00:00')
-                  // Avança para o próximo dia útil (segunda a sexta)
-                  do { next.setDate(next.getDate() + 1) } while ([0, 6].includes(next.getDay()))
-                  const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`
-                  setForm(f => ({ ...f, data: nextStr }))
-                }
-              }
-            })
-            .catch(() => {})
+          // Sem rascunho: usa next_rdo_date calculado pelo backend (considera dias_uteis_semana do contrato)
+          const nextRdoDate = r.data.next_rdo_date
+          if (nextRdoDate) {
+            setForm(f => ({ ...f, data: nextRdoDate }))
+          }
           setDraftId('')
           setAtividadesRDO([])
           setEvidencias([])
@@ -271,7 +268,7 @@ export default function RDOForm() {
   // Compute previstas para hoje — apenas micros/subs (macros são fruto das filhas)
   useEffect(() => {
     if (!atividadesCronograma.length) { setPrevistasHoje([]); return }
-    const today = new Date().toISOString().slice(0, 10)
+    const today = form.data || new Date().toISOString().slice(0, 10)
     const previstas = atividadesCronograma.filter((a: any) => {
       if (a.nivel === 'macro') return false  // macros não são preenchidas pelo user
       const ini  = a.inicio_previsto?.slice(0, 10)
@@ -291,7 +288,7 @@ export default function RDOForm() {
       return compareFase(a, b)
     })
     setPrevistasHoje(previstas)
-  }, [atividadesCronogramaRaw])
+  }, [atividadesCronogramaRaw, form.data])
 
   // ── Save draft ───────────────────────────────────────────────────────────
 
@@ -342,12 +339,17 @@ export default function RDOForm() {
           const lng = parseFloat(d.longitude)
           const addr = [d.city, d.region, d.country_name].filter(Boolean).join(', ')
           const ts = new Date().toISOString()
+          const kmExtra: Record<string, any> = {}
+          if (tipo === 'checkout' && form.checkin_lat && form.checkin_lng) {
+            kmExtra.km_percorrido = haversineKm(form.checkin_lat, form.checkin_lng, lat, lng).toFixed(1)
+          }
           setForm(f => ({
             ...f,
             [`${tipo}_lat`]: lat,
             [`${tipo}_lng`]: lng,
             [`${tipo}_endereco`]: `[IP] ${addr}`,
             [`${tipo}_timestamp`]: ts,
+            ...kmExtra,
           }))
         } else {
           alert('Não foi possível obter localização. Acesse via HTTPS para GPS preciso.')
@@ -362,6 +364,10 @@ export default function RDOForm() {
     navigator.geolocation.getCurrentPosition(
       async pos => {
         const { latitude: lat, longitude: lng } = pos.coords
+        const kmExtra: Record<string, any> = {}
+        if (tipo === 'checkout' && form.checkin_lat && form.checkin_lng) {
+          kmExtra.km_percorrido = haversineKm(form.checkin_lat, form.checkin_lng, lat, lng).toFixed(1)
+        }
         try {
           const r = await api.post('/rdo/geocode/reverse', { lat, lng })
           const ts = new Date().toISOString()
@@ -371,6 +377,7 @@ export default function RDOForm() {
             [`${tipo}_lng`]: lng,
             [`${tipo}_endereco`]: r.data.address,
             [`${tipo}_timestamp`]: ts,
+            ...kmExtra,
           }))
         } catch {
           // geocode failed but we still have coordinates
@@ -381,6 +388,7 @@ export default function RDOForm() {
             [`${tipo}_lng`]: lng,
             [`${tipo}_endereco`]: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
             [`${tipo}_timestamp`]: ts,
+            ...kmExtra,
           }))
         }
         setLoading(false)
@@ -559,6 +567,7 @@ export default function RDOForm() {
     if (!form.contrato) errors.push('Contrato é obrigatório')
     if (!form.data) errors.push('Data é obrigatória')
     if (!form.turno) errors.push('Turno é obrigatório')
+    if (!form.equipe_alocada || Number(form.equipe_alocada) <= 0) errors.push('Equipe alocada é obrigatória (informe o número de pessoas no campo)')
     if (atividadesRDO.length === 0) errors.push('Adicione ao menos uma atividade executada')
     if (!form.signatory_name.trim()) errors.push('Nome do responsável pela assinatura é obrigatório')
 

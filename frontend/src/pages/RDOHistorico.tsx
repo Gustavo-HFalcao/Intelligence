@@ -3,9 +3,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ClipboardList, ExternalLink, Play, Edit2, Trash2,
+  ClipboardList, ExternalLink, Play, Trash2,
   ChevronLeft, ChevronRight, Filter, Mail, Plus, X,
-  CheckCircle, FileText, Clock, AlertCircle, Building2, PenSquare, Loader2,
+  CheckCircle, FileText, Clock, AlertCircle, Building2, PenSquare, Loader2, Download,
 } from 'lucide-react'
 import api from '@/services/api'
 import { useAuth } from '@/context/AuthContext'
@@ -15,6 +15,13 @@ const TEAL   = '#2A9D8F'
 const RED    = '#EF4444'
 const GLASS  = 'rgba(255,255,255,0.04)'
 const BORDER = '1px solid rgba(201,139,42,0.15)'
+
+function fmtDate(s: string | undefined): string {
+  if (!s) return '—'
+  const d = s.slice(0, 10)
+  const [y, m, day] = d.split('-')
+  return `${day}/${m}/${y}`
+}
 
 function statusColor(s: string) {
   if (s === 'Submetido' || s === 'Aprovado') return TEAL
@@ -255,7 +262,7 @@ export default function RDOHistorico() {
                   <div className="flex items-center gap-3">
                     <Clock size={13} style={{ color: COPPER, flexShrink: 0 }} />
                     <div>
-                      <div className="text-sm font-semibold text-white/80 font-mono">{r.data}</div>
+                      <div className="text-sm font-semibold text-white/80 font-mono">{fmtDate(r.data)}</div>
                       <div className="text-[10px] text-white/30">
                         {r.contrato && <span style={{ color: COPPER }}>{r.contrato}</span>}
                         {r.turno && <span className="ml-2">{r.turno}</span>}
@@ -339,7 +346,7 @@ export default function RDOHistorico() {
                   style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
                   className="hover:bg-white/[0.02]"
                 >
-                  <td className="px-4 py-3 font-mono text-xs text-white/80">{r.data}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-white/80">{fmtDate(r.data)}</td>
                   <td className="px-4 py-3">
                     <span style={{ fontSize: 10, fontWeight: 700, color: COPPER, background: `${COPPER}12`, borderRadius: 4, padding: '2px 6px' }}>{r.contrato || '—'}</span>
                   </td>
@@ -373,12 +380,17 @@ export default function RDOHistorico() {
                           </button>
                         </>
                       )}
-                      {r.status === 'Submetido' && (
-                        <button
-                          onClick={() => navigate(`/rdo-form?contrato=${encodeURIComponent(r.contrato)}&draft_id=${r.id}&edit=1`)}
-                          style={{ background: `${COPPER}12`, border: `1px solid ${COPPER}25`, color: COPPER, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <Edit2 size={11} /> Editar
-                        </button>
+                      {(r.status === 'Submetido' || r.status === 'Aprovado') && r.pdf_url && (
+                        <a
+                          href={r.pdf_url}
+                          download
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ background: `${TEAL}12`, border: `1px solid ${TEAL}25`, color: TEAL, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}
+                          title="Baixar PDF do RDO"
+                        >
+                          <Download size={11} /> PDF
+                        </a>
                       )}
                     </div>
                   </td>

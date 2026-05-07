@@ -9,6 +9,13 @@ const RED    = '#EF4444'
 const GLASS  = 'rgba(255,255,255,0.04)'
 const BORDER = '1px solid rgba(201,139,42,0.15)'
 
+function fmtDate(s: string | undefined): string {
+  if (!s) return '—'
+  const d = s.slice(0, 10)
+  const [y, m, day] = d.split('-')
+  return `${day}/${m}/${y}`
+}
+
 async function fetchPublic(path: string) {
   const r = await fetch(path)
   if (!r.ok) throw new Error()
@@ -135,7 +142,7 @@ export default function RDOView() {
           </div>
         </div>
         <div style={{ fontSize: 13, color: '#666' }}>
-          Relatório Diário de Obra · Contrato <strong style={{ color: '#e2c87a' }}>{r.contrato}</strong> · {r.data}
+          Relatório Diário de Obra · Contrato <strong style={{ color: '#e2c87a' }}>{r.contrato}</strong> · {fmtDate(r.data)}
         </div>
         <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: r.status === 'Submetido' ? TEAL : COPPER, background: `${r.status === 'Submetido' ? TEAL : COPPER}20`, padding: '3px 10px', borderRadius: 6 }}>
@@ -149,7 +156,7 @@ export default function RDOView() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
         <InfoBlock label="Projeto" value={r.projeto} />
         <InfoBlock label="Cliente" value={r.cliente} />
-        <InfoBlock label="Data" value={r.data} />
+        <InfoBlock label="Data" value={fmtDate(r.data)} />
         <InfoBlock label="Clima" value={r.clima} />
         <InfoBlock label="Turno" value={r.turno} />
         <InfoBlock label="Equipe Alocada" value={r.equipe_alocada} />
@@ -220,10 +227,16 @@ export default function RDOView() {
             <CheckCircle size={12} style={{ color: COPPER }} /> Atividades Executadas
           </h3>
           {ats.map((a: any) => {
-            const prodPct: number | null = a.prod_pct ?? null
-            const prodColor = prodPct === null ? '#666' : prodPct >= 100 ? TEAL : prodPct >= 70 ? COPPER : RED
-            const prodLabel = prodPct === null ? null : prodPct >= 100 ? 'Acima do plano' : prodPct >= 70 ? 'No ritmo' : 'Abaixo do plano'
+            const delta: number | null = a.delta_pct ?? null
+            const diaX: number | null = a.dia_x ?? null
+            const diaTotal: number | null = a.dia_total ?? null
             const hasProdQty = a.total_qty > 0 && a.exec_qty !== undefined
+            const deltaColor = delta === null ? '#666' : delta >= 0 ? TEAL : delta >= -5 ? COPPER : RED
+            const deltaLabel = delta === null ? null
+              : delta >= 0    ? `+${delta.toFixed(0)}% — adiantada`
+              : delta >= -5   ? `${delta.toFixed(0)}% — praticamente no ritmo`
+              : delta >= -15  ? `${delta.toFixed(0)}% — atenção necessária`
+              : `${delta.toFixed(0)}% — ação necessária`
             return (
               <div key={a.id} style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)', background: GLASS, borderRadius: 8, marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -238,14 +251,17 @@ export default function RDOView() {
                           {a.exec_qty?.toFixed(0)} / {a.total_qty?.toFixed(0)} {a.unidade}
                         </span>
                       )}
-                      {prodLabel && (
-                        <span style={{ fontSize: 10, color: prodColor, fontWeight: 700 }}>
-                          {prodPct}% do plano — {prodLabel}
+                      {diaX !== null && diaTotal !== null && (
+                        <span style={{ fontSize: 10, color: '#555' }}>Dia {diaX}/{diaTotal}</span>
+                      )}
+                      {deltaLabel && (
+                        <span style={{ fontSize: 10, color: deltaColor, fontWeight: 700 }}>
+                          {deltaLabel}
                         </span>
                       )}
                       {a.termino_previsto && (
                         <span style={{ fontSize: 10, color: '#555' }}>
-                          📅 Prazo: {a.termino_previsto}
+                          📅 Prazo: {fmtDate(a.termino_previsto)}
                         </span>
                       )}
                     </div>

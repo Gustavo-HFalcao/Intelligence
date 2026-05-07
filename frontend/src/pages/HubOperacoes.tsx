@@ -14,6 +14,7 @@ import {
   ArrowRight, Gauge, Sparkles, X, CalendarCheck, MinusCircle, ChevronDown,
   ChevronRight, Pencil, Trash2, CalendarRange, MapPin, HardHat,
   Download, Send, Paperclip, Bell, FileText, AlertOctagon, Banknote,
+  Edit2, Building2, ShieldCheck, Calculator, PieChart, Info,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import ActivityModal from '@/components/ActivityModal'
@@ -1124,7 +1125,11 @@ function ProdutividadeSection({ allRows, refDate }: { allRows: any[]; refDate?: 
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    {prodPct !== null ? (
+                    {(a.tipo_medicao === 'marco' || a.unidade === 'marco') ? (
+                      <span style={{ color: pct >= 100 ? TEAL : COPPER, fontWeight: 700, fontSize: 10 }}>
+                        {pct >= 100 ? '✓ Marco Concluído' : 'Marco — Pendente'}
+                      </span>
+                    ) : prodPct !== null ? (
                       <div>
                         <span style={{ color: prodPct >= 100 ? TEAL : prodPct >= 70 ? COPPER : RED, fontWeight: 700, fontSize: 10 }}>
                           {prodPct}% do planejado
@@ -1810,103 +1815,775 @@ function TimelineTab({ contrato }: { contrato: string }) {
   )
 }
 
-function FinanceiroTab({ contrato }: { contrato: string }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['hub-financeiro', contrato],
-    queryFn:  () => api.get(`/hub/financeira?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: true,
-    placeholderData: keepPreviousData,
-    enabled:  !!contrato,
-  })
+// ── Financial CRUD helpers (used only inside FinanceiroTab) ───────────────────
 
-  if (isLoading) return <Skeleton />
-  const d = data || {}
-  const series: any[] = d.series ?? []
-  const burnPct = d.budget_planejado > 0
-    ? Math.min(100, (d.budget_realizado / d.budget_planejado) * 100)
-    : 0
-  const cpiGood = (d.cpi ?? 0) >= 1
+function fmtBRL(v: any) {
+  const n = typeof v === 'number' ? v : parseFloat(String(v || '0').replace(/[^\d.,-]/g, '').replace(',', '.'))
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(isNaN(n) ? 0 : n)
+}
 
+function BrlInput({ value, onChange, placeholder, className }: {
+  value: number; onChange: (v: number) => void; placeholder?: string; className?: string
+}) {
+  const fmt = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
+  const [display, setDisplay] = useState(() => fmt(value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDisplay(fmt(value)) }, [value, focused])
   return (
-    <div className="flex flex-col gap-8 animate-enter">
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Budget Planejado</div>
-          <div className="text-xl font-bold font-display text-white">{_fmt(d.budget_planejado)}</div>
+    <input
+      value={display}
+      onChange={e => setDisplay(e.target.value.replace(/[^\d,.]/g, ''))}
+      onFocus={e => { setFocused(true); e.target.select() }}
+      onBlur={() => {
+        setFocused(false)
+        const raw = display.replace(/\./g, '').replace(',', '.')
+        const n = parseFloat(raw) || 0
+        onChange(n)
+        setDisplay(n > 0 ? fmt(n) : '')
+      }}
+      placeholder={placeholder ?? '0,00'}
+      className={className}
+      inputMode="decimal"
+    />
+  )
+}
+
+const EVM_DESC: Record<string, { full: string; formula: string; good: string }> = {
+  CPI:  { full: 'Cost Performance Index', formula: 'CPI = EV ÷ AC', good: '≥ 1.0 = gastando menos do que o valor entregue' },
+  SPI:  { full: 'Schedule Performance Index', formula: 'SPI = EV ÷ PV', good: '≥ 1.0 = avanço físico à frente do planejado' },
+  EAC:  { full: 'Estimate at Completion', formula: 'EAC = BAC ÷ CPI', good: 'Projeção do custo total ao fim da obra' },
+  VAC:  { full: 'Variance at Completion', formula: 'VAC = BAC − EAC', good: 'Positivo = economia. Negativo = estouro projetado' },
+  TCPI: { full: 'To-Complete Performance Index', formula: 'TCPI = (BAC−EV)÷(BAC−AC)', good: '≤ 1.0 = meta alcançável' },
+  BAC:  { full: 'Budget at Completion', formula: 'Soma de todos os valores previstos', good: 'Referência máxima de orçamento aprovado' },
+  PV:   { full: 'Planned Value', formula: 'Soma do orçamento planejado até hoje', good: 'Baseline do quanto deveria ter sido gasto' },
+  EV:   { full: 'Earned Value', formula: 'EV = BAC × % Avanço Físico', good: 'Quanto do orçamento foi "ganho" pelo avanço real' },
+  AC:   { full: 'Actual Cost', formula: 'Soma de todos os lançamentos', good: 'Total desembolsado até o momento' },
+  CV:   { full: 'Cost Variance', formula: 'CV = EV − AC', good: 'Positivo = sob controle. Negativo = gastando mais' },
+}
+
+function FinStatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    previsto: 'bg-white/5 text-white/40 border-white/10',
+    em_andamento: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    parcial: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    concluido: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+    executado: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+    cancelado: 'bg-red-500/10 text-red-400 border-red-500/20',
+  }
+  return (
+    <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${map[status] ?? 'bg-white/5 text-white/40'}`}>
+      {status.replace('_', ' ')}
+    </span>
+  )
+}
+
+function FinEVMTooltip({ metric }: { metric: string }) {
+  const [open, setOpen] = useState(false)
+  const desc = EVM_DESC[metric]
+  if (!desc) return null
+  return (
+    <div className="relative inline-block">
+      <button onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} className="p-0.5 rounded text-white/20 hover:text-white/60">
+        <Info size={11} />
+      </button>
+      {open && (
+        <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-[#0d1117] border border-white/10 rounded-xl p-3 shadow-2xl pointer-events-none">
+          <div className="text-[9px] font-black text-copper uppercase tracking-widest mb-1">{metric}</div>
+          <div className="text-[9px] text-white/70 mb-2">{desc.full}</div>
+          <div className="font-mono text-[9px] text-teal-400 bg-teal-500/5 border border-teal-500/20 rounded px-2 py-1 mb-1">{desc.formula}</div>
+          <div className="text-[9px] text-white/40">{desc.good}</div>
         </div>
-        <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Executado</div>
-          <div className="text-xl font-bold font-display text-teal-400">{_fmt(d.budget_realizado)}</div>
+      )}
+    </div>
+  )
+}
+
+function FinEVMCard({ metric, fmt, good }: { metric: string; fmt: string; good: boolean }) {
+  return (
+    <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{metric}</span>
+        <FinEVMTooltip metric={metric} />
+      </div>
+      <div className="text-lg font-black font-mono" style={{ color: good ? TEAL : RED }}>{fmt}</div>
+      <div className="text-[9px]" style={{ color: good ? TEAL : RED }}>{good ? 'OK' : 'Atenção'}</div>
+    </div>
+  )
+}
+
+function FinSCurveTip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3 text-[10px] shadow-xl">
+      <div className="font-mono text-white/40 mb-2">{label}</div>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4">
+          <span className="text-white/60">{p.name}</span>
+          <span className="font-mono font-black" style={{ color: p.color }}>{fmtBRL(p.value)}</span>
         </div>
-        <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">Saldo</div>
-          <div className="text-xl font-bold font-display text-copper">{_fmt(d.saldo)}</div>
-          <div className="h-1 w-full bg-white/5 rounded-full mt-3 overflow-hidden">
-            <div className="h-full bg-teal-500 rounded-full transition-all duration-700" style={{ width: `${burnPct}%` }} />
+      ))}
+    </div>
+  )
+}
+
+function FinModalNovoCusto({ contrato, cats, atividades, onClose, onSaved, qc }: {
+  contrato: string; cats: any[]; atividades: any[]; onClose: () => void; onSaved: () => void; qc: any
+}) {
+  const [form, setForm] = useState<Record<string, any>>({ status: 'previsto' })
+  const f = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
+  const mut = useMutation({
+    mutationFn: (b: any) => api.post(`/financeiro/${contrato}`, b).then(r => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fin', contrato] }); onSaved(); onClose() },
+  })
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-2xl bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-copper/10 border border-copper/20"><DollarSign size={16} className="text-copper" /></div>
+            <span className="text-sm font-black uppercase tracking-widest text-white">Novo Item de Custo</span>
           </div>
-          <div className="text-[9px] text-text-muted mt-1">{burnPct.toFixed(1)}% executado</div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white"><X size={16} /></button>
         </div>
-        <div className="bg-void/40 border border-white/5 p-6 rounded-2xl">
-          <div className="text-[10px] text-text-muted uppercase font-black tracking-widest mb-2">CPI</div>
-          <div className="text-xl font-bold font-display" style={{ color: cpiGood ? TEAL : RED }}>{d.cpi}</div>
-          <div className="text-[9px] mt-1" style={{ color: cpiGood ? TEAL : RED }}>
-            {cpiGood ? '✓ Custo sob controle' : '⚠ Acima do previsto'}
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Categoria *</label>
+            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper outline-none"
+              onChange={e => { f('categoria_id', e.target.value); f('categoria_nome', cats.find(c => c.id === e.target.value)?.nome ?? '') }}>
+              <option value="">Selecionar...</option>
+              {cats.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
           </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Empresa / Fornecedor</label>
+            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" placeholder="Nome do fornecedor" onChange={e => f('empresa', e.target.value)} />
+          </div>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Descrição *</label>
+            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" placeholder="Descreva o item de custo" onChange={e => f('descricao', e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor Previsto (R$) *</label>
+            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper font-mono outline-none" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data de Referência</label>
+            <input type="date" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" onChange={e => f('data_custo', e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Atividade Vinculada</label>
+            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" onChange={e => f('atividade_id', e.target.value)}>
+              <option value="">Nenhuma</option>
+              {atividades.map((a: any) => <option key={a.id} value={a.id}>{a.atividade ?? a.nome ?? a.id}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Status</label>
+            <select defaultValue="previsto" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" onChange={e => f('status', e.target.value)}>
+              {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observações</label>
+            <textarea rows={2} className="w-full bg-void border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/60 outline-none resize-none" placeholder="Notas opcionais" onChange={e => f('observacoes', e.target.value)} />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/5">
+          {(!form.categoria_id || !form.descricao || !form.valor_previsto) && (
+            <span className="text-[9px] text-white/30 mr-auto">
+              {!form.categoria_id ? 'Selecione uma categoria' : !form.descricao ? 'Informe uma descrição' : 'Informe o valor previsto'}
+            </span>
+          )}
+          <Button onClick={onClose} variant="outline" className="border-white/10 text-white/40 text-xs h-9">Cancelar</Button>
+          <Button onClick={() => mut.mutate({ ...form })} disabled={mut.isPending || !form.categoria_id || !form.descricao || !form.valor_previsto}
+            className="bg-copper text-void font-black text-xs h-9 px-6 hover:bg-copper/90 disabled:opacity-40">
+            {mut.isPending ? 'Salvando...' : 'Criar Item'}
+          </Button>
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* S-Curve diária */}
-      <div className="bg-void/40 border border-white/5 p-8 rounded-3xl">
-        <div className="flex items-center gap-2 mb-2">
-          <Wallet size={16} className="text-copper" />
-          <h3 className="text-xs font-black uppercase tracking-widest text-white">S-Curve Financeira</h3>
-        </div>
-        <p className="text-[10px] text-text-muted mb-8 ml-6">Evolução acumulada diária — Baseline vs. Execução Real</p>
-        {series.length === 0 ? (
-          <div className="h-64 flex items-center justify-center text-white/20 text-sm">
-            Sem dados de lançamento para plotar
+function FinModalAvanco({ custo, contrato, onClose, qc }: { custo: any; contrato: string; onClose: () => void; qc: any }) {
+  const [valor, setValor]           = useState(0)
+  const [data, setData]             = useState(new Date().toISOString().slice(0, 10))
+  const [obs, setObs]               = useState('')
+  const [savedMsg, setSavedMsg]     = useState(false)
+  const [pendingDelLanc, setPendingDelLanc] = useState<string | null>(null)
+  const { data: lancData } = useQuery({
+    queryKey: ['fin-lanc', custo.id],
+    queryFn: () => api.get(`/financeiro/${contrato}/lancamentos/${custo.id}`).then(r => r.data),
+    staleTime: 30_000,
+  })
+  const lancamentos: any[] = lancData?.lancamentos ?? []
+  const delLanc = useMutation({
+    mutationFn: (id: string) => api.delete(`/financeiro/lancamentos/${id}`).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fin-lanc', custo.id] })
+      qc.invalidateQueries({ queryKey: ['fin', contrato] })
+      setPendingDelLanc(null)
+    },
+  })
+  const mut = useMutation({
+    mutationFn: (b: any) => api.post(`/financeiro/${contrato}/lancamentos/${custo.id}`, b).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fin-lanc', custo.id] })
+      qc.invalidateQueries({ queryKey: ['fin', contrato] })
+      setValor(0); setObs('')
+      setSavedMsg(true); setTimeout(() => setSavedMsg(false), 2500)
+    },
+  })
+  const saldo  = custo.valor_previsto - custo.valor_executado
+  const overrun = valor > 0 && valor > saldo && saldo > 0
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/5">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5"><Zap size={14} className="text-teal-400" /><span className="text-sm font-black uppercase tracking-widest text-white">Registrar Pagamento</span></div>
+            <p className="text-[10px] text-white/40 ml-5">{custo.descricao}</p>
           </div>
-        ) : (
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={series} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="hub_fp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={COPPER} stopOpacity={0.12} />
-                    <stop offset="95%" stopColor={COPPER} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="hub_fe" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={TEAL} stopOpacity={0.18} />
-                    <stop offset="95%" stopColor={TEAL} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                <XAxis
-                  dataKey="data"
-                  axisLine={false} tickLine={false}
-                  tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }}
-                  interval={Math.max(0, Math.floor(series.length / 7) - 1)}
-                  dy={8}
-                />
-                <YAxis
-                  axisLine={false} tickLine={false}
-                  tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }}
-                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip content={<SCurveFinTip />} />
-                <Legend
-                  formatter={v => <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{v}</span>}
-                  iconType="circle" iconSize={8}
-                />
-                <Area type="monotone" dataKey="previsto_acum"  stroke={COPPER} strokeWidth={2}   fill="url(#hub_fp)" name="Baseline" dot={false} />
-                <Area type="monotone" dataKey="executado_acum" stroke={TEAL}   strokeWidth={2.5} fill="url(#hub_fe)" name="Executado" dot={{ r: 3, fill: TEAL, strokeWidth: 0 }} activeDot={{ r: 5 }} />
-              </AreaChart>
-            </ResponsiveContainer>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white"><X size={16} /></button>
+        </div>
+        <div className="px-6 pt-5 pb-4">
+          <div className="flex justify-between text-[9px] font-black uppercase tracking-widest mb-2">
+            <span className="text-white/40">Executado</span>
+            <span className="text-teal-400">{fmtBRL(custo.valor_executado)} / {fmtBRL(custo.valor_previsto)}</span>
+          </div>
+          <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className="h-full bg-teal-500 rounded-full transition-all duration-700"
+              style={{ width: `${Math.min(100, custo.valor_previsto > 0 ? (custo.valor_executado / custo.valor_previsto) * 100 : 0)}%` }} />
+          </div>
+          <div className="text-[9px] text-white/30 mt-1.5">Saldo disponível: {fmtBRL(saldo)}</div>
+        </div>
+        <div className="px-6 pb-4 grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor (R$) *</label>
+            <BrlInput value={valor} onChange={setValor} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-teal-400 font-mono outline-none" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data</label>
+            <input type="date" value={data} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" onChange={e => setData(e.target.value)} />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observação</label>
+            <input value={obs} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" placeholder="Opcional" onChange={e => setObs(e.target.value)} />
+          </div>
+          {overrun && (
+            <div className="col-span-2 flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+              <AlertTriangle size={12} className="text-amber-400 shrink-0" />
+              <span className="text-[9px] text-amber-400">Valor excede o saldo de {fmtBRL(saldo)} — o item ficará em estouro</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 pb-4">
+          {savedMsg && <span className="text-[10px] text-teal-400 font-black mr-auto">✓ Registrado com sucesso</span>}
+          <Button onClick={onClose} variant="outline" className="border-white/10 text-white/40 text-xs h-9">Fechar</Button>
+          <Button onClick={() => mut.mutate({ valor, data, observacoes: obs })}
+            disabled={mut.isPending || valor <= 0}
+            className="bg-teal-600 hover:bg-teal-500 text-white font-black text-xs h-9 px-6 disabled:opacity-40">
+            {mut.isPending ? 'Registrando...' : 'Registrar'}
+          </Button>
+        </div>
+        {lancamentos.length > 0 && (
+          <div className="border-t border-white/5 px-6 py-4">
+            <div className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-3 flex items-center gap-2"><Clock size={10} /> Histórico</div>
+            <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scroll">
+              {lancamentos.map((lc: any) => (
+                <div key={lc.id} className="flex items-center justify-between bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2 group">
+                  <div>
+                    <span className="text-teal-400 font-mono text-xs font-black">{lc.valor_fmt}</span>
+                    {lc.observacoes && <span className="text-white/30 text-[10px] ml-2">{lc.observacoes}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-white/30">{lc.data}</span>
+                    {pendingDelLanc === lc.id ? (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => delLanc.mutate(lc.id)} className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 text-[9px] font-black hover:bg-red-500/30">Excluir</button>
+                        <button onClick={() => setPendingDelLanc(null)} className="px-2 py-0.5 rounded bg-white/5 text-white/40 text-[9px] font-black">Não</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setPendingDelLanc(lc.id)} className="p-1 rounded hover:bg-red-500/20 text-red-400/30 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function FinModalEditar({ custo, cats, contrato, onClose, qc, onSaved }: { custo: any; cats: any[]; contrato: string; onClose: () => void; qc: any; onSaved?: () => void }) {
+  const [form, setForm] = useState({
+    categoria_id: custo.categoria_id, categoria_nome: custo.categoria_nome,
+    empresa: custo.empresa ?? '', descricao: custo.descricao,
+    valor_previsto: custo.valor_previsto, data_custo: custo.data_custo ?? '',
+    observacoes: custo.observacoes ?? '', status: custo.status,
+  })
+  const f = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
+  const mut = useMutation({
+    mutationFn: (b: any) => api.patch(`/financeiro/${custo.id}`, b).then(r => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fin', contrato] }); onClose(); onSaved?.() },
+  })
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-xl bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/5">
+          <div className="flex items-center gap-3"><Edit2 size={14} className="text-copper" /><span className="text-sm font-black uppercase tracking-widest text-white">Editar Item</span></div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white"><X size={16} /></button>
+        </div>
+        <div className="p-6 grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Categoria</label>
+            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper outline-none" value={form.categoria_id}
+              onChange={e => { f('categoria_id', e.target.value); f('categoria_nome', cats.find(c => c.id === e.target.value)?.nome ?? '') }}>
+              {cats.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Empresa</label>
+            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.empresa} onChange={e => f('empresa', e.target.value)} />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Descrição</label>
+            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.descricao} onChange={e => f('descricao', e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor Previsto (R$)</label>
+            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper font-mono outline-none" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data</label>
+            <input type="date" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.data_custo} onChange={e => f('data_custo', e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Status</label>
+            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" value={form.status} onChange={e => f('status', e.target.value)}>
+              {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observações</label>
+            <textarea rows={2} className="w-full bg-void border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/60 outline-none resize-none" value={form.observacoes} onChange={e => f('observacoes', e.target.value)} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-white/5">
+          <Button onClick={onClose} variant="outline" className="border-white/10 text-white/40 text-xs h-9">Cancelar</Button>
+          <Button onClick={() => mut.mutate({ ...form, data: form.data_custo })} disabled={mut.isPending}
+            className="bg-copper text-void font-black text-xs h-9 px-6 hover:bg-copper/90">
+            {mut.isPending ? 'Salvando...' : 'Salvar'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FinCategoriaGrupo({ nome, itens, contrato, cats, onAvanco, onEdit, onDelete }: {
+  nome: string; itens: any[]; contrato: string; cats: any[];
+  onAvanco: (c: any) => void; onEdit: (c: any) => void; onDelete: (id: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const totalPrev = itens.reduce((s, r) => s + r.valor_previsto, 0)
+  const totalExec = itens.reduce((s, r) => s + r.valor_executado, 0)
+  const pct = totalPrev > 0 ? Math.min(100, (totalExec / totalPrev) * 100) : 0
+  return (
+    <div className="rounded-2xl border border-white/5 overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-5 py-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+        <div className="flex items-center gap-3">
+          {open ? <ChevronDown size={14} className="text-copper" /> : <ChevronRight size={14} className="text-white/30" />}
+          <span className="text-[10px] font-black uppercase tracking-widest text-white">{nome}</span>
+          <span className="text-[9px] text-white/30 font-mono">{itens.length} iten{itens.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="flex items-center gap-6">
+          <div className="text-right hidden sm:block">
+            <div className="text-[9px] text-white/30 uppercase tracking-widest">Previsto</div>
+            <div className="text-xs font-mono font-black text-copper">{fmtBRL(totalPrev)}</div>
+          </div>
+          <div className="text-right hidden sm:block">
+            <div className="text-[9px] text-white/30 uppercase tracking-widest">Executado</div>
+            <div className="text-xs font-mono font-black text-teal-400">{fmtBRL(totalExec)}</div>
+          </div>
+          <div className="flex items-center gap-2 min-w-[80px]">
+            <div className="h-1.5 flex-1 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-full bg-teal-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-[9px] font-mono text-white/40 w-8 text-right">{pct.toFixed(0)}%</span>
+          </div>
+        </div>
+      </button>
+      {open && (
+        <div className="divide-y divide-white/[0.02]">
+          {itens.map(r => {
+            const pctI = r.valor_previsto > 0 ? Math.min(100, (r.valor_executado / r.valor_previsto) * 100) : 0
+            return (
+              <div key={r.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.015] transition-colors group">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-white truncate">{r.descricao}</div>
+                  {r.empresa && <div className="flex items-center gap-1 mt-0.5"><Building2 size={9} className="text-white/20" /><span className="text-[9px] text-white/30">{r.empresa}</span></div>}
+                </div>
+                <div className="flex items-center gap-2 w-28 shrink-0 hidden md:flex">
+                  <div className="h-1 flex-1 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full bg-teal-500 rounded-full" style={{ width: `${pctI}%` }} />
+                  </div>
+                  <span className="text-[9px] font-mono text-white/30 w-7 text-right">{pctI.toFixed(0)}%</span>
+                </div>
+                <div className="text-right shrink-0 hidden sm:block">
+                  <div className="text-[9px] text-white/30">Prev</div>
+                  <div className="text-xs font-mono text-copper">{r.valor_previsto_fmt}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[9px] text-white/30">Exec</div>
+                  <div className="text-xs font-mono text-teal-400">{r.valor_executado_fmt}</div>
+                </div>
+                <div className="shrink-0 hidden lg:block"><FinStatusBadge status={r.status} /></div>
+                {pendingDelete === r.id ? (
+                  <div className="flex items-center gap-1.5 shrink-0 animate-enter">
+                    <span className="text-[9px] text-white/40">Confirmar?</span>
+                    <button onClick={() => { onDelete(r.id); setPendingDelete(null) }} className="px-2 py-1 rounded-lg bg-red-500/20 text-red-400 text-[9px] font-black hover:bg-red-500/30">Sim</button>
+                    <button onClick={() => setPendingDelete(null)} className="px-2 py-1 rounded-lg bg-white/5 text-white/40 text-[9px] font-black hover:bg-white/10">Não</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => onAvanco(r)} className="p-1.5 rounded-lg hover:bg-teal-500/20 text-teal-400/50 hover:text-teal-400" title="Registrar Pagamento"><Zap size={13} /></button>
+                    <button onClick={() => onEdit(r)} className="p-1.5 rounded-lg hover:bg-copper/20 text-copper/50 hover:text-copper" title="Editar"><Edit2 size={13} /></button>
+                    <button onClick={() => setPendingDelete(r.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400/40 hover:text-red-400" title="Excluir"><Trash2 size={13} /></button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FinanceiroTab({ contrato }: { contrato: string }) {
+  const qc = useQueryClient()
+  const [finTab, setFinTab]       = useState<'lancamentos' | 'scurve' | 'bycat' | 'evm'>('lancamentos')
+  const [modalNovo, setModalNovo] = useState(false)
+  const [avancoItem, setAvancoItem] = useState<any>(null)
+  const [editItem, setEditItem]   = useState<any>(null)
+  const [filterCat, setFilterCat] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['fin', contrato],
+    queryFn:  () => api.get(`/financeiro/${contrato}`).then(r => r.data),
+    staleTime: 2 * 60_000,
+    refetchOnWindowFocus: true,
+    placeholderData: keepPreviousData,
+    enabled: !!contrato,
+  })
+
+  const { data: ativData } = useQuery({
+    queryKey: ['hub-cronograma', contrato],
+    queryFn:  () => api.get(`/hub/cronograma?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
+    staleTime: Infinity,
+    enabled: !!contrato,
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/financeiro/${id}`).then(r => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fin', contrato] }); showToast('Item excluído') },
+  })
+
+  if (isLoading) return <Skeleton />
+
+  const d        = data || {}
+  const custos: any[]  = d.custos ?? []
+  const cats: any[]    = d.categorias ?? []
+  const scurve: any[]  = d.scurve ?? []
+  const bycat: any[]   = d.by_categoria ?? []
+  const evm            = d.evm ?? {}
+  const atividades: any[] = ativData?.atividades ?? []
+
+  const custosFiltrados = custos.filter(r => {
+    if (filterCat && r.categoria_nome !== filterCat) return false
+    if (filterStatus && r.status !== filterStatus) return false
+    return true
+  })
+
+  const grupos: Record<string, any[]> = {}
+  for (const r of custosFiltrados) {
+    const cat = r.categoria_nome || '— Sem Categoria'
+    if (!grupos[cat]) grupos[cat] = []
+    grupos[cat].push(r)
+  }
+
+  const totalPrev = custos.reduce((s, r) => s + r.valor_previsto, 0)
+  const totalExec = custos.reduce((s, r) => s + r.valor_executado, 0)
+  const burnPct   = totalPrev > 0 ? Math.min(100, (totalExec / totalPrev) * 100) : 0
+
+  return (
+    <div className="flex flex-col gap-6 animate-enter">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="glass-panel p-5 border-white/5">
+          <div className="flex items-center gap-2 mb-3"><div className="p-1.5 rounded-lg bg-white/5"><Wallet size={14} className="text-white/60" /></div><span className="text-[9px] font-black uppercase tracking-widest text-white/40">Total Previsto</span></div>
+          <div className="text-xl font-black font-mono text-white">{fmtBRL(totalPrev)}</div>
+          <div className="text-[9px] text-white/20 mt-1">{custos.length} itens de custo</div>
+        </div>
+        <div className="glass-panel p-5 border-white/5">
+          <div className="flex items-center gap-2 mb-3"><div className="p-1.5 rounded-lg bg-teal-500/10"><TrendingUp size={14} className="text-teal-400" /></div><span className="text-[9px] font-black uppercase tracking-widest text-white/40">Executado</span></div>
+          <div className="text-xl font-black font-mono text-teal-400">{fmtBRL(totalExec)}</div>
+          <div className="text-[9px] text-teal-400/40 mt-1">{d.kpis?.concluidos ?? 0} concluídos</div>
+        </div>
+        <div className="glass-panel p-5 border-white/5">
+          <div className="flex items-center gap-2 mb-3"><div className="p-1.5 rounded-lg bg-copper/10"><ShieldCheck size={14} className="text-copper" /></div><span className="text-[9px] font-black uppercase tracking-widest text-white/40">Saldo</span></div>
+          <div className="text-xl font-black font-mono text-copper">{fmtBRL(totalPrev - totalExec)}</div>
+          <div className="text-[9px] text-white/20 mt-1">Remanescente</div>
+        </div>
+        <div className="glass-panel p-5 border-white/5">
+          <div className="flex items-center gap-2 mb-3"><div className="p-1.5 rounded-lg bg-amber-500/10"><Activity size={14} className="text-amber-400" /></div><span className="text-[9px] font-black uppercase tracking-widest text-white/40">Burn Rate</span></div>
+          <div className="text-xl font-black font-mono" style={{ color: burnPct > 90 ? RED : burnPct > 70 ? '#F59E0B' : TEAL }}>{burnPct.toFixed(1)}%</div>
+          <div className="h-1.5 w-full bg-white/5 rounded-full mt-2 overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${burnPct}%`, background: burnPct > 90 ? RED : burnPct > 70 ? '#F59E0B' : TEAL }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-1 bg-white/[0.02] border border-white/5 p-1 rounded-xl">
+          {[
+            { id: 'lancamentos', label: 'Lançamentos', icon: FileText },
+            { id: 'scurve',      label: 'Curva-S',     icon: TrendingUp },
+            { id: 'bycat',       label: 'Por Categoria', icon: PieChart },
+            { id: 'evm',         label: 'EVM',          icon: Calculator },
+          ].map(t => (
+            <button key={t.id} onClick={() => setFinTab(t.id as any)}
+              className={`px-3 py-2 rounded-lg flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${finTab === t.id ? 'bg-copper text-void shadow-lg' : 'text-text-muted hover:text-white'}`}>
+              <t.icon size={12} /> {t.label}
+            </button>
+          ))}
+        </div>
+        {finTab === 'lancamentos' && (
+          <Button onClick={() => setModalNovo(true)} className="bg-void border border-copper/40 hover:border-copper text-copper font-black text-[10px] uppercase tracking-widest h-9 px-4">
+            <Plus size={14} className="mr-2" /> Novo Item
+          </Button>
+        )}
+      </div>
+
+      {/* Lançamentos */}
+      {finTab === 'lancamentos' && (
+        <div className="flex flex-col gap-3 animate-enter">
+          {(cats.length > 0 || custos.length > 0) && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <select className="bg-void border border-white/10 rounded-lg h-8 px-3 text-[10px] text-white/60 outline-none" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+                <option value="">Todas categorias</option>
+                {cats.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+              <select className="bg-void border border-white/10 rounded-lg h-8 px-3 text-[10px] text-white/60 outline-none" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                <option value="">Todos status</option>
+                {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+              </select>
+              {(filterCat || filterStatus) && (
+                <button onClick={() => { setFilterCat(''); setFilterStatus('') }} className="text-[9px] text-white/30 hover:text-white flex items-center gap-1">
+                  <X size={10} /> Limpar
+                </button>
+              )}
+              <span className="text-[9px] text-white/20 ml-auto">{custosFiltrados.length} de {custos.length} itens</span>
+            </div>
+          )}
+          {Object.keys(grupos).length === 0 ? (
+            <div className="glass-panel p-20 text-center border-white/5">
+              <DollarSign size={32} className="text-white/10 mx-auto mb-4" />
+              <p className="text-white/20 text-sm font-bold">Nenhum item de custo cadastrado</p>
+              <button onClick={() => setModalNovo(true)} className="mt-4 text-copper text-[10px] font-black uppercase tracking-widest hover:underline">+ Criar primeiro item</button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {Object.entries(grupos).map(([cat, itens]) => (
+                <FinCategoriaGrupo key={cat} nome={cat} itens={itens} contrato={contrato} cats={cats}
+                  onAvanco={setAvancoItem} onEdit={setEditItem}
+                  onDelete={id => deleteMut.mutate(id)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Curva-S */}
+      {finTab === 'scurve' && (
+        <div className="glass-panel p-8 border-white/5 animate-enter">
+          <h3 className="text-xs font-black uppercase tracking-widest text-copper mb-1">Curva-S Acumulada</h3>
+          <p className="text-[10px] text-text-muted mb-8">Evolução diária: Baseline planejada vs. execução real</p>
+          {scurve.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-white/20 text-sm">Sem dados temporais</div>
+          ) : (
+            <div className="h-[360px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={scurve} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="fin_fp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COPPER} stopOpacity={0.12} /><stop offset="95%" stopColor={COPPER} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="fin_fe" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={TEAL} stopOpacity={0.15} /><stop offset="95%" stopColor={TEAL} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
+                  <XAxis dataKey="data" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }} interval={Math.max(0, Math.floor(scurve.length / 8) - 1)} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9, fontWeight: 700 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip content={<FinSCurveTip />} />
+                  <Legend formatter={v => <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{v}</span>} iconType="circle" iconSize={8} />
+                  <Area type="monotone" dataKey="previsto_acum" stroke={COPPER} strokeWidth={2} fill="url(#fin_fp)" name="Baseline" dot={false} />
+                  <Area type="monotone" dataKey="executado_acum" stroke={TEAL} strokeWidth={2.5} fill="url(#fin_fe)" name="Executado" dot={{ r: 3, fill: TEAL, strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Por Categoria */}
+      {finTab === 'bycat' && (
+        <div className="flex flex-col gap-4 animate-enter">
+          <div className="glass-panel p-8 border-white/5">
+            <h3 className="text-xs font-black uppercase tracking-widest text-copper mb-1">Distribuição por Categoria</h3>
+            <p className="text-[10px] text-text-muted mb-8">Previsto vs. executado por categoria de custo</p>
+            {bycat.length === 0 ? (
+              <div className="h-48 flex items-center justify-center text-white/20 text-sm">Sem dados</div>
+            ) : (
+              <div className="h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={bycat} layout="vertical" margin={{ left: 20, right: 30 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(255,255,255,0.03)" />
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 9 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+                    <YAxis type="category" dataKey="categoria" width={130} axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: 700 }} />
+                    <Tooltip contentStyle={{ background: '#0d1117', border: BORDER, borderRadius: 12 }} formatter={(v: any) => fmtBRL(v)} />
+                    <Legend formatter={v => <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{v}</span>} iconType="circle" iconSize={8} />
+                    <Bar dataKey="previsto" fill={COPPER} radius={[0, 4, 4, 0]} name="Previsto" barSize={14} />
+                    <Bar dataKey="executado" fill={TEAL} radius={[0, 4, 4, 0]} name="Executado" barSize={14} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+          <div className="glass-panel border-white/5 overflow-hidden">
+            <table className="w-full">
+              <thead><tr className="bg-white/[0.02] border-b border-white/5">
+                <th className="text-left px-5 py-3 text-[9px] font-black uppercase tracking-widest text-white/30">Categoria</th>
+                <th className="text-right px-5 py-3 text-[9px] font-black uppercase tracking-widest text-white/30">Previsto</th>
+                <th className="text-right px-5 py-3 text-[9px] font-black uppercase tracking-widest text-white/30">Executado</th>
+                <th className="text-right px-5 py-3 text-[9px] font-black uppercase tracking-widest text-white/30">%</th>
+                <th className="px-5 py-3" />
+              </tr></thead>
+              <tbody className="divide-y divide-white/[0.02]">
+                {bycat.map((r: any) => {
+                  const p = r.previsto > 0 ? Math.min(100, (r.executado / r.previsto) * 100) : 0
+                  return (
+                    <tr key={r.categoria} className="hover:bg-white/[0.015]">
+                      <td className="px-5 py-3 text-xs font-bold text-white">{r.categoria}</td>
+                      <td className="px-5 py-3 text-right font-mono text-xs text-copper">{fmtBRL(r.previsto)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-xs text-teal-400">{fmtBRL(r.executado)}</td>
+                      <td className="px-5 py-3 text-right text-[10px] font-mono text-white/40">{p.toFixed(1)}%</td>
+                      <td className="px-5 py-3 w-28"><div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-teal-500 rounded-full" style={{ width: `${p}%` }} /></div></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* EVM */}
+      {finTab === 'evm' && (
+        <div className="flex flex-col gap-6 animate-enter">
+          {Object.keys(evm).length === 0 ? (
+            <div className="glass-panel p-20 text-center border-white/5">
+              <Calculator size={32} className="text-white/10 mx-auto mb-4" />
+              <p className="text-white/20 text-sm font-bold">Sem dados suficientes para calcular EVM</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-3">Índices de Desempenho</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <FinEVMCard metric="CPI"  fmt={String(evm.CPI)}  good={evm.CPI >= 1} />
+                  <FinEVMCard metric="SPI"  fmt={String(evm.SPI)}  good={evm.SPI >= 1} />
+                  <FinEVMCard metric="TCPI" fmt={String(evm.TCPI)} good={evm.TCPI <= 1} />
+                  <FinEVMCard metric="CV"   fmt={(evm.CV >= 0 ? '+' : '-') + evm.CV_fmt} good={evm.CV >= 0} />
+                  <FinEVMCard metric="SV"   fmt={(evm.SV >= 0 ? '+' : '-') + evm.SV_fmt} good={evm.SV >= 0} />
+                </div>
+              </div>
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-3">Valores de Referência</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {([
+                    { m: 'BAC', fmt: evm.BAC_fmt, good: true },
+                    { m: 'EAC', fmt: evm.EAC_fmt, good: !evm.is_overrun },
+                    { m: 'VAC', fmt: (evm.is_overrun ? '-' : '+') + evm.VAC_fmt, good: !evm.is_overrun },
+                    { m: 'PV',  fmt: evm.PV_fmt,  good: true },
+                    { m: 'EV',  fmt: evm.EV_fmt,  good: true },
+                    { m: 'AC',  fmt: evm.AC_fmt,  good: true },
+                  ] as any[]).map(x => (
+                    <div key={x.m} className="bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-white/40">{x.m}</span>
+                        <FinEVMTooltip metric={x.m} />
+                      </div>
+                      <div className="text-base font-black font-mono" style={{ color: x.good ? '#FFF' : RED }}>{x.fmt}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="glass-panel p-6 border-white/5">
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-6 flex items-center gap-2">
+                  <Activity size={12} className="text-copper" /> Avanço Físico vs. Financeiro
+                </h3>
+                <div className="space-y-5">
+                  <div>
+                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest mb-2">
+                      <span className="text-copper">Físico</span><span className="text-white">{evm.physical_pct}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-copper rounded-full transition-all" style={{ width: `${evm.physical_pct}%` }} /></div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest mb-2">
+                      <span className="text-teal-400">Financeiro</span><span className="text-white">{evm.cost_pct}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-teal-500 rounded-full transition-all" style={{ width: `${evm.cost_pct}%` }} /></div>
+                  </div>
+                </div>
+                {evm.is_overrun && (
+                  <div className="mt-6 flex items-start gap-3 bg-red-500/5 border border-red-500/20 rounded-xl p-4">
+                    <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-xs font-black text-red-400 mb-1">Alerta de Estouro Orçamentário</div>
+                      <div className="text-[10px] text-red-400/60">Projeção indica custo final {evm.VAC_fmt} acima do BAC.</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Modals */}
+      {modalNovo && <FinModalNovoCusto contrato={contrato} cats={cats} atividades={atividades} onClose={() => setModalNovo(false)} onSaved={() => showToast('Item criado com sucesso')} qc={qc} />}
+      {avancoItem && <FinModalAvanco custo={avancoItem} contrato={contrato} onClose={() => setAvancoItem(null)} qc={qc} />}
+      {editItem && <FinModalEditar custo={editItem} cats={cats} contrato={contrato} onClose={() => setEditItem(null)} qc={qc} onSaved={() => showToast('Item atualizado')} />}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[100] bg-teal-700 border border-teal-500/30 text-white text-xs font-black px-5 py-3 rounded-xl shadow-2xl animate-enter">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }
@@ -1972,10 +2649,10 @@ export default function HubOperacoes({ hubTab, onHubTabChange }: any) {
       { key: ['hub-cronograma', cod],   url: `/hub/cronograma?contrato=${encodeURIComponent(cod)}` },
       { key: ['hub-timeline', cod],     url: `/hub/timeline?contrato=${encodeURIComponent(cod)}` },
       { key: ['hub-auditoria', cod],    url: `/hub/auditoria?contrato=${encodeURIComponent(cod)}` },
-      { key: ['hub-financeiro', cod],   url: `/hub/financeira?contrato=${encodeURIComponent(cod)}` },
+      { key: ['fin', cod],              url: `/financeiro/${encodeURIComponent(cod)}` },
       { key: ['hub-agente-insights', cod], url: `/hub/agente/insights?contrato=${encodeURIComponent(cod)}` },
     ]
-    const FINANCIAL_KEYS = ['hub-dashboard', 'hub-financeiro']
+    const FINANCIAL_KEYS = ['hub-dashboard', 'fin']
     tabs.forEach(({ key, url }) => {
       const isFinancial = FINANCIAL_KEYS.includes(key[0] as string)
       queryClient.prefetchQuery({

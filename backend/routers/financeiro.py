@@ -7,11 +7,12 @@ from collections import defaultdict
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends
 
 from backend.integrations.supabase import sb_delete, sb_insert, sb_select, sb_update
 from backend.middleware.auth import get_current_user
 from backend.middleware.tenant import get_current_tenant
+from backend.integrations.ai import query as _ai_query
 
 router = APIRouter(prefix="/api/financeiro", tags=["financeiro"])
 
@@ -228,6 +229,27 @@ async def get_financeiro_all(
             "atividade_id":        _norm(r.get("atividade_id")),
             "observacoes":         _norm(r.get("observacoes")),
         })
+    # Per-contract breakdown
+    por_contrato: Dict[str, list] = defaultdict(list)
+    for r in custos:
+        por_contrato[r["contrato"]].append(r)
+    contratos_kpis = []
+    for cod, items in sorted(por_contrato.items()):
+        k = _compute_kpis(items)
+        evm_c = _compute_evm(items)
+        contratos_kpis.append({
+            "contrato":            cod,
+            "total_previsto":      k["total_previsto"],
+            "total_executado":     k["total_executado"],
+            "total_previsto_raw":  k["total_previsto_raw"],
+            "total_executado_raw": k["total_executado_raw"],
+            "saldo":               k["saldo"],
+            "pct_executado":       k["pct_executado"],
+            "n_itens":             k["total_itens"],
+            "cpi":                 evm_c.get("CPI", 0),
+            "is_overrun":          evm_c.get("is_overrun", False),
+        })
+
     cats = sb_select("fin_categorias", order="nome.asc", limit=100) or []
     return {
         "custos":         custos,
@@ -237,7 +259,79 @@ async def get_financeiro_all(
         "evm":            _compute_evm(custos),
         "categorias":     [{"id": str(c.get("id","")), "nome": str(c.get("nome",""))} for c in cats],
         "status_options": FIN_STATUS_OPTIONS,
+        "por_contrato":   contratos_kpis,
     }
+
+
+@router.get("/insights")
+async def get_financeiro_insights(
+    _user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Gera insights executivos sobre a carteira financeira via AI — visão de diretor."""
+    filters: Dict[str, Any] = {}
+    if client_id:
+        filters["client_id"] = client_id
+    rows = sb_select("fin_custos", filters=filters, order="created_at.asc", limit=5000) or []
+
+    por_contrato: Dict[str, list] = defaultdict(list)
+    for r in rows:
+        prev = _parse_float(r.get("valor_previsto", 0))
+        exec_ = _parse_float(r.get("valor_executado", 0))
+        por_contrato[_norm(r.get("contrato"))].append({
+            "valor_previsto": prev, "valor_executado": exec_,
+            "status": _norm(r.get("status"), "previsto"),
+            "data_custo": _norm(r.get("data"), "")[:10],
+        })
+
+    linhas = []
+    total_bac = total_ac = 0.0
+    overruns = []
+    for cod, items in sorted(por_contrato.items()):
+        k = _compute_kpis(items)
+        e = _compute_evm(items)
+        bac = sum(i["valor_previsto"] for i in items)
+        ac  = sum(i["valor_executado"] for i in items)
+        total_bac += bac
+        total_ac  += ac
+        cpi = e.get("CPI", 1.0)
+        if e.get("is_overrun"):
+            overruns.append(cod)
+        linhas.append(
+            f"  {cod}: BAC={_fmt_brl(bac)} AC={_fmt_brl(ac)} burn={k['pct_executado']:.1f}%"
+            f" CPI={cpi:.2f} SPI={e.get('SPI', 1.0):.2f} {'⚠ OVERRUN' if e.get('is_overrun') else 'OK'}"
+        )
+
+    if not linhas:
+        return {"insights": []}
+
+    context = (
+        f"CARTEIRA: {len(por_contrato)} contratos | BAC total={_fmt_brl(total_bac)} | AC total={_fmt_brl(total_ac)}"
+        f" | Burn geral={round(total_ac/total_bac*100,1) if total_bac else 0}%\n\n"
+        f"POR CONTRATO:\n" + "\n".join(linhas)
+    )
+
+    system_prompt = (
+        "Você é o diretor financeiro da construtora. Analise a carteira de obras e gere EXATAMENTE 3 insights executivos em JSON.\n"
+        "Formato: [{\"title\": str, \"body\": str, \"priority\": \"High\"|\"Medium\"|\"Low\", \"tipo\": str}]\n"
+        "Regras: use APENAS os dados fornecidos. title ≤ 55 chars. body ≤ 280 chars com números reais e recomendação acionável.\n"
+        "Foco executivo: eficiência de custo (CPI), estouro orçamentário, oportunidades de realocação, tendência geral da carteira."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": context},
+    ]
+    try:
+        raw = _ai_query(messages, max_tokens=700, temperature=0.3, client_id=client_id,
+                        prompt_preview="financeiro_insights_exec")
+        import json as _json
+        start = raw.find("[")
+        end   = raw.rfind("]") + 1
+        insights = _json.loads(raw[start:end]) if start >= 0 else []
+    except Exception:
+        insights = []
+
+    return {"insights": insights, "overruns": overruns, "n_contratos": len(por_contrato)}
 
 
 @router.get("/{contrato}")
@@ -289,7 +383,7 @@ async def get_financeiro(
 async def create_custo(
     contrato: str,
     body: Dict[str, Any] = Body(...),
-    user=Depends(get_current_user),
+    _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     payload = {

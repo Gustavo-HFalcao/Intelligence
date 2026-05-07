@@ -179,7 +179,31 @@ async def get_draft(
             "atividades": [_fmt_atividade(a) for a in atividades],
             "evidencias": [_fmt_evidencia(e) for e in evidencias],
         }
-    return {"draft": None, "atividades": [], "evidencias": []}
+
+    # Sem rascunho: calcula o próximo dia útil baseado nos dias_uteis do contrato
+    next_rdo_date = str(_date.today())
+    try:
+        from backend.routers.hub import _add_working_days, _parse_dias_uteis
+        # Busca o último RDO submetido para este contrato
+        last_rdos = sb_select(
+            "rdo_master",
+            filters={"contrato": contrato, "status": "Submetido"},
+            order="data.desc",
+            limit=1,
+        ) or []
+        # Busca dias úteis do contrato para avançar corretamente
+        contrato_row = sb_select("contratos", filters={"contrato": contrato}, limit=1) or []
+        dias_str = contrato_row[0].get("dias_uteis_semana", "") if contrato_row else ""
+        working_days = _parse_dias_uteis(dias_str)  # ex: {0,1,2,3,4,5} para seg-sab
+        if last_rdos:
+            last_date = str(last_rdos[0].get("data", ""))[:10]
+            if last_date:
+                # Avança 1 dia útil a partir do último RDO
+                next_rdo_date = _add_working_days(last_date, 2, working_days)  # +2 porque _add_working_days é 1-based
+    except Exception:
+        pass
+
+    return {"draft": None, "atividades": [], "evidencias": [], "next_rdo_date": next_rdo_date}
 
 
 @router.post("/draft")
@@ -525,11 +549,14 @@ async def submit_rdo(
             novo_exec = None
             unidade_hist = str(hub.get("unidade") or "")
 
-            # ── Marco concluído → 100% imediato ──────────────────────────────
+            # ── Marco concluído → 100% imediato + exec_qty = total_qty para display correto ─
             if is_marco and marco_concluido:
                 novo_pct = 100
                 if not has_subs:
                     hub_update["conclusao_pct"] = 100
+                    # Garante exec_qty = total_qty para que o cronograma mostre corretamente
+                    total_qty_hub = float(hub.get("total_qty") or 1)
+                    hub_update["exec_qty"] = total_qty_hub if total_qty_hub > 0 else 1.0
             # ── Percentual direto (não marco) ─────────────────────────────────
             elif unidade_at == "%" and quantidade > pct_atual:
                 novo_pct = min(100, int(quantidade))
@@ -634,7 +661,13 @@ async def submit_rdo(
         rdo_row_snap["data_rdo"] = str(rdo_row_snap.get("data", today_str))[:10]
         atividades_snap = list(sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or [])
         evidencias_snap = list(sb_select("rdo_evidencias", filters={"rdo_id": rdo_id}, limit=100) or [])
-        subs = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=50) or []
+        # Filtra subscribers pelo client_id para evitar vazamento entre tenants
+        _subs_all = sb_select("email_sender", filters={"contract": contrato, "module": "rdo"}, limit=50) or []
+        if client_id:
+            # Inclui subscribers sem client_id (legado) e do tenant correto
+            subs = [s for s in _subs_all if not s.get("client_id") or s.get("client_id") == client_id]
+        else:
+            subs = _subs_all
         email_list = [s["email"] for s in subs if s.get("email")]
 
         import threading as _threading
@@ -727,8 +760,7 @@ async def submit_rdo(
 def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: str) -> str:
     """Gera ai_summary para o RDO usando OpenAI. Chamado em thread — não bloqueia response."""
     try:
-        from backend.core.config import Config
-        import openai
+        from backend.integrations.ai import query as _ai_query
 
         contrato = rdo.get("contrato", "")
         data_rdo = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10]
@@ -742,6 +774,12 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
         hora_i = str(rdo.get("hora_inicio") or "")[:5]
         hora_f = str(rdo.get("hora_termino") or "")[:5]
 
+        # today_rdo: data do RDO — DEVE ser definida antes de qualquer cálculo de prazo
+        try:
+            today_rdo = _date.fromisoformat(data_rdo[:10])
+        except Exception:
+            today_rdo = _date.today()
+
         # Prazo e valor do contrato (Tier 1)
         dias_restantes_rdo = ""
         valor_contrato_rdo = ""
@@ -753,7 +791,9 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
                 if dt_fim:
                     d_fim_r = _date.fromisoformat(str(dt_fim)[:10])
                     dr = (d_fim_r - today_rdo).days
-                    dias_restantes_rdo = f"{dr} dias até o prazo final ({d_fim_r.isoformat()})"
+                    from backend.routers.hub import _working_days_between as _wdb_sum
+                    du = _wdb_sum(today_rdo, d_fim_r)
+                    dias_restantes_rdo = f"{dr}d corridos ({du} úteis) até {d_fim_r.strftime('%d/%m/%Y')}"
                 v = float(ci.get("valor_contratado") or 0)
                 if v > 0:
                     valor_contrato_rdo = f"R$ {v:,.0f}"
@@ -762,34 +802,29 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
 
         # Enriquece atividades com dados do cronograma
         hub_ativs = sb_select("hub_atividades", filters={"contrato": contrato}, limit=500) or []
-        hub_by_id = {str(h.get("id", "")): h for h in hub_ativs}
+        hub_by_id   = {str(h.get("id", "")): h for h in hub_ativs}
         hub_by_name = {str(h.get("atividade", "")).lower().strip(): h for h in hub_ativs}
-
-        from datetime import date as _date
-        today_rdo = _date.today()
-        try:
-            today_rdo = _date.fromisoformat(data_rdo[:10])
-        except Exception:
-            pass
 
         ativ_lines = []
         for at in atividades:
-            nome = str(at.get("atividade") or "").strip()
-            qty = at.get("quantidade", 0)
-            unit = str(at.get("unidade") or "")
-            efetivo = at.get("efetivo") or 0
-            is_marco = bool(at.get("is_marco"))
+            nome       = str(at.get("atividade") or "").strip()
+            qty        = at.get("quantidade", 0)
+            unit       = str(at.get("unidade") or "")
+            efetivo    = int(at.get("efetivo") or 0)
+            is_marco   = bool(at.get("is_marco"))
             marco_conc = bool(at.get("marco_concluido"))
 
-            ha = hub_by_id.get(str(at.get("atividade_id") or "")) or hub_by_name.get(nome.lower().strip(), {})
+            ha        = hub_by_id.get(str(at.get("atividade_id") or "")) or hub_by_name.get(nome.lower().strip(), {})
             pct_atual = float(ha.get("conclusao_pct") or 0)
-            ter = str(ha.get("termino_previsto", "?"))[:10]
-            ini = str(ha.get("inicio_previsto", "?"))[:10]
+            ter       = str(ha.get("termino_previsto", "?"))[:10]
+            ini       = str(ha.get("inicio_previsto", "?"))[:10]
             total_qty = float(ha.get("total_qty") or 0)
-            critico = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
+            exec_qty  = float(ha.get("exec_qty") or 0)
+            critico   = str(ha.get("critico", "")).lower() in ("sim", "true", "1")
 
-            # Calcula % esperado acumulado na data do RDO + posição dia X/Y (dias úteis)
+            # Posição dia X/Y e delta vs esperado (âncora = data do RDO)
             pct_esp_txt = ""
+            saldo_txt   = ""
             try:
                 from backend.routers.hub import _working_days_between as _wdb
                 from datetime import timedelta as _td
@@ -797,10 +832,15 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
                 d_ter = _date.fromisoformat(ter)
                 d_total_wd = max(1, _wdb(d_ini, d_ter + _td(days=1)))
                 d_dec_wd   = min(d_total_wd, max(0, _wdb(d_ini, today_rdo + _td(days=1))))
-                pct_esp = round(d_dec_wd / d_total_wd * 100)
-                delta = round(pct_atual - pct_esp)
-                status_prod = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
-                pct_esp_txt = f", dia {d_dec_wd}/{d_total_wd}, esp={pct_esp}%, acum={pct_atual:.0f}%, delta={delta:+d}% [{status_prod}]"
+                pct_esp    = round(d_dec_wd / d_total_wd * 100)
+                delta      = round(pct_atual - pct_esp)
+                status_p   = "ADIANTADO" if delta > 5 else "NO RITMO" if delta >= -5 else "ATRASADO"
+                pct_esp_txt = f", dia {d_dec_wd}/{d_total_wd}, esp={pct_esp}%, acum={pct_atual:.0f}%, delta={delta:+d}% [{status_p}]"
+                # Saldo físico para cálculo de efetivo mínimo pelo LLM
+                if total_qty > 0 and delta < 0:
+                    saldo = max(0.0, total_qty - exec_qty)
+                    dias_restantes_at = max(1, _wdb(today_rdo, d_ter))
+                    saldo_txt = f", saldo={saldo:.0f}{unit}, prazo em {dias_restantes_at}du"
             except Exception:
                 pass
 
@@ -809,69 +849,78 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
             elif unit == "%":
                 status_str = f"{int(qty)}% executado hoje"
             elif total_qty > 0:
-                status_str = f"{qty}{unit} executado hoje (total: {int(pct_atual)}% de {int(total_qty)}{unit})"
+                status_str = f"{qty}{unit} hoje (acum: {exec_qty:.0f}/{total_qty:.0f}{unit})"
             else:
                 status_str = f"{qty}{unit} executado"
 
-            # Produtividade por pessoa (Tier 1)
+            # Produtividade por pessoa — usa efetivo específico desta atividade no RDO
             prod_pessoa_txt = ""
-            if efetivo and qty and unit not in ("%", "marco", ""):
+            if efetivo > 0 and float(qty or 0) > 0 and unit not in ("%", "marco", ""):
                 try:
-                    pp = round(float(qty) / int(efetivo), 1)
-                    prod_pessoa_txt = f", {pp} {unit}/pessoa"
+                    pp = round(float(qty) / efetivo, 1)
+                    prod_pessoa_txt = f", {pp}{unit}/pessoa"
                 except Exception:
                     pass
 
-            # Observação do campo por atividade (Tier 1 — ouro)
-            obs_campo = str(at.get("observacao") or "").strip()
-            obs_txt = f"\n      Obs campo: \"{obs_campo[:120]}\"" if obs_campo else ""
-
+            obs_campo  = str(at.get("observacao") or "").strip()
+            obs_txt    = f"\n      Obs: \"{obs_campo[:120]}\"" if obs_campo else ""
             efetivo_txt = f" ({efetivo}p{prod_pessoa_txt})" if efetivo else ""
 
             ativ_lines.append(
-                f"  - {nome}{efetivo_txt}: {status_str}{pct_esp_txt}, prazo={ter}"
+                f"  - {nome}{efetivo_txt}: {status_str}{pct_esp_txt}{saldo_txt}, prazo={ter}"
                 f"{' [CRÍTICO]' if critico else ''}{obs_txt}"
             )
 
         ativ_text = "\n".join(ativ_lines) or "  Nenhuma atividade registrada."
 
-        prompt = f"""Você é um gestor sênior de obras escrevendo a análise executiva do RDO para o cliente.
-
-REGRAS ABSOLUTAS:
-1. delta ≥ 0% = atividade ADIANTADA ou NO RITMO → NUNCA alerte risco de prazo nesse caso.
-2. "dia X de Y com delta positivo" = ritmo acima do esperado → mencione como ponto forte.
-   Ex: "dia 1 de 2 com 60% real e 50% esperado" → está adiantado, no dia 2 haverá folga.
-3. "Obs campo" por atividade = nota do engenheiro de campo — use para contextualizar desvios.
-4. Produtividade por pessoa: se acima do esperado, é eficiência da equipe — destaque.
-5. Só alerte risco quando: delta < 0% E prazo restante não comporta a recuperação natural.
-6. Tom executivo: direto, sem alarmismo, sem linguagem burocrática.
-7. Se tudo está bem → diga claramente e sugira o que pode ser antecipado ou otimizado.
-
-DATA: {data_rdo}  |  CONTRATO: {contrato}
-PRAZO: {dias_restantes_rdo or 'não informado'} | VALOR: {valor_contrato_rdo or 'não informado'}
-CLIMA: {clima}  |  CHUVA: {chuva}  |  ACIDENTE: {acidente}
-EQUIPE TOTAL: {equipe} pessoas  |  HORÁRIO: {hora_i}–{hora_f}
-INTERRUPÇÃO: {interrupcao}
-OBSERVAÇÕES GERAIS DO CAMPO: {observacoes}
-ORIENTAÇÃO PARA AMANHÃ: {orientacao}
-
-ATIVIDADES DO DIA:
-(efetivo=pessoas nessa atividade | prod/pessoa | dia X/Y | esp%=esperado pelo cronograma | delta=[ADIANTADO/OK/ATRASADO])
-{ativ_text}
-
-Escreva análise executiva em 3-5 frases corridas, em português:
-- Frase 1: como foi o dia — produtividade, eficiência da equipe, condições
-- Frase 2-3: situação de cada atividade com os números reais — dia X/Y, delta, obs de campo
-- Frase 4-5: recomendação objetiva — se positivo, o que pode ser antecipado; se negativo, ação concreta"""
-
-        client_ai = openai.OpenAI(api_key=Config.OPENAI_API_KEY, timeout=60.0)
-        resp = client_ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
-            temperature=0.35,
+        _ex_neg = (
+            "Ex: Vedacao (3p, 161un/pessoa): -13%, saldo=189un, 1du restante."
+            " Efetivo min=ceil(189/161)=2p — atual tem 3p, suficiente se mantiver ritmo."
+            " Fixacao (+3%) pode ceder 1p se necessario."
         )
-        summary = resp.choices[0].message.content.strip() if resp.choices else ""
+
+        system_prompt = (
+            "Você é um gestor sênior de obras escrevendo a análise executiva do RDO.\n\n"
+            "REGRAS ABSOLUTAS:\n"
+            "1. delta >= 0% = ADIANTADA/NO RITMO — NUNCA gere alerta de prazo.\n"
+            "2. 'Obs campo' = voz do engenheiro — use para contextualizar desvios.\n"
+            "3. Só alerte risco quando: delta < -5% E dias restantes insuficientes para recuperação natural.\n"
+            "4. Tom executivo: objetivo, sem alarmismo, com números reais.\n\n"
+            "OBRIGATÓRIO para atividades com delta negativo — CALCULE e APRESENTE:\n"
+            "  a) Prod/pessoa/dia (informada no contexto como 'X un/pessoa')\n"
+            "  b) Efetivo mínimo: ceil(saldo / (dias_restantes_úteis × prod/pessoa))\n"
+            "  c) Fonte: há atividade adiantada que pode ceder pessoas? Recomende a realocação.\n"
+            f"  {_ex_neg}\n\n"
+            "FORMATO: 3-5 frases corridas em português:\n"
+            "  Frase 1: balanço do dia (produtividade geral, condições, eficiência)\n"
+            "  Frases 2-3: cada atividade — números reais, dia X/Y, delta, obs do campo\n"
+            "  Frases 4-5: recomendação acionável com cálculo explícito de efetivo"
+        )
+
+        user_content = (
+            f"DATA: {data_rdo} | CONTRATO: {contrato}\n"
+            f"PRAZO: {dias_restantes_rdo or 'não informado'} | VALOR: {valor_contrato_rdo or 'não informado'}\n"
+            f"CLIMA: {clima} | CHUVA: {chuva} | ACIDENTE: {acidente}\n"
+            f"EQUIPE TOTAL: {equipe}p | HORÁRIO: {hora_i}–{hora_f}\n"
+            f"INTERRUPÇÃO: {interrupcao}\n"
+            f"OBS GERAIS: {observacoes}\n"
+            f"ORIENTAÇÃO AMANHÃ: {orientacao}\n\n"
+            "ATIVIDADES (efetivo | prod/pessoa | dia X/Y | esp% | delta [ritmo] | saldo | prazo):\n"
+            f"{ativ_text}"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_content},
+        ]
+        summary = _ai_query(
+            messages,
+            max_tokens=600,
+            temperature=0.3,
+            client_id=client_id,
+            prompt_preview=f"RDO summary {contrato} {data_rdo}",
+        )
+        summary = summary.strip() if summary else ""
         if summary:
             logger.info(f"AI summary gerado: rdo={str(rdo.get('id', ''))[:8]} chars={len(summary)}")
         return summary
@@ -1148,14 +1197,23 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
                     from backend.routers.hub import _working_days_between as _wdb
                     _ini = str(ha.get("inicio_previsto") or "")[:10]
                     _ter = str(ha.get("termino_previsto") or "")[:10]
-                    _today = _d.today()
+                    # Usa a DATA DO RDO como referência — não today.
+                    # O RDO é uma foto do dia de obra; today distorceria o % esperado.
+                    _rdo_date_str = str(r.get("data", ""))[:10]
+                    try:
+                        _ref_date = _d.fromisoformat(_rdo_date_str)
+                    except Exception:
+                        _ref_date = _d.today()
                     if _ini and _ter:
                         _d_ini = _d.fromisoformat(_ini)
                         _d_ter = _d.fromisoformat(_ter)
                         _total_wd = max(1, _wdb(_d_ini, _d_ter + _td(days=1)))
-                        _dec_wd   = min(_total_wd, max(0, _wdb(_d_ini, _today + _td(days=1))))
+                        _dec_wd   = min(_total_wd, max(0, _wdb(_d_ini, _ref_date + _td(days=1))))
                         _pct_esp  = round(_dec_wd / _total_wd * 100)
                         fmt["pct_esperado"] = _pct_esp
+                        fmt["dia_x"]        = _dec_wd
+                        fmt["dia_total"]    = _total_wd
+                        fmt["delta_pct"]    = round(conclusao_pct - _pct_esp)
                         if total_qty > 0 and _pct_esp > 0:
                             cum_plan = total_qty * _pct_esp / 100
                             fmt["prod_pct"] = round(exec_qty / cum_plan * 100) if cum_plan > 0 else None
@@ -1164,9 +1222,15 @@ async def view_rdo_public(view_token: str) -> Dict[str, Any]:
                     else:
                         fmt["pct_esperado"] = None
                         fmt["prod_pct"] = None
+                        fmt["dia_x"] = None
+                        fmt["dia_total"] = None
+                        fmt["delta_pct"] = None
                 except Exception:
                     fmt["pct_esperado"] = None
                     fmt["prod_pct"] = None
+                    fmt["dia_x"] = None
+                    fmt["dia_total"] = None
+                    fmt["delta_pct"] = None
             else:
                 # Atividade extra (não mapeada): usa o pct do próprio RDO
                 raw_pct = int(float(at.get("quantidade") or 0)) if _is_pct(at) else 0

@@ -364,7 +364,9 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_day
     # Se a atividade foi iniciada antes do previsto (antecipação), usar a data real de início
     # do progresso para não gerar falsos atrasos. A referência é hoje vs prazo planejado.
     effective_start = min(d_inicio, today) if pct > 0 and today < d_inicio else d_inicio
-    dias_uteis_decorridos = _working_days_between(effective_start, today)
+    # +1 day: _working_days_between é exclusivo no fim (conta dias anteriores a d_end).
+    # Para que o dia "hoje" (= ref_rdo) conte como dia trabalhado, passamos today+1.
+    dias_uteis_decorridos = _working_days_between(effective_start, today + timedelta(days=1), working_days)
     dia_atual = min(dias_uteis_decorridos, dias_plan)
 
     prod_plan = total_qty / dias_plan if total_qty > 0 and dias_plan > 0 else 0.0
@@ -392,10 +394,10 @@ def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_day
             else:
                 desvio_dias = -_working_days_between(fim_prev, d_termino)
 
-    # Tendency Logic — velocidade diária tem precedência; prazo estourado só pesa se atraso > 1d
+    # Tendency Logic — pct=100 tem precedência absoluta (inclui marcos concluídos com exec_qty=0)
     antecipada = today < d_inicio and pct > 0
-    if exec_qty == 0 and not antecipada: tendencia = "sem_dados"
-    elif pct >= 100: tendencia = "concluida"
+    if pct >= 100: tendencia = "concluida"
+    elif exec_qty == 0 and not antecipada: tendencia = "sem_dados"
     elif antecipada: tendencia = "acima"
     elif desvio_pct >= 10.0: tendencia = "acima"          # produz acima do plano diário
     elif desvio_pct <= -10.0 or desvio_dias > 1: tendencia = "abaixo"   # lento ou > 1d atrasado
@@ -555,9 +557,20 @@ def _calc_velocity(atividade: dict, historico: list, working_days: set = None) -
 
 def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> list:
     """Detecta anomalias factuais nos dados — sem LLM, sem margem para erro.
-    Retorna lista de dicts {tipo, title, body, priority, atividade_id?}."""
+    Retorna lista de dicts {tipo, title, body, priority, atividade_id?}.
+    REGRA: usa a data do último RDO submetido como referência temporal,
+    não 'today'. Dias sem RDO depois do último RDO não indicam parada de obra."""
     anomalies = []
     today = date.today()
+    # ref_rdo: data do último RDO submetido — é a âncora temporal de todos os cálculos.
+    # Não usar today: o gap entre ref_rdo e today não significa que a obra parou.
+    rdos_sub = [r for r in rdo_recentes if r.get("status") == "Submetido"]
+    ref_rdo = today
+    if rdos_sub:
+        try:
+            ref_rdo = date.fromisoformat(str(rdos_sub[0].get("data", ""))[:10])
+        except Exception:
+            pass
 
     # Índice de efetivo por atividade nos RDOs recentes
     from backend.integrations.supabase import sb_select as _sb
@@ -575,15 +588,14 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
                 "atividade_id": str(a.get("id", "")),
             })
 
-    # 2. Atividade crítica (FOLHA) sem nenhum movimento por 3+ dias úteis
-    # Macros (nivel="macro" ou com filhos) nunca recebem last_rdo_date direto — são rollup das filhas.
-    # O check só faz sentido para atividades-folha que deveriam aparecer diretamente no RDO.
+    # 2. Atividade crítica (FOLHA) sem nenhum movimento dentro do período coberto pelos RDOs
+    # REGRA: o gap é medido entre last_rdo_date da atividade e ref_rdo (último RDO do projeto).
+    # Dias corridos entre ref_rdo e today NÃO indicam parada — apenas ausência de preenchimento.
     has_children_ids = {str(a.get("parent_id")) for a in atividades if a.get("parent_id")}
     for a in atividades:
         critico_val = a.get("critico")
         if not (critico_val is True or str(critico_val).lower() in ("true", "sim", "1")):
             continue
-        # Pula macros — nunca têm last_rdo_date diretamente
         if str(a.get("id", "")) in has_children_ids or str(a.get("nivel", "")).lower() == "macro":
             continue
         pct = float(a.get("conclusao_pct") or 0)
@@ -591,45 +603,48 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
             continue
         last_rdo = str(a.get("last_rdo_date") or "")[:10]
         ini = str(a.get("inicio_previsto") or "")[:10]
-        # Só dispara se a atividade já deveria ter iniciado há pelo menos 3 dias úteis
-        if ini and ini <= today.isoformat():
-            dias_desde_ini = _working_days_between(date.fromisoformat(ini), today) if ini else 0
+        # Só dispara se a atividade deveria ter iniciado na janela do ref_rdo
+        if ini and ini <= ref_rdo.isoformat():
+            dias_desde_ini = _working_days_between(date.fromisoformat(ini), ref_rdo + timedelta(days=1)) if ini else 0
             if dias_desde_ini < 3:
                 continue  # atividade nova — sem RDO ainda é esperado
             if not last_rdo:
                 anomalies.append({
                     "tipo": "critica_parada",
-                    "title": f"Atividade crítica sem registro",
-                    "body": f"'{a.get('atividade','?')[:45]}' em {pct}% há {dias_desde_ini} dias úteis sem RDO. Verificar imediatamente.",
+                    "title": "Atividade crítica sem registro no RDO",
+                    "body": f"'{a.get('atividade','?')[:45]}' em {pct}% sem registro nos últimos RDOs. Confirme se foi executada.",
                     "priority": "High",
                     "atividade_id": str(a.get("id", "")),
                 })
             else:
                 try:
                     d_last = date.fromisoformat(last_rdo)
-                    dias_sem_rdo = _working_days_between(d_last, today)
+                    # Gap = dias úteis entre o last_rdo desta atividade e o ref_rdo do projeto
+                    dias_sem_rdo = _working_days_between(d_last, ref_rdo + timedelta(days=1))
                     if dias_sem_rdo >= 3:
                         anomalies.append({
                             "tipo": "critica_parada",
-                            "title": f"Atividade crítica parada há {dias_sem_rdo}d úteis",
-                            "body": f"'{a.get('atividade','?')[:45]}' em {pct}%. Último RDO: {last_rdo}. Risco de atraso em cascata.",
+                            "title": f"Atividade crítica ausente por {dias_sem_rdo} RDOs",
+                            "body": f"'{a.get('atividade','?')[:45]}' em {pct}%. Último registro: {last_rdo}. Ausente nos últimos {dias_sem_rdo} dias úteis de RDO — verificar se obra está avançando.",
                             "priority": "High",
                             "atividade_id": str(a.get("id", "")),
                         })
                 except ValueError:
                     pass
 
-    # 3. Dias sem RDO — só gera se não há "critica_parada" com mesmo gap (seria redundante)
+    # 3. Falta de RDO recente — medida de today (data real) vs último RDO submetido
+    # Este gap SIM é válido pois indica que o preenchimento está atrasado.
+    # NÃO implica que a obra não aconteceu — apenas que não temos registros.
     has_critica_parada = any(a.get("tipo") == "critica_parada" for a in anomalies)
-    if not has_critica_parada and rdo_recentes:
+    if not has_critica_parada and rdos_sub:
         try:
-            ultimo = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
-            gap = _working_days_between(ultimo, today)
+            ultimo = ref_rdo
+            gap = _working_days_between(ultimo, today + timedelta(days=1))
             if gap >= 2:
                 anomalies.append({
                     "tipo": "sem_rdo",
-                    "title": f"{gap} dias úteis sem RDO registrado",
-                    "body": f"Último RDO em {ultimo.isoformat()}. Sem registros diários, o controle de avanço e a memória de obra ficam comprometidos.",
+                    "title": f"{gap} dias úteis desde o último RDO",
+                    "body": f"Último RDO preenchido em {ultimo.strftime('%d/%m/%Y')}. A obra pode ter avançado — preencha os RDOs pendentes para manter a rastreabilidade.",
                     "priority": "Medium",
                 })
         except (ValueError, TypeError):
@@ -770,6 +785,66 @@ def _cascade_impact(ativ_id: str, atividades: list) -> tuple[int, str]:
     return len(pendentes), f"{', '.join(nomes)}{sufixo}"
 
 
+def _fetch_weather_forecast(lat: float, lng: float) -> dict:
+    """Busca previsão meteorológica 7 dias via Open-Meteo para contextualizar insights de clima."""
+    try:
+        r = httpx.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lng,
+                "daily": "precipitation_sum,wind_speed_10m_max,temperature_2m_max,temperature_2m_min",
+                "forecast_days": 7,
+                "timezone": "America/Sao_Paulo",
+            },
+            timeout=5.0,
+        )
+        if r.status_code != 200:
+            return {}
+        d = r.json().get("daily", {})
+        dates   = d.get("time", [])
+        precip  = d.get("precipitation_sum", [])
+        wind    = d.get("wind_speed_10m_max", [])
+        t_max   = d.get("temperature_2m_max", [])
+
+        total_rain    = round(sum(p or 0 for p in precip), 1)
+        rain_days     = sum(1 for p in precip if (p or 0) >= 2.0)
+        max_daily_rain = round(max((p or 0) for p in precip), 1) if precip else 0.0
+        max_wind      = round(max((w or 0) for w in wind), 1) if wind else 0.0
+
+        daily = []
+        for i, ds in enumerate(dates[:7]):
+            daily.append(
+                f"{ds}: {round(precip[i] or 0, 1)}mm chuva, {round(wind[i] or 0)}km/h vento, {round(t_max[i] or 0)}°C max"
+                if i < len(precip) else ds
+            )
+
+        return {
+            "chuva_total_7d_mm": total_rain,
+            "dias_chuva_7d":     rain_days,
+            "chuva_max_dia_mm":  max_daily_rain,
+            "vento_max_kmh":     max_wind,
+            "diario":            daily,
+        }
+    except Exception:
+        return {}
+
+
+def _weather_ctx(weather: dict | None) -> str:
+    """Formata contexto de previsão do tempo para o LLM."""
+    if not weather:
+        return ""
+    lines = [
+        f"\nPREVISÃO DO TEMPO — próximos 7 dias:",
+        f"  Chuva total: {weather['chuva_total_7d_mm']}mm | Dias com chuva (≥2mm): {weather['dias_chuva_7d']} | Máx/dia: {weather['chuva_max_dia_mm']}mm | Vento máx: {weather['vento_max_kmh']}km/h",
+    ]
+    if weather.get("diario"):
+        lines.append("  " + " | ".join(weather["diario"][:4]))
+        if len(weather["diario"]) > 4:
+            lines.append("  " + " | ".join(weather["diario"][4:]))
+    return "\n".join(lines) + "\n"
+
+
 def _build_insights_llm(
     atividades: list,
     rdo_recentes: list,
@@ -778,6 +853,7 @@ def _build_insights_llm(
     historico: list | None = None,
     insights_anteriores: list | None = None,
     contrato_info: dict | None = None,
+    weather: dict | None = None,
 ) -> list:
     """Gera insights via LLM com contexto completo:
     velocity, anomalias, caminho crítico, SPI trend, cascade impact, valor em risco."""
@@ -927,17 +1003,8 @@ def _build_insights_llm(
             real = vel["velocity_real"]
             trend_v = vel.get("trend", "")
             # Calcula produtividade por pessoa usando último RDO
-            prod_pessoa_txt = ""
-            try:
-                ef_ativ = int(rdo_recentes[0].get("equipe_alocada") or 0) if rdo_recentes else 0
-                if ef_ativ > 0:
-                    pp = round(real / ef_ativ, 1)
-                    pp_plan = round(plan / ef_ativ, 1) if ef_ativ and plan else 0
-                    prod_pessoa_txt = f" {pp}/{pp_plan}p/pessoa"
-            except Exception:
-                pass
             vel_txt = (
-                f" | vel={real}/dia(plan={plan}{prod_pessoa_txt}) [{trend_v}]"
+                f" | vel={real}/dia(plan={plan}) [{trend_v}]"
                 f" | EAC={vel.get('eac_date','?')}"
                 f" | saldo={vel.get('saldo',0):.0f} {a.get('unidade','')}"
             )
@@ -1027,48 +1094,63 @@ ANOMALIAS FACTUAIS:
 
 RDOs RECENTES (clima | equipe | interrupções | obs do campo):
 {chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
-{dia_livre}{delta_ctx}"""
+{_weather_ctx(weather)}{dia_livre}{delta_ctx}"""
 
     system_prompt = """Você é o Agente de Inteligência da plataforma Bomtempo — gestor sênior de obras de infraestrutura.
 
 Gere EXATAMENTE 4 insights em JSON. Cada insight:
 - "title": max 55 chars, direto ao ponto
-- "body": análise com NÚMEROS REAIS do contexto — atividade, dia X/Y, delta%, velocity, EAC. Max 180 chars.
+- "body": análise com NÚMEROS REAIS + RECOMENDAÇÃO ACIONÁVEL com cálculo explícito. Max 260 chars.
 - "priority": "High" | "Medium" | "Low"
 - "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta"
 
 ════ REGRAS ABSOLUTAS — violá-las é um erro crítico ════
 
-R1. FUTURAS: Atividades na seção "ATIVIDADES FUTURAS" NÃO EXISTEM para fins de análise.
-    NUNCA gere insight de risco, pendência ou atraso sobre elas. São futuras por design do cronograma.
+R1. FUTURAS: Atividades na seção "ATIVIDADES FUTURAS" NÃO EXISTEM para análise.
+    NUNCA gere insight de risco, pendência ou atraso sobre elas.
 
-R2. COBERTURA DE RDO: RDO é diário — 1 por dia de obra é a frequência CORRETA e COMPLETA.
-    Se há 1 RDO por dia trabalhado, a cobertura é 100%. JAMAIS alerte "falta de RDO" nesse caso.
+R2. COBERTURA DE RDO: RDO é diário — 1 por dia de obra é frequência CORRETA.
+    JAMAIS alerte "falta de RDO" se há 1 por dia trabalhado.
 
-R3. OBRA SAUDÁVEL: Se o PANORAMA diz "SAUDÁVEL" (SPI ≥ 1.0 e desvio ≥ 0%), PROIBIDO gerar alertas de atraso.
-    Gere oportunidades: o que pode ser antecipado, qual atividade concluirá antes do prazo.
+R3. OBRA SAUDÁVEL: Se PANORAMA diz "SAUDÁVEL" (SPI≥1.0 e desvio≥0%), PROIBIDO gerar alertas de atraso.
+    Gere oportunidades: o que antecipar, qual atividade concluirá antes do prazo.
 
-R4. RITMO POSITIVO: Se delta ≥ 0% → a atividade está NO RITMO ou ADIANTADA.
-    Encare "dia 1 de 2 com 60% realizado e esperado 50%" como ADIANTADO — no dia 2 haverá folga.
-    Se velocity_real > producao_planejada/dia → conclusão antes do prazo → mencione proativamente.
+R4. RITMO POSITIVO: delta ≥ 0% → NO RITMO ou ADIANTADA.
+    "Dia 1/2, real=60%, esp=50%" = ADIANTADO — dia 2 terá folga.
 
-R5. DEFINIÇÃO DE ATRASO: atividade atrasada = termino_previsto < data_ref_rdo E já iniciou E pct < 100%.
-    Atividade no prazo, futura, ou com delta ≥ 0% NÃO está atrasada.
+R5. ATRASO = termino_previsto < ref_rdo E já iniciou E pct < 100%.
 
-R6. DADOS REAIS: Use APENAS os dados do contexto. Jamais invente métricas, datas ou situações.
-    Se não há dado suficiente para um insight, use "Low" priority e diga "dados insuficientes para confirmar".
+R6. DADOS REAIS: Use APENAS os dados fornecidos. Jamais invente métricas.
 
-════ HIERARQUIA (aplique nesta ordem) ════
-1. Anomalia factual grave (produção impossível, crítica parada há 3+ dias com evidência real)
-2. Atividade em andamento com prazo vencido E delta negativo (atrasada de verdade)
-3. Ritmo insuficiente: velocity_real < 50% do planejado em atividade já iniciada
-4. Oportunidade: delta positivo, conclusão antecipada, próxima atividade pode ser adiantada
-5. Padrão climático ou interrupção recorrente com impacto comprovado
+R7. CLIMA: Se PREVISÃO DO TEMPO indica ≥ 3 dias de chuva OU chuva máxima ≥ 15mm/dia, OBRIGATÓRIO gerar
+    1 insight do tipo "clima" com: dias úteis em risco, atividades externas impactadas e recomendação
+    (antecipar atividades internas, buffer de prazo, realocação de equipe para serviços cobertos).
 
-════ CALIBRAÇÃO DE TOM ════
-- Projeto saudável → fale sobre o que está bem e o que pode melhorar
-- "Perfuração: dia 1/2, real=55%, esp=50%, delta=+5% → concluirá amanhã no prazo" = insight de oportunidade
-- Cite sempre: atividade, dia X/Y, delta, EAC quando disponíveis
+════ OBRIGATÓRIO NOS INSIGHTS DE RISCO/EQUIPE ════
+Para cada atividade com delta negativo, CALCULE e APRESENTE:
+  a) Saldo restante: total_qty − exec_qty
+  b) Produção média por pessoa/dia: velocity_real ÷ efetivo do último RDO
+  c) Dias restantes no prazo
+  d) Efetivo mínimo para concluir no prazo: ceil(saldo ÷ (dias_restantes × prod/pessoa))
+  e) Fonte de efetivo extra: outra atividade com delta ≥ 0% pode liberar pessoas?
+     Se sim → "Recomendo alocar N pessoas da atividade X (delta=+Y%) para cobrir o déficit."
+     Se não → "Necessário contratar N pessoa(s) extra."
+
+EXEMPLO CORRETO:
+  "Vedação: dia 2/3, real=54% (786/1456), esp=67%, delta=-13%, saldo=670un.
+   Prod/pessoa=161un/dia. Para concluir amanhã: ceil(670/161)=5 pessoas (3 atuais +2 extra).
+   Fixação está adiantada (delta=+3%) — realoque 2 pessoas para cobrir sem custo adicional."
+
+EXEMPLO ADIANTADO:
+  "Fixação: dia 2/3, real=65%, esp=67%, delta=+3% — concluirá no prazo.
+   Após conclusão (amanhã), 3 pessoas ficam livres para reforçar vedação se necessário."
+
+════ HIERARQUIA ════
+1. Anomalia factual grave (dados inválidos, crítica parada com evidência)
+2. Atividade atrasada (prazo vencido, delta negativo) — com cálculo de recuperação
+3. Ritmo insuficiente: velocity < 50% do plano
+4. Oportunidade: delta positivo, reallocation, antecipação
+5. Padrão climático/interrupção recorrente
 
 Responda SOMENTE com JSON array:
 [{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
@@ -1079,7 +1161,7 @@ Responda SOMENTE com JSON array:
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": context},
         ]
-        response_text = ai_query(messages, max_tokens=1000, temperature=0.3)
+        response_text = ai_query(messages, max_tokens=1400, temperature=0.3)
         if not response_text:
             raise ValueError("empty response")
 
@@ -1300,7 +1382,17 @@ async def trigger_insights_generation(
     contrato_rows = sb_select("contratos", filters={"contrato": contrato}, client_id=client_id, limit=1) or []
     contrato_info = contrato_rows[0] if contrato_rows else {}
 
-    insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant, contrato_info=contrato_info)
+    # Previsão meteorológica para contexto de clima nos insights
+    weather: dict = {}
+    try:
+        lat = float(contrato_info.get("lat") or contrato_info.get("latitude") or 0)
+        lng = float(contrato_info.get("lng") or contrato_info.get("longitude") or 0)
+        if lat and lng:
+            weather = _fetch_weather_forecast(lat, lng)
+    except Exception:
+        pass
+
+    insights = _build_insights_llm(atividades, rdos, contrato, today, historico, insights_ant, contrato_info=contrato_info, weather=weather)
     last_rdo_date = _get_last_rdo_date(contrato, client_id)
     _hmap_ins = _build_hist_map(historico)
     kpis     = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=last_rdo_date, hist_map=_hmap_ins)
