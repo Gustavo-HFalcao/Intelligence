@@ -257,149 +257,351 @@ def _build_fin_pdf_fpdf(report: Dict, data: Dict) -> Optional[bytes]:
 
 
 def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
-    """Gera PDF de RDO usando fpdf2 (pure Python — sem dependências nativas).
-    Layout executivo: cabeçalho, KPIs, tabela de atividades, observações, AI summary."""
+    """Gera PDF executivo de RDO — layout profissional para entrega ao cliente."""
     try:
         from fpdf import FPDF, XPos, YPos
 
-        COPPER_RGB = (201, 139, 42)
-        TEAL_RGB   = (42, 157, 143)
-        DARK_RGB   = (26, 26, 46)
+        # ── Paleta ───────────────────────────────────────────────────────────────
+        COPPER  = (201, 139,  42)   # dourado
+        TEAL    = ( 42, 157, 143)   # verde-azulado
+        DARK    = ( 26,  26,  46)   # header escuro
+        NAVY    = ( 38,  38,  62)   # faixa secundária
+        LIGHT   = (250, 248, 243)   # zebra claro
+        WHITE   = (255, 255, 255)
+        GRAY    = (120, 120, 120)
+        MIDGRAY = (200, 200, 200)
+        RED     = (220,  53,  69)
+        GREEN   = ( 40, 167,  69)
 
-        pdf = FPDF()
-        pdf.set_margins(15, 15, 15)
+        # ── Extração de dados ─────────────────────────────────────────────────────
+        contrato  = _safe(str(rdo.get("contrato") or ""))
+        data_raw  = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10]
+        try:
+            from datetime import date as _d
+            data_fmt = _d.fromisoformat(data_raw).strftime("%d/%m/%Y")
+        except Exception:
+            data_fmt = data_raw
+        status    = _safe(str(rdo.get("status") or ""))
+        turno     = _safe(str(rdo.get("turno") or ""))
+        equipe    = _safe(str(rdo.get("equipe_alocada") or ""))
+        clima     = _safe(str(rdo.get("condicao_climatica") or rdo.get("clima") or ""))
+        h_ini     = _safe(str(rdo.get("hora_inicio") or "")[:5])
+        h_fim     = _safe(str(rdo.get("hora_termino") or "")[:5])
+        local_    = _safe(str(rdo.get("localizacao") or ""))
+        km        = _safe(str(rdo.get("km_percorrido") or ""))
+        obs       = _safe(str(rdo.get("observacoes") or ""))
+        ori       = _safe(str(rdo.get("orientacao") or ""))
+        ai        = _safe(str(rdo.get("ai_summary") or ""))
+        sig_name  = _safe(str(rdo.get("signatory_name") or ""))
+        sig_doc   = _safe(str(rdo.get("signatory_doc") or ""))
+        chuva     = bool(rdo.get("houve_chuva"))
+        interr    = bool(rdo.get("houve_interrupcao"))
+        acidente  = bool(rdo.get("houve_acidente"))
+        mot_interr = _safe(str(rdo.get("motivo_interrupcao") or ""))
+        desc_acid  = _safe(str(rdo.get("descricao_acidente") or ""))
+
+        # ── Classe PDF com header/footer automático ───────────────────────────────
+        class RDO_PDF(FPDF):
+            def header(self):
+                # Barra topo escura
+                self.set_fill_color(*DARK)
+                self.rect(0, 0, 210, 22, "F")
+                # Linha dourada embaixo do header
+                self.set_fill_color(*COPPER)
+                self.rect(0, 22, 210, 1.2, "F")
+                # Título
+                self.set_xy(12, 5)
+                self.set_font("Helvetica", "B", 13)
+                self.set_text_color(*COPPER)
+                self.cell(120, 8, "RELAT\xd3RIO DI\xc1RIO DE OBRA")
+                # Contrato + data (direita)
+                self.set_font("Helvetica", "", 8)
+                self.set_text_color(*MIDGRAY)
+                self.set_xy(130, 5)
+                self.cell(0, 5, contrato, align="R")
+                self.set_xy(130, 11)
+                self.cell(0, 5, f"{data_fmt}  |  {status}", align="R")
+                self.set_y(28)
+
+            def footer(self):
+                self.set_y(-12)
+                self.set_fill_color(*DARK)
+                self.rect(0, self.get_y() - 2, 210, 16, "F")
+                self.set_font("Helvetica", "I", 7)
+                self.set_text_color(*GRAY)
+                self.cell(0, 8,
+                    f"Bomtempo Intelligence  |  {contrato}  |  {data_fmt}  |  "
+                    f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  "
+                    f"Pag. {self.page_no()}",
+                    align="C")
+
+        pdf = RDO_PDF()
+        pdf.set_margins(12, 30, 12)
+        pdf.set_auto_page_break(auto=True, margin=16)
         pdf.add_page()
 
-        # ── Cabeçalho ────────────────────────────────────────────────────────────
-        pdf.set_fill_color(*DARK_RGB)
-        pdf.rect(0, 0, 210, 30, "F")
-        pdf.set_text_color(201, 139, 42)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_xy(15, 8)
-        pdf.cell(0, 8, "RELATÓRIO DIÁRIO DE OBRA", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(180, 180, 180)
-        pdf.set_xy(15, 18)
-        contrato = _safe(str(rdo.get("contrato") or "-"))
-        data_rdo = _safe(str(rdo.get("data") or rdo.get("data_rdo") or "-")[:10])
-        pdf.cell(0, 6, f"Contrato: {contrato}   |   Data: {data_rdo}   |   Status: {rdo.get('status','')}")
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 1 — IDENTIFICAÇÃO (faixa azul escura sob o header)
+        # ════════════════════════════════════════════════════════════════════════
+        pdf.set_fill_color(*NAVY)
+        pdf.rect(0, 23.2, 210, 0, "F")  # já coberto pelo header
 
-        pdf.set_y(36)
-        pdf.set_text_color(*DARK_RGB)
+        # ── KPI cards: 6 colunas ──────────────────────────────────────────────
+        def kpi_card(x, y, w, label, value, color=None):
+            pdf.set_fill_color(248, 246, 240)
+            pdf.set_draw_color(*COPPER)
+            pdf.rect(x, y, w, 16, "FD")
+            # Linha dourada no topo do card
+            pdf.set_fill_color(*COPPER)
+            pdf.rect(x, y, w, 1, "F")
+            pdf.set_xy(x + 2, y + 2.5)
+            pdf.set_font("Helvetica", "B", 6.5)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(w - 4, 4, label.upper())
+            pdf.set_xy(x + 2, y + 7)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(*(color or DARK))
+            pdf.cell(w - 4, 6, value[:22] if value else "-")
 
-        # ── KPIs ─────────────────────────────────────────────────────────────────
-        equipe  = _safe(str(rdo.get("equipe_alocada") or "-"))
-        clima   = _safe(str(rdo.get("condicao_climatica") or rdo.get("clima") or "-"))
-        turno   = _safe(str(rdo.get("turno") or "-"))
-        kpis    = [("Equipe", equipe + " pess."), ("Clima", clima), ("Turno", turno)]
+        horario = f"{h_ini}-{h_fim}" if h_ini and h_fim else (h_ini or h_fim or "-")
+        kpi_y = 29
+        card_w = 30.5
+        gap = 1.2
+        kpi_card(12,              kpi_y, card_w, "Data",    data_fmt)
+        kpi_card(12+card_w+gap,   kpi_y, card_w, "Turno",   turno)
+        kpi_card(12+2*(card_w+gap), kpi_y, card_w, "Hor\xe1rio", horario)
+        kpi_card(12+3*(card_w+gap), kpi_y, card_w, "Equipe",  f"{equipe} pessoas" if equipe else "-")
+        kpi_card(12+4*(card_w+gap), kpi_y, card_w, "Clima",   clima)
+        kpi_card(12+5*(card_w+gap), kpi_y, card_w, "Status",  status,
+                 GREEN if status == "Submetido" else COPPER)
 
-        for i, (lbl, val) in enumerate(kpis):
-            x = 15 + i * 60
-            pdf.set_fill_color(245, 243, 238)
-            pdf.rect(x, 36, 56, 18, "F")
-            pdf.set_xy(x + 2, 38)
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.set_text_color(150, 130, 80)
-            pdf.cell(52, 4, lbl.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_xy(x + 2, 43)
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.set_text_color(*DARK_RGB)
-            pdf.cell(52, 5, val[:20])
+        pdf.set_y(kpi_y + 19)
 
-        pdf.set_y(60)
+        # Localização + KM (linha fina)
+        if local_ or km:
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*GRAY)
+            loc_line = []
+            if local_: loc_line.append(f"Local: {local_}")
+            if km:     loc_line.append(f"KM: {km}")
+            pdf.cell(0, 5, "  ".join(loc_line), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
 
-        # ── Atividades ────────────────────────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_fill_color(*COPPER_RGB)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(95, 7, "ATIVIDADE", fill=True)
-        pdf.cell(25, 7, "QTD / PCT", fill=True, align="C")
-        pdf.cell(20, 7, "EFETIVO", fill=True, align="C")
-        pdf.cell(0,  7, "OBS", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 2 — ATIVIDADES DO DIA
+        # ════════════════════════════════════════════════════════════════════════
+        def section_title(title, color=COPPER):
+            pdf.ln(2)
+            pdf.set_fill_color(*color)
+            pdf.rect(12, pdf.get_y(), 186, 7, "F")
+            pdf.set_xy(14, pdf.get_y() + 0.8)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*WHITE)
+            pdf.cell(0, 5.5, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
+
+        section_title("ATIVIDADES EXECUTADAS NO DIA")  # Latin-1: sem acento necessário
+
+        # Cabeçalho da tabela
+        pdf.set_fill_color(*DARK)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 7.5)
+        col_nome = 82
+        col_qty  = 22
+        col_und  = 14
+        col_pct  = 14
+        col_ef   = 15
+        col_obs  = 186 - col_nome - col_qty - col_und - col_pct - col_ef  # resto
+
+        def th(w, txt, align="L", last=False):
+            pdf.cell(w, 6, txt, fill=True, align=align,
+                     new_x=XPos.LMARGIN if last else XPos.RIGHT,
+                     new_y=YPos.NEXT    if last else YPos.TOP)
+
+        th(col_nome, "  ATIVIDADE")
+        th(col_qty,  "QUANTIDADE", "C")
+        th(col_und,  "UNIDADE",    "C")
+        th(col_pct,  "% ACUM",     "C")
+        th(col_ef,   "EFETIVO",    "C")
+        th(col_obs,  "OBSERVACAO", last=True)
 
         pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(*DARK_RGB)
-        for idx, at in enumerate(atividades[:30]):
-            nome    = _safe(str(at.get("atividade") or at.get("descricao") or "-"))[:55]
+        for idx, at in enumerate(atividades):
+            nome    = _safe(str(at.get("atividade") or at.get("descricao") or "-"))
             unidade = str(at.get("unidade") or "")
             qty     = at.get("quantidade") or 0
-            efet    = _safe(str(at.get("efetivo") or "-"))
-            obs_v   = _safe(str(at.get("observacao") or ""))[:30]
+            efet    = str(at.get("efetivo") or "-")
+            obs_v   = _safe(str(at.get("observacao") or ""))
             is_m    = bool(at.get("is_marco"))
+            pct_at  = at.get("pct") or at.get("conclusao_pct") or 0
+
             if is_m:
-                qty_str = "Concluido" if at.get("marco_concluido") else "Pendente"
+                qty_disp = "Marco"
+                pct_disp = "100%" if at.get("marco_concluido") else "Pend."
             elif unidade == "%":
-                qty_str = f"{int(qty)}%"
+                qty_disp = f"{int(float(qty))}%"
+                pct_disp = f"{int(float(qty))}%"
             else:
-                qty_str = f"{qty} {unidade}"
-            fill = idx % 2 == 0
-            if fill:
-                pdf.set_fill_color(250, 248, 243)
-            else:
-                pdf.set_fill_color(255, 255, 255)
-            pdf.cell(95, 6, nome,    fill=fill)
-            pdf.cell(25, 6, qty_str, fill=fill, align="C")
-            pdf.cell(20, 6, efet,    fill=fill, align="C")
-            pdf.cell(0,  6, obs_v,   fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                qty_disp = f"{qty:.0f}" if isinstance(qty, float) else str(qty)
+                pct_disp = f"{int(float(pct_at))}%" if pct_at else "-"
 
-        # ── Alertas / Obs / AI — nova página se necessário ───────────────────────
-        if pdf.get_y() > 230:
-            pdf.add_page()
+            fill_bg = LIGHT if idx % 2 == 0 else WHITE
+            pdf.set_fill_color(*fill_bg)
+            pdf.set_text_color(*DARK)
 
-        if rdo.get("houve_interrupcao") or rdo.get("houve_chuva") or rdo.get("houve_acidente"):
-            pdf.ln(4)
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_text_color(*COPPER_RGB)
-            pdf.cell(0, 6, "OCORRÊNCIAS", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            row_y = pdf.get_y()
+            ROW_H = 6.5  # altura fixa por linha
+
+            # Calcula quantas linhas o nome ocupa na largura disponível
+            pdf.set_font("Helvetica", "B" if is_m else "", 7.5)
+            nome_disp = "  " + nome[:80]
+            sw = pdf.get_string_width(nome_disp)
+            n_lines = max(1, int(sw / (col_nome - 1)) + 1) if sw > col_nome - 1 else 1
+            row_h = ROW_H * n_lines
+
+            pdf.set_fill_color(*fill_bg)
+            pdf.rect(12, row_y, 186, row_h, "F")
+
+            # Nome — multi_cell alinhado ao topo
+            pdf.set_xy(12, row_y)
+            pdf.set_text_color(*(COPPER if is_m else DARK))
+            pdf.multi_cell(col_nome, ROW_H, nome_disp, new_x=XPos.RIGHT, new_y=YPos.TOP)
+
+            # Demais colunas centralizadas verticalmente na linha
+            mid_y = row_y + (row_h - ROW_H) / 2
+            pdf.set_xy(12 + col_nome, mid_y)
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.set_text_color(*DARK)
+            pdf.cell(col_qty, ROW_H, qty_disp,   align="C")
+            pdf.cell(col_und, ROW_H, unidade[:8], align="C")
+            pdf.cell(col_pct, ROW_H, pct_disp,   align="C")
+            pdf.cell(col_ef,  ROW_H, efet,        align="C")
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(col_obs, ROW_H, obs_v[:35])
+
+            pdf.set_xy(12, row_y + row_h)
+
+        # Linha de total
+        total_efetivo = sum(int(a.get("efetivo") or 0) for a in atividades)
+        pdf.set_fill_color(*DARK)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(col_nome + col_qty + col_und + col_pct, 5.5,
+                 f"  {len(atividades)} atividade(s) registrada(s)", fill=True)
+        pdf.cell(col_ef,  5.5, str(total_efetivo), fill=True, align="C")
+        pdf.cell(col_obs, 5.5, "pessoas total", fill=True,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 3 — OCORRÊNCIAS (só se houver)
+        # ════════════════════════════════════════════════════════════════════════
+        if chuva or interr or acidente:
+            section_title("OCORR\xcaNCIAS E INTERCORR\xcaNCIAS", RED)
             pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(*DARK_RGB)
-            if rdo.get("houve_interrupcao"):
-                mot = _safe(str(rdo.get("motivo_interrupcao") or "Nao especificado"))[:80]
-                pdf.cell(0, 5, f"  Interrupcao: {mot}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if rdo.get("houve_chuva"):
-                pdf.cell(0, 5, f"  Chuva registrada", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if rdo.get("houve_acidente"):
-                pdf.cell(0, 5, "  ACIDENTE REGISTRADO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-        # ── Observações ───────────────────────────────────────────────────────────
-        obs = _safe(str(rdo.get("observacoes") or ""))
-        if obs:
-            pdf.ln(4)
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_text_color(*COPPER_RGB)
-            pdf.cell(0, 6, "OBSERVACOES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(*DARK_RGB)
-            pdf.multi_cell(0, 5, obs[:400])
-
-        # ── Orientação p/ amanhã ──────────────────────────────────────────────────
-        ori = _safe(str(rdo.get("orientacao") or ""))
-        if ori:
+            pdf.set_text_color(*DARK)
+            if chuva:
+                pdf.set_fill_color(230, 240, 255)
+                pdf.rect(12, pdf.get_y(), 186, 6, "F")
+                pdf.set_xy(14, pdf.get_y())
+                pdf.set_text_color(30, 80, 180)
+                pdf.cell(0, 6, "Chuva registrada no periodo", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_text_color(*DARK)
+            if interr:
+                pdf.set_fill_color(255, 243, 220)
+                pdf.rect(12, pdf.get_y(), 186, 6 if not mot_interr else 11, "F")
+                pdf.set_xy(14, pdf.get_y())
+                pdf.set_text_color(160, 80, 0)
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.cell(0, 6, "Interrup\xe7\xe3o de servi\xe7o", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                if mot_interr:
+                    pdf.set_xy(14, pdf.get_y())
+                    pdf.set_font("Helvetica", "", 7.5)
+                    pdf.set_text_color(*DARK)
+                    pdf.multi_cell(180, 5, mot_interr[:200])
+                pdf.set_text_color(*DARK)
+            if acidente:
+                pdf.set_fill_color(255, 220, 220)
+                pdf.rect(12, pdf.get_y(), 186, 6 if not desc_acid else 11, "F")
+                pdf.set_xy(14, pdf.get_y())
+                pdf.set_text_color(*RED)
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.cell(0, 6, "ACIDENTE REGISTRADO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                if desc_acid:
+                    pdf.set_xy(14, pdf.get_y())
+                    pdf.set_font("Helvetica", "", 7.5)
+                    pdf.set_text_color(*DARK)
+                    pdf.multi_cell(180, 5, desc_acid[:200])
             pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_text_color(*TEAL_RGB)
-            pdf.cell(0, 6, "ORIENTACAO PARA AMANHA", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(*DARK_RGB)
-            pdf.multi_cell(0, 5, ori[:400])
 
-        # ── AI Summary ────────────────────────────────────────────────────────────
-        ai = _safe(str(rdo.get("ai_summary") or ""))
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 4 — OBSERVAÇÕES + ORIENTAÇÃO (lado a lado se couberem)
+        # ════════════════════════════════════════════════════════════════════════
+        if obs or ori:
+            section_title("OBSERVA\xc7\xd5ES E ORIENTA\xc7\xd5ES")
+            if obs:
+                pdf.set_font("Helvetica", "B", 7.5)
+                pdf.set_text_color(*COPPER)
+                pdf.cell(0, 5, "Observa\xe7\xf5es gerais:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(*DARK)
+                pdf.set_x(12)
+                pdf.multi_cell(186, 5, obs[:800])
+                pdf.ln(1)
+            if ori:
+                pdf.set_font("Helvetica", "B", 7.5)
+                pdf.set_text_color(*TEAL)
+                pdf.cell(0, 5, "Orienta\xe7\xe3o para amanh\xe3:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(*DARK)
+                pdf.set_x(12)
+                pdf.multi_cell(186, 5, ori[:800])
+            pdf.ln(2)
+
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 5 — ANÁLISE DE IA
+        # ════════════════════════════════════════════════════════════════════════
         if ai:
-            pdf.ln(4)
-            pdf.set_fill_color(240, 250, 248)
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_text_color(*TEAL_RGB)
-            pdf.cell(0, 6, "ANALISE DE INTELIGENCIA ARTIFICIAL", fill=False, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            # Nova página se restar menos de 60mm
+            if pdf.get_y() > 195:
+                pdf.add_page()
+            section_title("AN\xc1LISE DE INTELIG\xcaNCIA ARTIFICIAL", TEAL)
+            ai_y = pdf.get_y()
             pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(*DARK_RGB)
-            pdf.multi_cell(0, 5, ai[:800])
+            pdf.set_text_color(*DARK)
+            pdf.set_fill_color(242, 250, 248)
+            # Conteúdo com recuo de 4mm para deixar espaço para a borda esquerda
+            pdf.set_x(16)
+            pdf.multi_cell(182, 5, ai, fill=True)
+            # Borda esquerda teal (desenhada depois, sem sobrepor texto)
+            ai_h = pdf.get_y() - ai_y
+            pdf.set_fill_color(*TEAL)
+            pdf.rect(12, ai_y, 3, ai_h, "F")
+            pdf.ln(3)
 
-        # ── Rodapé ────────────────────────────────────────────────────────────────
-        pdf.set_y(-15)
-        pdf.set_font("Helvetica", "I", 7)
-        pdf.set_text_color(170, 170, 170)
-        pdf.cell(0, 5, f"Bomtempo Intelligence  |  Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  {contrato}", align="C")
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 6 — ASSINATURA
+        # ════════════════════════════════════════════════════════════════════════
+        if sig_name or sig_doc:
+            if pdf.get_y() > 230:
+                pdf.add_page()
+            section_title("RESPONS\xc1VEL T\xc9CNICO PELA APROVA\xc7\xc3O")
+            y_sig = pdf.get_y() + 2
+            # Linha de assinatura
+            pdf.set_draw_color(*COPPER)
+            pdf.line(12, y_sig + 10, 95, y_sig + 10)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(*DARK)
+            pdf.set_xy(12, y_sig + 12)
+            if sig_name: pdf.cell(85, 5, sig_name)
+            pdf.set_xy(12, y_sig + 17)
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.set_text_color(*GRAY)
+            if sig_doc:  pdf.cell(85, 4, f"Registro: {sig_doc}")
+            pdf.set_xy(12, y_sig + 22)
+            pdf.cell(85, 4, f"Data: {data_fmt}")
+            pdf.ln(12)
 
         return bytes(pdf.output())
 
