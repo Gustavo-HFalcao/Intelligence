@@ -9,7 +9,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+import os
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 import httpx
 from backend.integrations.supabase import (
@@ -2270,17 +2271,17 @@ async def upload_timeline_file(
     file: UploadFile = File(...),
     _user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    """Faz upload de anexo da timeline para diretório local e retorna URL."""
-    import uuid, os
-    upload_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".bin"
-    fname = f"{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(upload_dir, fname)
+    """Faz upload de anexo da timeline para Supabase Storage e retorna URL pública."""
+    import uuid as _uuid
+    from backend.integrations.supabase import sb_storage_upload
+    ext     = os.path.splitext(file.filename or "")[1] or ".bin"
+    fname   = f"{_uuid.uuid4().hex}{ext}"
     content = await file.read()
-    with open(dest, "wb") as f:
-        f.write(content)
-    return {"ok": True, "url": f"/uploads/{fname}", "nome": file.filename or fname}
+    content_type = file.content_type or "application/octet-stream"
+    url = sb_storage_upload("hub-docs", f"timeline/{fname}", content, content_type) or ""
+    if not url:
+        raise HTTPException(status_code=500, detail="Falha ao salvar arquivo")
+    return {"ok": True, "url": url, "nome": file.filename or fname}
 
 
 @router.post("/timeline")

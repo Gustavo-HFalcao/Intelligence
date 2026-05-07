@@ -148,6 +148,43 @@ async def chat_agentic(
 
     messages = _build_messages(history, user_message)
 
+    from backend.core.redis_cache import is_redis_available
+
+    async def _run_inline() -> Dict[str, Any]:
+        from backend.integrations.ai import query_agentic, OPENAI_CHAT_MODEL
+        from backend.integrations.ai_tools import TOOL_SCHEMAS, make_executor
+        loop = asyncio.get_event_loop()
+        full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+        executor_fn   = make_executor(client_id or "")
+        content = await loop.run_in_executor(
+            _executor,
+            lambda: query_agentic(
+                messages=full_messages,
+                tools=TOOL_SCHEMAS,
+                model=OPENAI_CHAT_MODEL,
+                user_login=user_login,
+                client_id=client_id or "",
+                tool_executor=executor_fn,
+            ),
+        )
+        return {"status": "done", "session_id": session_id, "content": content}
+
+    # Se Redis não disponível, não há como retornar resultado via polling — executar inline
+    if not is_redis_available():
+        logger.info("Redis indisponível — executando agentic inline")
+        try:
+            result = await _run_inline()
+            audit_log(
+                category=AuditCategory.AI_CHAT,
+                action=f"Agentic chat inline: {user_message[:120]}",
+                username=user_login,
+                client_id=client_id or "",
+                metadata={"session_id": session_id, "mode": "inline"},
+            )
+            return result
+        except Exception as e:
+            return {"status": "error", "session_id": session_id, "content": f"Erro: {e}"}
+
     try:
         from backend.workers.celery_app import celery_app
         celery_app.send_task(
@@ -167,29 +204,13 @@ async def chat_agentic(
             client_id=client_id or "",
             metadata={"session_id": session_id, "history_len": len(history)},
         )
-        return {"status":"queued", "session_id":session_id}
+        return {"status": "queued", "session_id": session_id}
     except Exception as e:
-        # Fallback: executar inline se Celery não disponível
         logger.warning(f"Celery não disponível: {e} — executando inline")
-        loop = asyncio.get_event_loop()
-        from backend.integrations.ai import query_agentic, OPENAI_CHAT_MODEL
-        from backend.integrations.ai_tools import TOOL_SCHEMAS, make_executor
-
-        full_messages = [{"role":"system","content":SYSTEM_PROMPT}] + messages
-        executor_fn   = make_executor(client_id or "")
-
-        content = await loop.run_in_executor(
-            _executor,
-            lambda: query_agentic(
-                messages=full_messages,
-                tools=TOOL_SCHEMAS,
-                model=OPENAI_CHAT_MODEL,
-                user_login=user_login,
-                client_id=client_id or "",
-                tool_executor=executor_fn,
-            ),
-        )
-        return {"status":"done", "session_id":session_id, "content":content}
+        try:
+            return await _run_inline()
+        except Exception as e2:
+            return {"status": "error", "session_id": session_id, "content": f"Erro: {e2}"}
 
 
 @router.get("/stream/{sid}")

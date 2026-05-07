@@ -1948,7 +1948,7 @@ function FinModalNovoCusto({ contrato, cats, atividades, onClose, onSaved, qc }:
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Categoria *</label>
-            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper outline-none"
+            <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#C98B2A', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }}
               onChange={e => { f('categoria_id', e.target.value); f('categoria_nome', cats.find(c => c.id === e.target.value)?.nome ?? '') }}>
               <option value="">Selecionar...</option>
               {cats.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
@@ -1956,36 +1956,36 @@ function FinModalNovoCusto({ contrato, cats, atividades, onClose, onSaved, qc }:
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Empresa / Fornecedor</label>
-            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" placeholder="Nome do fornecedor" onChange={e => f('empresa', e.target.value)} />
+            <input style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }} placeholder="Nome do fornecedor" onChange={e => f('empresa', e.target.value)} />
           </div>
           <div className="md:col-span-2 space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Descrição *</label>
-            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" placeholder="Descreva o item de custo" onChange={e => f('descricao', e.target.value)} />
+            <input style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} placeholder="Descreva o item de custo" onChange={e => f('descricao', e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor Previsto (R$) *</label>
-            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper font-mono outline-none" />
+            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full rounded-lg h-10 px-3 text-sm font-mono outline-none" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#C98B2A' } as any} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data de Referência</label>
-            <input type="date" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" onChange={e => f('data_custo', e.target.value)} />
+            <input type="date" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', colorScheme: 'dark' } as any} onChange={e => f('data_custo', e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Atividade Vinculada</label>
-            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" onChange={e => f('atividade_id', e.target.value)}>
+            <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }} onChange={e => f('atividade_id', e.target.value)}>
               <option value="">Nenhuma</option>
               {atividades.map((a: any) => <option key={a.id} value={a.id}>{a.atividade ?? a.nome ?? a.id}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Status</label>
-            <select defaultValue="previsto" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" onChange={e => f('status', e.target.value)}>
+            <select defaultValue="previsto" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }} onChange={e => f('status', e.target.value)}>
               {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </div>
           <div className="md:col-span-2 space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observações</label>
-            <textarea rows={2} className="w-full bg-void border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/60 outline-none resize-none" placeholder="Notas opcionais" onChange={e => f('observacoes', e.target.value)} />
+            <textarea rows={2} style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, width: '100%', padding: '10px 12px', fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box' } as any} placeholder="Notas opcionais" onChange={e => f('observacoes', e.target.value)} />
           </div>
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/5">
@@ -2060,15 +2060,15 @@ function FinModalAvanco({ custo, contrato, onClose, qc }: { custo: any; contrato
         <div className="px-6 pb-4 grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor (R$) *</label>
-            <BrlInput value={valor} onChange={setValor} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-teal-400 font-mono outline-none" />
+            <BrlInput value={valor} onChange={setValor} className="w-full rounded-lg h-10 px-3 text-sm font-mono outline-none" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#2A9D8F' } as any} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data</label>
-            <input type="date" value={data} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" onChange={e => setData(e.target.value)} />
+            <input type="date" value={data} style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' } as any} onChange={e => setData(e.target.value)} />
           </div>
           <div className="col-span-2 space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observação</label>
-            <input value={obs} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" placeholder="Opcional" onChange={e => setObs(e.target.value)} />
+            <input value={obs} style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' } as any} placeholder="Opcional" onChange={e => setObs(e.target.value)} />
           </div>
           {overrun && (
             <div className="col-span-2 flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
@@ -2141,36 +2141,36 @@ function FinModalEditar({ custo, cats, contrato, onClose, qc, onSaved }: { custo
         <div className="p-6 grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Categoria</label>
-            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper outline-none" value={form.categoria_id}
+            <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#C98B2A', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }} value={form.categoria_id}
               onChange={e => { f('categoria_id', e.target.value); f('categoria_nome', cats.find(c => c.id === e.target.value)?.nome ?? '') }}>
               {cats.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Empresa</label>
-            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.empresa} onChange={e => f('empresa', e.target.value)} />
+            <input style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' } as any} value={form.empresa} onChange={e => f('empresa', e.target.value)} />
           </div>
           <div className="col-span-2 space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Descrição</label>
-            <input className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.descricao} onChange={e => f('descricao', e.target.value)} />
+            <input style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' } as any} value={form.descricao} onChange={e => f('descricao', e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Valor Previsto (R$)</label>
-            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-copper font-mono outline-none" />
+            <BrlInput value={form.valor_previsto ?? 0} onChange={v => f('valor_previsto', v)} className="w-full rounded-lg h-10 px-3 text-sm font-mono outline-none" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#C98B2A' } as any} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Data</label>
-            <input type="date" className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white outline-none" value={form.data_custo} onChange={e => f('data_custo', e.target.value)} />
+            <input type="date" style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' } as any} value={form.data_custo} onChange={e => f('data_custo', e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Status</label>
-            <select className="w-full bg-void border border-white/10 rounded-lg h-10 px-3 text-sm text-white/60 outline-none" value={form.status} onChange={e => f('status', e.target.value)}>
+            <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 40, width: '100%', padding: '0 12px', fontSize: 14, outline: 'none' }} value={form.status} onChange={e => f('status', e.target.value)}>
               {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </div>
           <div className="col-span-2 space-y-1.5">
             <label className="text-[9px] font-black uppercase tracking-wider text-white/40">Observações</label>
-            <textarea rows={2} className="w-full bg-void border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/60 outline-none resize-none" value={form.observacoes} onChange={e => f('observacoes', e.target.value)} />
+            <textarea rows={2} style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, width: '100%', padding: '10px 12px', fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box' } as any} value={form.observacoes} onChange={e => f('observacoes', e.target.value)} />
           </div>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-white/5">
@@ -2381,11 +2381,11 @@ function FinanceiroTab({ contrato }: { contrato: string }) {
         <div className="flex flex-col gap-3 animate-enter">
           {(cats.length > 0 || custos.length > 0) && (
             <div className="flex items-center gap-3 flex-wrap">
-              <select className="bg-void border border-white/10 rounded-lg h-8 px-3 text-[10px] text-white/60 outline-none" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+              <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 32, padding: '0 10px', fontSize: 10, outline: 'none' }} value={filterCat} onChange={e => setFilterCat(e.target.value)}>
                 <option value="">Todas categorias</option>
                 {cats.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
               </select>
-              <select className="bg-void border border-white/10 rounded-lg h-8 px-3 text-[10px] text-white/60 outline-none" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+              <select style={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', borderRadius: 8, height: 32, padding: '0 10px', fontSize: 10, outline: 'none' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
                 <option value="">Todos status</option>
                 {['previsto', 'em_andamento', 'parcial', 'concluido', 'cancelado'].map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>

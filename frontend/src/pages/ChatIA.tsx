@@ -134,7 +134,7 @@ export default function ChatIA() {
           ts 
         }])
       } else if (mode === 'agentic') {
-        // Agentic Mode (Polling)
+        // Agentic Mode
         const res = await fetch('/api/ai/chat/agentic', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -142,25 +142,29 @@ export default function ChatIA() {
           credentials: 'include'
         })
         const initData = await res.json()
-        
-        // Polling loop
-        let done = false
-        while (!done) {
-          await new Promise(r => setTimeout(r, 1500))
-          const pollRes = await fetch(`/api/ai/stream/${initData.session_id}`, { credentials: 'include' })
-          const pollData = await pollRes.json()
-          
-          if (pollData.status === 'done') {
-            setMessages(m => [...m, { 
-              role: 'assistant', 
-              content: pollData.content, 
-              ts, 
-              isAgentic: true 
-            }])
-            done = true
-          } else if (pollData.status === 'error') {
-            throw new Error(pollData.error)
+
+        // Backend pode retornar done diretamente (modo inline quando Redis indisponível)
+        if (initData.status === 'done' || initData.content) {
+          setMessages(m => [...m, { role: 'assistant', content: initData.content, ts, isAgentic: true }])
+        } else if (initData.status === 'error') {
+          throw new Error(initData.content || 'Erro no agente')
+        } else {
+          // Polling loop com timeout de 90s (60 tentativas × 1.5s)
+          let done = false
+          let attempts = 0
+          while (!done && attempts < 60) {
+            await new Promise(r => setTimeout(r, 1500))
+            attempts++
+            const pollRes = await fetch(`/api/ai/stream/${initData.session_id}`, { credentials: 'include' })
+            const pollData = await pollRes.json()
+            if (pollData.status === 'done') {
+              setMessages(m => [...m, { role: 'assistant', content: pollData.content, ts, isAgentic: true }])
+              done = true
+            } else if (pollData.status === 'error') {
+              throw new Error(pollData.content || pollData.error || 'Erro no agente')
+            }
           }
+          if (!done) throw new Error('Tempo limite excedido. Tente novamente ou use o modo Chat Rápido.')
         }
       } else {
         // Streaming Direct Mode

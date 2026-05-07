@@ -111,12 +111,12 @@ TOOL_SCHEMAS: List[Dict] = [
         "type": "function",
         "function": {
             "name": "get_timeline",
-            "description": "Eventos recentes da timeline de um contrato: marcos, reuniões, decisões, documentos.",
+            "description": "Eventos e documentos da timeline de um contrato: marcos, reuniões, decisões, atas, contratos e arquivos anexados. Retorna título, descrição, autor, data e URL do anexo quando houver.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "contrato": {"type": "string"},
-                    "limit":    {"type": "integer", "default": 10},
+                    "limit":    {"type": "integer", "default": 20},
                 },
                 "required": ["contrato"],
             },
@@ -424,13 +424,22 @@ def _get_timeline(contrato: str, limit: int, client_id: str) -> str:
         filters["client_id"] = client_id
 
     rows = sb_select("hub_timeline", filters=filters, order="created_at.desc", limit=limit) or []
-    result = [{
-        "tipo":      str(r.get("tipo") or ""),
-        "titulo":    str(r.get("titulo") or ""),
-        "descricao": str(r.get("descricao") or "")[:300],
-        "autor":     str(r.get("autor") or ""),
-        "criado_em": str(r.get("created_at") or "")[:16],
-    } for r in rows]
+    result = []
+    for r in rows:
+        entry: Dict[str, Any] = {
+            "tipo":       str(r.get("tipo") or ""),
+            "titulo":     str(r.get("titulo") or ""),
+            "descricao":  str(r.get("descricao") or "")[:400],
+            "autor":      str(r.get("autor") or ""),
+            "data_evento": str(r.get("data_evento") or "")[:10],
+            "criado_em":  str(r.get("created_at") or "")[:16],
+        }
+        anexo_url  = str(r.get("anexo_url") or "")
+        anexo_nome = str(r.get("anexo_nome") or "")
+        if anexo_url:
+            entry["anexo_url"]  = anexo_url
+            entry["anexo_nome"] = anexo_nome or anexo_url.split("/")[-1]
+        result.append(entry)
 
     return json.dumps({"contrato": contrato, "eventos": result, "total": len(result)}, ensure_ascii=False)
 
