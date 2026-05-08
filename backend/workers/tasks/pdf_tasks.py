@@ -256,7 +256,7 @@ def _build_fin_pdf_fpdf(report: Dict, data: Dict) -> Optional[bytes]:
         return None
 
 
-def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
+def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list, evidencias: list | None = None) -> Optional[bytes]:  # noqa: C901
     """Gera PDF executivo de RDO — layout profissional para entrega ao cliente."""
     try:
         from fpdf import FPDF, XPos, YPos
@@ -294,6 +294,7 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
         ai        = _safe(str(rdo.get("ai_summary") or ""))
         sig_name  = _safe(str(rdo.get("signatory_name") or ""))
         sig_doc   = _safe(str(rdo.get("signatory_doc") or ""))
+        sig_b64   = str(rdo.get("signatory_sig_b64") or "")
         chuva     = bool(rdo.get("houve_chuva"))
         interr    = bool(rdo.get("houve_interrupcao"))
         acidente  = bool(rdo.get("houve_acidente"))
@@ -430,7 +431,8 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
             nome    = _safe(str(at.get("atividade") or at.get("descricao") or "-"))
             unidade = str(at.get("unidade") or "")
             qty     = at.get("quantidade") or 0
-            efet    = str(at.get("efetivo") or "-")
+            efet_val = at.get("efetivo")
+            efet    = str(efet_val) if efet_val is not None else "-"
             obs_v   = _safe(str(at.get("observacao") or ""))
             is_m    = bool(at.get("is_marco"))
             pct_at  = at.get("pct") or at.get("conclusao_pct") or 0
@@ -560,7 +562,54 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
             pdf.ln(2)
 
         # ════════════════════════════════════════════════════════════════════════
-        # BLOCO 5 — ANÁLISE DE IA
+        # BLOCO 5 — EVIDÊNCIAS FOTOGRÁFICAS
+        # ════════════════════════════════════════════════════════════════════════
+        ev_list = evidencias or []
+        if ev_list:
+            import httpx as _httpx
+            section_title("EVID\xcaNCIAS FOTOGR\xc1FICAS")
+            IMG_W = 58
+            IMG_H = 44
+            GAP   = 4
+            per_row = 3
+            x_starts = [12, 12 + IMG_W + GAP, 12 + 2 * (IMG_W + GAP)]
+            col_idx = 0
+            row_y = pdf.get_y() + 1
+            for ev in ev_list[:9]:
+                url = str(ev.get("foto_url") or ev.get("url_foto") or ev.get("url") or "")
+                cap = _safe(str(ev.get("legenda") or ev.get("caption") or ev.get("tipo") or ""))
+                if not url:
+                    continue
+                try:
+                    resp = _httpx.get(url, timeout=8.0, follow_redirects=True)
+                    if resp.status_code == 200:
+                        img_bytes = io.BytesIO(resp.content)
+                        ct = resp.headers.get("content-type", "")
+                        img_type = "JPEG" if "jpeg" in ct or "jpg" in ct else "PNG" if "png" in ct else "JPEG"
+                        x_img = x_starts[col_idx]
+                        if pdf.get_y() + IMG_H + 10 > 270:
+                            pdf.add_page()
+                            row_y = pdf.get_y() + 1
+                            col_idx = 0
+                        pdf.image(img_bytes, x=x_img, y=row_y, w=IMG_W, h=IMG_H, type=img_type)
+                        if cap:
+                            pdf.set_xy(x_img, row_y + IMG_H + 0.5)
+                            pdf.set_font("Helvetica", "I", 6.5)
+                            pdf.set_text_color(*GRAY)
+                            pdf.cell(IMG_W, 4, cap[:40], align="C")
+                        col_idx += 1
+                        if col_idx >= per_row:
+                            col_idx = 0
+                            row_y += IMG_H + 6
+                            pdf.set_y(row_y)
+                except Exception:
+                    continue
+            if col_idx > 0:
+                pdf.set_y(row_y + IMG_H + 6)
+            pdf.ln(2)
+
+        # ════════════════════════════════════════════════════════════════════════
+        # BLOCO 7 — ANÁLISE DE IA
         # ════════════════════════════════════════════════════════════════════════
         if ai:
             # Nova página se restar menos de 60mm
@@ -581,27 +630,38 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list) -> Optional[bytes]:
             pdf.ln(3)
 
         # ════════════════════════════════════════════════════════════════════════
-        # BLOCO 6 — ASSINATURA
+        # BLOCO 8 — ASSINATURA
         # ════════════════════════════════════════════════════════════════════════
-        if sig_name or sig_doc:
-            if pdf.get_y() > 230:
+        if sig_name or sig_doc or sig_b64:
+            if pdf.get_y() > 220:
                 pdf.add_page()
             section_title("RESPONS\xc1VEL T\xc9CNICO PELA APROVA\xc7\xc3O")
             y_sig = pdf.get_y() + 2
-            # Linha de assinatura
+
+            # Imagem da assinatura digital (base64 JPEG)
+            if sig_b64:
+                try:
+                    import base64
+                    sig_bytes = base64.b64decode(sig_b64)
+                    sig_img = io.BytesIO(sig_bytes)
+                    pdf.image(sig_img, x=12, y=y_sig, w=80, h=18, type="JPEG")
+                except Exception:
+                    pass
+
+            # Linha dourada de assinatura (abaixo da imagem)
             pdf.set_draw_color(*COPPER)
-            pdf.line(12, y_sig + 10, 95, y_sig + 10)
+            pdf.line(12, y_sig + 20, 95, y_sig + 20)
             pdf.set_font("Helvetica", "B", 8)
             pdf.set_text_color(*DARK)
-            pdf.set_xy(12, y_sig + 12)
+            pdf.set_xy(12, y_sig + 22)
             if sig_name: pdf.cell(85, 5, sig_name)
-            pdf.set_xy(12, y_sig + 17)
+            pdf.set_xy(12, y_sig + 27)
             pdf.set_font("Helvetica", "", 7.5)
             pdf.set_text_color(*GRAY)
             if sig_doc:  pdf.cell(85, 4, f"Registro: {sig_doc}")
-            pdf.set_xy(12, y_sig + 22)
+            pdf.set_xy(12, y_sig + 32)
             pdf.cell(85, 4, f"Data: {data_fmt}")
-            pdf.ln(12)
+            pdf.ln(14)
 
         return bytes(pdf.output())
 
@@ -697,9 +757,10 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
             return {"ok": False, "error": "RDO não encontrado"}
         rdo = rows[0]
 
-        atividades = sb_select("rdo_atividades", filters={"rdo_id": rdo_id}, limit=200) or []
+        atividades  = sb_select("rdo_atividades",  filters={"rdo_id": rdo_id}, limit=200) or []
+        evidencias  = sb_select("rdo_evidencias",  filters={"rdo_id": rdo_id}, limit=30)  or []
 
-        pdf_bytes = _build_rdo_pdf_fpdf(rdo, atividades)
+        pdf_bytes = _build_rdo_pdf_fpdf(rdo, atividades, evidencias)
         if not pdf_bytes:
             return {"ok": False, "error": "PDF generation failed"}
 
@@ -707,7 +768,7 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
         contrato = str(rdo.get("contrato") or "rdo").replace("/", "-").replace(" ", "_")
         data_str = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10].replace("-", "")
         filename = f"RDO-{contrato}-{data_str}-{rdo_id[:8]}.pdf"
-        storage_path = f"rdo-pdfs/{filename}"
+        storage_path = filename  # path inside bucket, no bucket prefix
 
         # Salva localmente primeiro (para anexar no email)
         local_dir = _Cfg.RDO_PDF_DIR

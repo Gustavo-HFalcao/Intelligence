@@ -640,12 +640,13 @@ def _detect_anomalies(atividades: list, rdo_recentes: list, historico: list) -> 
     if not has_critica_parada and rdos_sub:
         try:
             ultimo = ref_rdo
-            gap = _working_days_between(ultimo, today + timedelta(days=1))
-            if gap >= 2:
+            # gap >= 3: ignora visualizações no mesmo dia ou dia seguinte ao último RDO
+            gap = _working_days_between(ultimo + timedelta(days=1), today + timedelta(days=1))
+            if gap >= 3:
                 anomalies.append({
                     "tipo": "sem_rdo",
-                    "title": f"{gap} dias úteis desde o último RDO",
-                    "body": f"Último RDO preenchido em {ultimo.strftime('%d/%m/%Y')}. A obra pode ter avançado — preencha os RDOs pendentes para manter a rastreabilidade.",
+                    "title": f"{gap} dias úteis sem RDO",
+                    "body": f"Último RDO preenchido em {ultimo.strftime('%d/%m/%Y')}. Preencha os RDOs dos dias pendentes para manter a rastreabilidade do progresso.",
                     "priority": "Medium",
                 })
         except (ValueError, TypeError):
@@ -1057,16 +1058,37 @@ def _build_insights_llm(
         delta_ctx += "\n".join(f"  - {t}" for t in titulos_ant)
         delta_ctx += "\nGere insights que EVOLUEM em relação aos anteriores — mostre o que mudou.\n"
 
-    # Dia livre próximo
-    dia_livre = ""
+    # Planejamento amanhã — atividades previstas para o dia seguinte ao último RDO
+    planejamento_amanha_ctx = ""
     if rdo_recentes:
         try:
             d_prox = date.fromisoformat(str(rdo_recentes[0].get("data",""))[:10]) + timedelta(days=1)
             atv_amanha = [a for a in atividades
                 if str(a.get("inicio_previsto",""))[:10] <= d_prox.isoformat() <= str(a.get("termino_previsto",""))[:10]
                 and float(a.get("conclusao_pct") or 0) < 100]
+            # Atividades do dia atual com progresso pendente (delta negativo)
+            pendencias_hoje = [a for a in atividades
+                if str(a.get("termino_previsto",""))[:10] == _ref_rdo.isoformat()
+                and float(a.get("conclusao_pct") or 0) < 100]
+
             if not atv_amanha:
-                dia_livre = f"\nATENÇÃO: {d_prox.isoformat()} não tem atividades programadas — oportunidade de antecipação.\n"
+                planejamento_amanha_ctx = f"\nPLANEJAMENTO AMANHÃ ({d_prox.isoformat()}): Nenhuma atividade programada — oportunidade de antecipar atividades futuras.\n"
+            else:
+                equipe_disp = int(rdo_recentes[0].get("equipe_alocada") or 0) if rdo_recentes else 0
+                linhas = [f"\nPLANEJAMENTO AMANHÃ ({d_prox.isoformat()}) — equipe disponível: {equipe_disp} pessoas:"]
+                for a in atv_amanha[:6]:
+                    pct = float(a.get("conclusao_pct") or 0)
+                    ef_plan = int(a.get("efetivo_alocado") or 1)
+                    linhas.append(
+                        f"  • {a.get('atividade','?')[:45]}: {pct:.0f}% concluído"
+                        f" | ini={str(a.get('inicio_previsto',''))[:10]} prazo={str(a.get('termino_previsto',''))[:10]}"
+                        f" | efetivo planejado={ef_plan}p"
+                    )
+                if pendencias_hoje:
+                    linhas.append(f"  PENDÊNCIAS DE HOJE ({_ref_rdo.isoformat()}):")
+                    for p in pendencias_hoje[:3]:
+                        linhas.append(f"    ↳ {p.get('atividade','?')[:45]}: {float(p.get('conclusao_pct') or 0):.0f}% — priorizar amanhã")
+                planejamento_amanha_ctx = "\n".join(linhas) + "\n"
         except Exception:
             pass
 
@@ -1102,15 +1124,15 @@ ANOMALIAS FACTUAIS:
 
 RDOs RECENTES (clima | equipe | interrupções | obs do campo):
 {chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
-{_weather_ctx(weather)}{dia_livre}{delta_ctx}"""
+{_weather_ctx(weather)}{planejamento_amanha_ctx}{delta_ctx}"""
 
     system_prompt = """Você é o Agente de Inteligência da plataforma Bomtempo — gestor sênior de obras de infraestrutura.
 
-Gere EXATAMENTE 4 insights em JSON. Cada insight:
+Gere entre 2 e 6 insights em JSON, conforme a quantidade de achados reais. Não invente insights para atingir um número mínimo. Cada insight:
 - "title": max 55 chars, direto ao ponto
-- "body": análise com NÚMEROS REAIS + RECOMENDAÇÃO ACIONÁVEL com cálculo explícito. Max 260 chars.
+- "body": análise com NÚMEROS REAIS + RECOMENDAÇÃO ACIONÁVEL. Max 280 chars.
 - "priority": "High" | "Medium" | "Low"
-- "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta"
+- "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta" | "planejamento"
 
 ════ REGRAS ABSOLUTAS — violá-las é um erro crítico ════
 
@@ -1130,39 +1152,51 @@ R5. ATRASO = termino_previsto < ref_rdo E já iniciou E pct < 100%.
 
 R6. DADOS REAIS: Use APENAS os dados fornecidos. Jamais invente métricas.
 
-R7. CLIMA: Se PREVISÃO DO TEMPO indica ≥ 3 dias de chuva OU chuva máxima ≥ 15mm/dia, OBRIGATÓRIO gerar
-    1 insight do tipo "clima" com: dias úteis em risco, atividades externas impactadas e recomendação
-    (antecipar atividades internas, buffer de prazo, realocação de equipe para serviços cobertos).
+R7. CLIMA: Só gere insight de clima se PREVISÃO DO TEMPO indica ≥ 3 dias de chuva OU chuva máxima ≥ 15mm/dia.
+    PROIBIDO gerar insight "clima favorável" ou "boas condições" — isso não agrega valor.
+
+R8. FILLER PROIBIDO: NUNCA gere insights de:
+    - Clima favorável / condições normais
+    - Equipe disponível / efetivo suficiente (sem gap real)
+    - Progresso "no ritmo" sem nenhuma recomendação específica
+    Só gere insight se há achado real com recomendação acionável.
+
+R9. NOTAÇÃO MATEMÁTICA PROIBIDA: JAMAIS escreva fórmulas, funções ou expressões matemáticas cruas no texto.
+    PROIBIDO: "ceil(670 / (1 * 161)) = 5", "math.ceil(...)", "(saldo ÷ dias) = X", "a/b = c pessoas"
+    OBRIGATÓRIO: escreva o resultado em prosa executiva direta.
+    ✓ "São necessárias 5 pessoas para concluir amanhã (3 atuais + 2 de reforço)."
+    ✗ "ceil(670 / (1 * 161)) = 5 pessoas" — ISSO É UM ERRO CRÍTICO
 
 ════ OBRIGATÓRIO NOS INSIGHTS DE RISCO/EQUIPE ════
-Para cada atividade com delta negativo, CALCULE e APRESENTE:
-  a) Saldo: total_qty − exec_qty
-  b) Produção por pessoa/dia: use o valor "prod/pessoa" que está na linha de contexto da atividade
-     (NUNCA use velocity/dia como se fosse prod/pessoa — velocity já inclui a equipe toda)
-  c) Dias úteis restantes (após a data do último RDO)
-  d) Efetivo mínimo: saldo ÷ (dias_restantes × prod/pessoa), arredonde para cima
-  e) Pool disponível: equipe total do último RDO (campo EQUIPE no contexto)
-  f) Fonte de reforço: atividade com delta ≥ 0% pode liberar pessoas?
+Para cada atividade com delta negativo:
+  a) Saldo = total_qty − exec_qty (valores do contexto)
+  b) Produção por pessoa/dia: campo "prod/pessoa" no contexto (NÃO confunda com velocity total)
+  c) Dias úteis restantes após o último RDO
+  d) Efetivo mínimo: calcule internamente, escreva APENAS o resultado em prosa
+  e) Pool disponível: equipe total do último RDO
+  f) Reforço possível de atividade com delta ≥ 0%?
 
-FORMATO DE SAÍDA — escreva de forma executiva, em português, SEM notação matemática crua:
-  ✓ "Saldo de 670 un. Com produção de 161 un/pessoa/dia, são necessárias 5 pessoas para concluir amanhã (3 atuais + 2 de reforço)."
-  ✗ "ceil(670 / (1 * 161)) = 5 pessoas"  ← PROIBIDO este formato
+════ INSIGHT PLANEJAMENTO (tipo "planejamento") ════
+Se a seção PLANEJAMENTO AMANHÃ estiver presente no contexto, gere OBRIGATORIAMENTE 1 insight do tipo "planejamento":
+  - Liste as atividades previstas para amanhã com o efetivo sugerido para cada uma
+  - Inclua pendências do dia anterior que precisam ser priorizadas
+  - Tom: orientação prática, não alerta
 
-EXEMPLO CORRETO:
-  "Vedação atrasada: dia 2/3, real=54% (786/1456), esp=67%, delta=−13%.
-   Saldo: 670 un. Produção: 161 un/pessoa/dia. Para concluir amanhã: 5 pessoas (3 atuais + 2 de reforço).
-   Fixação está adiantada (delta=+3%) — realoque 2 pessoas para cobrir sem custo adicional."
+EXEMPLO CORRETO (risco):
+  "Vedação atrasada: dia 2/3, real=54%, esp=67%, delta=−13%.
+   Saldo de 670 un com produção de 161 un/pessoa/dia.
+   Para concluir amanhã: 5 pessoas (3 atuais + 2 de Fixação, que está adiantada)."
 
 EXEMPLO ADIANTADO:
-  "Fixação: dia 2/3, real=65%, esp=67%, delta=+3% — no prazo.
-   Após conclusão amanhã, 3 pessoas ficam disponíveis para reforçar Vedação."
+  "Fixação: dia 2/3, real=65%, no prazo. Após conclusão amanhã, 3 pessoas ficam livres para reforçar Vedação."
 
 ════ HIERARQUIA ════
 1. Anomalia factual grave (dados inválidos, crítica parada com evidência)
-2. Atividade atrasada (prazo vencido, delta negativo) — com cálculo de recuperação
+2. Atividade atrasada (prazo vencido, delta negativo) — com cálculo de recuperação em prosa
 3. Ritmo insuficiente: velocity < 50% do plano
-4. Oportunidade: delta positivo, reallocation, antecipação
-5. Padrão climático/interrupção recorrente
+4. Planejamento amanhã (se PLANEJAMENTO AMANHÃ presente)
+5. Oportunidade: delta positivo, reallocation, antecipação
+6. Padrão climático real (≥3 dias chuva ou ≥15mm/dia)
 
 Responda SOMENTE com JSON array:
 [{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
