@@ -769,7 +769,7 @@ def generate_rdo_pdf(self, rdo_id: str, client_id: str = "") -> Dict[str, Any]:
         contrato = str(rdo.get("contrato") or "rdo").replace("/", "-").replace(" ", "_")
         data_str = str(rdo.get("data") or rdo.get("data_rdo") or "")[:10].replace("-", "")
         filename = f"RDO-{contrato}-{data_str}-{rdo_id[:8]}.pdf"
-        storage_path = filename  # path inside bucket, no bucket prefix
+        storage_path = f"rdo-pdfs/{filename}"  # subfolder inside bucket (consistent with existing URLs)
 
         # Salva localmente primeiro (para anexar no email)
         local_dir = _Cfg.RDO_PDF_DIR
