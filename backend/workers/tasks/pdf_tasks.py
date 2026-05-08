@@ -587,7 +587,7 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list, evidencias: list | None = N
                         ct = resp.headers.get("content-type", "")
                         img_type = "JPEG" if "jpeg" in ct or "jpg" in ct else "PNG" if "png" in ct else "JPEG"
                         x_img = x_starts[col_idx]
-                        if pdf.get_y() + IMG_H + 10 > 270:
+                        if row_y + IMG_H + 10 > 270:
                             pdf.add_page()
                             row_y = pdf.get_y() + 1
                             col_idx = 0
@@ -642,7 +642,8 @@ def _build_rdo_pdf_fpdf(rdo: Dict, atividades: list, evidencias: list | None = N
             if sig_b64:
                 try:
                     import base64
-                    sig_bytes = base64.b64decode(sig_b64)
+                    raw = sig_b64.split(",", 1)[1] if "," in sig_b64 else sig_b64
+                    sig_bytes = base64.b64decode(raw)
                     sig_img = io.BytesIO(sig_bytes)
                     pdf.image(sig_img, x=12, y=y_sig, w=80, h=18, type="JPEG")
                 except Exception:
