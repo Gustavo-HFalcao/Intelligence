@@ -910,10 +910,25 @@ def _build_insights_llm(
             dias_restantes_txt = f"{dias_rest} dias corridos ({dias_uteis_rest} úteis) após hoje até {d_fim.isoformat()}"
     except Exception:
         pass
+    # ── Tier 2: Tendência de SPI ──────────────────────────────────────────────
+    rdos_ord = sorted(rdo_recentes, key=lambda r: str(r.get("data") or ""), reverse=True)
+    spi_trend_txt = _calc_spi_trend(atividades, historico, rdos_ord)
+
+    # ── #5 Caminho Crítico ─────────────────────────────────────────────────────
+    # kpis calculado ANTES de valor_em_risco_txt para que progress_pct esteja disponível
+    _last_rdo_ref = None
+    if rdo_recentes:
+        try:
+            _last_rdo_ref = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
+        except Exception:
+            pass
+    _hmap_llm = _build_hist_map(historico)
+    kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
+
     try:
         valor = float(contrato_info.get("valor_contratado") or 0)
         if valor > 0:
-            pct_restante = max(0, 100 - float((kpis if 'kpis' in dir() else {}).get("progress_pct", 0)))
+            pct_restante = max(0, 100 - float(kpis.get("progress_pct", 0)))
             vr = valor * pct_restante / 100
             valor_em_risco_txt = f"R$ {vr:,.0f} a executar ({pct_restante:.0f}% do contrato de R$ {valor:,.0f})"
     except Exception:
@@ -926,21 +941,6 @@ def _build_insights_llm(
             efetivo_gap_txt = f"real={ef_real}p vs planejado={ef_plan}p (delta={delta_ef:+d}p)"
     except Exception:
         pass
-
-    # ── Tier 2: Tendência de SPI ──────────────────────────────────────────────
-    rdos_ord = sorted(rdo_recentes, key=lambda r: str(r.get("data") or ""), reverse=True)
-    spi_trend_txt = _calc_spi_trend(atividades, historico, rdos_ord)
-
-    # ── #5 Caminho Crítico ─────────────────────────────────────────────────────
-    # last_rdo: pega o mais recente dos rdos_recentes (já filtrado por Submetido no caller)
-    _last_rdo_ref = None
-    if rdo_recentes:
-        try:
-            _last_rdo_ref = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
-        except Exception:
-            pass
-    _hmap_llm = _build_hist_map(historico)
-    kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
     _ref_rdo = _last_rdo_ref or today
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
     # Atrasada: prazo vencido NA data do último RDO ou antes (<=) E atividade já deveria ter iniciado.
@@ -1033,7 +1033,6 @@ def _build_insights_llm(
         else:
             ativ_iniciadas_ctx.append(linha)
 
-    ativ_ctx = ativ_iniciadas_ctx  # mantém compatibilidade
 
     # RDO context rico — inclui obs do master
     rdo_ctx = []

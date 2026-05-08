@@ -307,9 +307,6 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
     { label: 'Telemetria',      value: d.temperatura ? `${d.temperatura}°C` : '—', icon: CloudRain, color: TEAL, sub: d.clima_resumido || 'Sem dados', onClick: undefined },
   ]
 
-  // Preenche até 4 cards para a grid do agente IA
-  const insightCards = [...insights]
-  while (insightCards.length < 4) insightCards.push(null)
 
   return (
     <div className="flex flex-col gap-6 animate-enter">
@@ -357,16 +354,14 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
               {generatingInsights ? 'Analisando...' : 'Gerar Insights'}
             </button>
           </div>
-          {/* 4 cards grid */}
+          {/* insight cards — 2 a 5 cards dinâmicos */}
           <div className="grid grid-cols-2 gap-3 flex-1">
-            {insightCards.slice(0, 4).map((ins, i) =>
-              ins ? (
-                <InsightCard key={i} insight={ins} idx={i} />
-              ) : (
-                <div key={i} className="bg-white/[0.02] border border-white/[0.05] rounded-xl p-4 flex items-center justify-center">
-                  <span className="text-[9px] text-white/15 font-black uppercase tracking-widest">Sem dados</span>
-                </div>
-              )
+            {insights.length > 0 ? insights.map((ins, i) => (
+              <InsightCard key={i} insight={ins} idx={i} />
+            )) : (
+              <div className="col-span-2 bg-white/[0.02] border border-white/[0.05] rounded-xl p-4 flex items-center justify-center">
+                <span className="text-[9px] text-white/15 font-black uppercase tracking-widest">Sem dados — clique em Gerar Insights</span>
+              </div>
             )}
           </div>
         </div>

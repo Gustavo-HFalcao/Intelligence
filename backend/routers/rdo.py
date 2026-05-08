@@ -792,7 +792,8 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
                     d_fim_r = _date.fromisoformat(str(dt_fim)[:10])
                     dr = (d_fim_r - today_rdo).days
                     from backend.routers.hub import _working_days_between as _wdb_sum
-                    du = _wdb_sum(today_rdo, d_fim_r)
+                    from datetime import timedelta as _td_r
+                    du = _wdb_sum(today_rdo + _td_r(days=1), d_fim_r + _td_r(days=1))
                     dias_restantes_rdo = f"{dr}d corridos ({du} úteis) até {d_fim_r.strftime('%d/%m/%Y')}"
                 v = float(ci.get("valor_contratado") or 0)
                 if v > 0:
@@ -876,8 +877,8 @@ def _generate_ai_summary_sync(rdo: Dict[str, Any], atividades: list, client_id: 
 
         _ex_neg = (
             "Ex: Vedacao (3p, 161un/pessoa): -13%, saldo=189un, 1du restante."
-            " Efetivo min=ceil(189/161)=2p — atual tem 3p, suficiente se mantiver ritmo."
-            " Fixacao (+3%) pode ceder 1p se necessario."
+            " Efetivo minimo necessario: 2 pessoas (saldo 189un dividido por 161un/pessoa, arredondado pra cima)."
+            " Atual tem 3p, suficiente se mantiver ritmo. Fixacao (+3%) pode ceder 1p se necessario."
         )
 
         system_prompt = (
