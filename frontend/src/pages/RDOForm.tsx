@@ -581,7 +581,7 @@ export default function RDOForm() {
 
     setIsSubmitting(true)
     try {
-      if (!draftId) await saveDraft()
+      await saveDraft()  // sempre flush do estado antes de submeter (garante equipe_alocada, orientacao, etc.)
       if (!draftId) { setIsSubmitting(false); return }
 
       const sig = sigPadRef.current?.toDataURL('image/jpeg') ?? ''
