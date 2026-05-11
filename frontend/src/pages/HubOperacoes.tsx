@@ -225,14 +225,16 @@ function OverviewTab({ contrato, contratoInfo }: { contrato: string; contratoInf
     queryKey: ['hub-visao-geral', contrato],
     queryFn:  () => api.get(`/hub/visao-geral?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: Infinity,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   })
   const { data: insightsData, refetch: refetchInsights } = useQuery({
     queryKey: ['hub-agente-insights', contrato],
     queryFn:  () => api.get(`/hub/agente/insights?contrato=${encodeURIComponent(contrato)}`).then(r => r.data),
     enabled:  !!contrato,
-    staleTime: Infinity,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
   })
   const [riscoOpen, setRiscoOpen] = useState(false)
   const [alertaOpen, setAlertaOpen] = useState(false)

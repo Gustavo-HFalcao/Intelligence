@@ -1125,59 +1125,24 @@ RDOs RECENTES (clima | equipe | interrupções | obs do campo):
 {chr(10).join(rdo_ctx) if rdo_ctx else '  Sem RDOs'}
 {_weather_ctx(weather)}{planejamento_amanha_ctx}{delta_ctx}"""
 
-    system_prompt = """Você é o Agente de Inteligência da plataforma Bomtempo — gestor sênior de obras de infraestrutura.
+    system_prompt = """Você é o motor de alertas da plataforma Bomtempo. Analise os dados da obra e retorne entre 2 e 5 insights independentes.
 
-Gere entre 2 e 5 insights ESTRUTURADOS em JSON. Cada insight é um ALERTA ou DIRETIVA específica — NÃO um resumo narrativo do dia.
-- "title": max 55 chars — nomeie UMA atividade ou UMA métrica específica. NUNCA títulos genéricos.
-- "body": 1-3 frases com NÚMERO DO CONTEXTO + RECOMENDAÇÃO ACIONÁVEL específica. Max 280 chars.
-- "priority": "High" | "Medium" | "Low"
-- "tipo": "risco" | "oportunidade" | "anomalia" | "producao" | "equipe" | "clima" | "delta" | "planejamento"
+FORMATO OBRIGATÓRIO — retorne EXATAMENTE este JSON object:
+{"insights": [
+  {"title": "Instalação Módulos FV — risco de prazo", "body": "Saldo de 212 un com apenas 1 dia útil restante. Produção atual de 88 un/pessoa exige mínimo 3 pessoas para fechar no prazo (atual: 2). Realocar 1 pessoa do Aterramento (+7%, pode ceder).", "priority": "High", "tipo": "risco"},
+  {"title": "Aterramento — antecipação possível", "body": "Delta +7%, saldo zerado. Equipe pode ser cedida para reforçar Instalação FV amanhã.", "priority": "Low", "tipo": "oportunidade"}
+]}
 
-════ REGRAS ABSOLUTAS ════
-
-R0. NÃO É RESUMO DO DIA: Insights NÃO são narrativa geral da obra. São alertas pontuais sobre UMA atividade ou métrica.
-    PROIBIDO títulos como "Análise do dia", "Balanço geral", "Resumo do dia", "Visão geral", "Produtividade satisfatória".
-    Cada insight deve nomear algo específico: "Instalação dos módulos FV", "SPI em queda", "Risco de prazo — Vedação".
-
-R1. FUTURAS: Atividades na seção "ATIVIDADES FUTURAS" NÃO EXISTEM para análise.
-    NUNCA gere insight sobre elas.
-
-R2. COBERTURA DE RDO: 1 RDO por dia trabalhado é CORRETO. Não alerte sobre isso.
-
-R3. OBRA SAUDÁVEL (SPI≥1.0 e desvio≥0%): PROIBIDO alertas de atraso. Gere oportunidades de antecipação.
-
-R4. RITMO POSITIVO: delta ≥ 0% = NO RITMO ou ADIANTADA.
-
-R5. ATRASO = termino_previsto < ref_rdo E iniciou E pct < 100%.
-
-R6. DADOS REAIS: Use apenas dados fornecidos.
-
-R7. CLIMA: Só se ≥ 3 dias de chuva OU ≥ 15mm/dia. PROIBIDO "clima favorável".
-
-R8. FILLER PROIBIDO: PROIBIDO gerar insights de equipe disponível, clima normal, ou "no ritmo" sem recomendação específica.
-
-R9. NOTAÇÃO MATEMÁTICA PROIBIDA:
-    ✗ "ceil(670 / (1 * 161)) = 5" | "saldo ÷ dias = X" | qualquer fórmula no texto
-    ✓ "São necessárias 5 pessoas para concluir no prazo (3 atuais + 2 de reforço de Fixação)."
-
-════ INSIGHTS DE RISCO/EQUIPE ════
-Para atividade com delta negativo, inclua no body: saldo em unidades, produção/pessoa/dia do contexto,
-dias restantes, efetivo mínimo necessário (em prosa), fonte de reforço disponível.
-
-════ INSIGHT PLANEJAMENTO ════
-Se PLANEJAMENTO AMANHÃ presente: gere 1 insight tipo "planejamento" com as atividades do dia seguinte
-e como distribuir o efetivo disponível. Tom: orientação prática.
-
-════ HIERARQUIA ════
-1. Anomalia factual grave
-2. Atividade atrasada (prazo vencido + delta negativo) com cálculo de recuperação
-3. Velocity < 50% do plano
-4. Planejamento amanhã
-5. Oportunidade (delta positivo, antecipação possível)
-6. Clima (só se risco real)
-
-Responda SOMENTE com JSON array válido — sem texto antes ou depois:
-[{"title":"...","body":"...","priority":"...","tipo":"..."},...]"""
+REGRAS:
+1. CADA insight trata UMA atividade ou UMA métrica — nunca o dia como um todo.
+2. PROIBIDO: títulos como "Análise do dia", "Balanço geral", "Resumo", "Visão geral". Se o título não nomear uma atividade específica, reescreva.
+3. ATIVIDADES FUTURAS: ignorar completamente.
+4. SPI ≥ 1.0 e desvio ≥ 0%: sem alertas de atraso — gere oportunidades.
+5. Delta negativo: inclua saldo, produção/pessoa, dias restantes, efetivo mínimo (em prosa, sem fórmulas), fonte de reforço.
+6. CLIMA: só se ≥ 3 dias consecutivos de chuva ou ≥ 15mm/dia.
+7. PLANEJAMENTO: se houver contexto de amanhã, gere 1 insight tipo "planejamento" com distribuição de equipe.
+8. Use APENAS números do contexto fornecido.
+9. Prioridade: High = prazo em risco ou anomalia grave | Medium = atenção | Low = oportunidade."""
 
     try:
         from backend.integrations.ai import query as ai_query
@@ -1185,25 +1150,30 @@ Responda SOMENTE com JSON array válido — sem texto antes ou depois:
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": context},
         ]
-        response_text = ai_query(messages, max_tokens=1400, temperature=0.3)
+        response_text = ai_query(
+            messages,
+            max_tokens=1400,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
         if not response_text:
             raise ValueError("empty response")
 
-        start = response_text.find("[")
-        end   = response_text.rfind("]") + 1
-        if start >= 0 and end > start:
-            parsed = json.loads(response_text[start:end])
-            valid = [
-                {
-                    "title":    i.get("title", "Insight"),
-                    "body":     i.get("body", ""),
-                    "priority": i.get("priority", "Medium"),
-                    "tipo":     i.get("tipo", "risco"),
-                }
-                for i in parsed if isinstance(i, dict)
-            ]
-            if valid:
-                return valid
+        parsed_obj = json.loads(response_text)
+        raw_list = parsed_obj.get("insights") or []
+        if not isinstance(raw_list, list):
+            raise ValueError("insights not a list")
+        valid = [
+            {
+                "title":    i.get("title", "Insight"),
+                "body":     i.get("body", ""),
+                "priority": i.get("priority", "Medium"),
+                "tipo":     i.get("tipo", "risco"),
+            }
+            for i in raw_list if isinstance(i, dict)
+        ]
+        if valid:
+            return valid
 
     except Exception as e:
         logger.warning(f"LLM insights failed for {contrato}: {e}")

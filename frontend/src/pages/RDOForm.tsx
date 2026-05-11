@@ -590,8 +590,6 @@ export default function RDOForm() {
         signatory_doc: form.signatory_doc,
         signatory_sig_b64: sig,
       })
-      // Invalida TODOS os caches relevantes — o hub de projetos atualiza em tempo real
-      // para qualquer usuário que já está na página
       qc.invalidateQueries({ queryKey: ['rdo-historico'] })
       qc.invalidateQueries({ queryKey: ['rdo-drafts'] })
       qc.invalidateQueries({ queryKey: ['hub-contratos'] })
@@ -599,6 +597,12 @@ export default function RDOForm() {
       qc.invalidateQueries({ queryKey: ['hub-kpis'] })
       qc.invalidateQueries({ queryKey: ['dashboard-kpis'] })
       qc.invalidateQueries({ queryKey: ['rdo-insights'] })
+      qc.invalidateQueries({ queryKey: ['hub-visao-geral'] })
+      qc.invalidateQueries({ queryKey: ['hub-agente-insights'] })
+      // Dispara geração de insights em background para o hub já mostrar dados atualizados
+      if (form.contrato) {
+        api.post('/hub/agente/insights/generate', { contrato: form.contrato }).catch(() => {})
+      }
       navigate('/rdo-historico')
     } finally {
       setIsSubmitting(false)

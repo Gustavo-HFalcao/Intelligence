@@ -59,13 +59,15 @@ def query(
     user_login: str = "system",
     client_id: str = "",
     prompt_preview: str = "",
+    response_format: Dict[str, Any] | None = None,
 ) -> str:
     client = _get_client()
     t0 = time.time()
     try:
-        resp = client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, temperature=temperature,
-        )
+        kwargs: Dict[str, Any] = dict(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+        if response_format:
+            kwargs["response_format"] = response_format
+        resp = client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content or ""
         usage = resp.usage
         cost  = _estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
