@@ -113,11 +113,8 @@ export default function RDOHistorico() {
     queryFn: () => api.get('/rdo/contratos').then(r => r.data),
     staleTime: 30_000,
   })
-  // Combina contratos do tenant + contratos dos RDOs carregados (fallback)
   const allRdos: any[] = data?.rdos ?? []
-  const tenantContratos: string[] = contratosData?.contratos ?? []
-  const rdoContratos: string[] = allRdos.map((r: any) => r.contrato).filter(Boolean)
-  const contratos = Array.from(new Set([...tenantContratos, ...rdoContratos])).sort()
+  const contratos: string[] = contratosData?.contratos ?? []
 
   // ── Notificações ─────────────────────────────────────────────────────────────
   const { data: subData, refetch: refetchSubs } = useQuery({

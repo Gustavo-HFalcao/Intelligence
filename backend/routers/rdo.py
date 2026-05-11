@@ -1007,7 +1007,11 @@ async def list_historico(
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
     filters: Dict[str, Any] = {}
-    if contrato:
+    # Usuário vinculado a contrato específico — restringe ao seu contrato
+    user_project = str(_user.get("project") or "").strip()
+    if user_project:
+        filters["contrato"] = user_project
+    elif contrato:
         filters["contrato"] = contrato
     if client_id:
         filters["client_id"] = client_id
