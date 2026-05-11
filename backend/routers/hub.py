@@ -499,9 +499,11 @@ def _calculate_risk_score(df_proj: Any, financeiro_df: Any, contrato_info: Dict[
 # MOTOR DE INTELIGÊNCIA — Velocity, Anomalias, Risk Score, Caminho Crítico, Delta
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _calc_velocity(atividade: dict, historico: list, working_days: set = None) -> dict:
+def _calc_velocity(atividade: dict, historico: list, working_days: set = None, ref_date: date = None) -> dict:
     """Calcula produtividade real por DIA TRABALHADO (não por dia corrido).
-    Retorna velocity_real, dias_trabalhados, saldo, dias_restantes_projetados, eac_date."""
+    Retorna velocity_real, dias_trabalhados, saldo, dias_restantes_projetados, eac_date.
+    ref_date: data âncora para EAC — deve ser a data do último RDO, não date.today().
+    EAC conta dias úteis a partir do PRÓXIMO dia após ref_date."""
     aid = str(atividade.get("id", ""))
     total_qty = float(atividade.get("total_qty") or 0)
     exec_qty  = float(atividade.get("exec_qty") or 0)
@@ -523,7 +525,9 @@ def _calc_velocity(atividade: dict, historico: list, working_days: set = None) -
     _wd = working_days if working_days is not None else {0, 1, 2, 3, 4, 5}
     eac_date = None
     if dias_restantes is not None:
-        current = date.today()
+        # Âncora: data do último RDO submetido. EAC começa a contar do dia SEGUINTE.
+        # Nunca usar date.today(): hoje pode ser dias depois do último RDO (fins de semana, feriados).
+        current = ref_date if ref_date is not None else date.today()
         added = 0
         while added < dias_restantes:
             current += timedelta(days=1)
@@ -882,19 +886,34 @@ def _build_insights_llm(
             "priority": "Medium", "tipo": "risco",
         }]
 
-    # ── #1 Velocity Engine ─────────────────────────────────────────────────────
+    # ── Âncora temporal: data do último RDO submetido ─────────────────────────
+    # DEVE ser calculada primeiro — usada em velocity, risk score e contexto.
+    # Nunca usar date.today(): o hub pode ser consultado dias após o último RDO.
+    _last_rdo_ref = None
+    rdos_sub_sorted = sorted(
+        [r for r in rdo_recentes if r.get("status") == "Submetido"],
+        key=lambda r: str(r.get("data") or ""), reverse=True
+    )
+    if rdos_sub_sorted:
+        try:
+            _last_rdo_ref = date.fromisoformat(str(rdos_sub_sorted[0].get("data", ""))[:10])
+        except Exception:
+            pass
+    _ref_rdo = _last_rdo_ref or today
+
+    # ── #1 Velocity Engine — EAC ancorado em _ref_rdo ─────────────────────────
     velocities: dict = {}
     for a in atividades:
         if float(a.get("total_qty") or 0) > 0:
-            velocities[str(a["id"])] = _calc_velocity(a, historico)
+            velocities[str(a["id"])] = _calc_velocity(a, historico, ref_date=_ref_rdo)
 
     # ── #2 Anomaly Detection ───────────────────────────────────────────────────
     anomalias = _detect_anomalies(atividades, rdo_recentes, historico)
 
-    # ── #3 Risk Score ──────────────────────────────────────────────────────────
+    # ── #3 Risk Score — ancorado em _ref_rdo, não hoje ────────────────────────
     for a in atividades:
         vel = velocities.get(str(a.get("id", "")), {})
-        a["_risk_score"] = _calc_risk_score(a, vel, today)
+        a["_risk_score"] = _calc_risk_score(a, vel, _ref_rdo)
 
     # ── Tier 1: Prazo e valor do contrato ─────────────────────────────────────
     dias_restantes_txt = ""
@@ -904,24 +923,16 @@ def _build_insights_llm(
         dt = contrato_info.get("data_termino") or contrato_info.get("data_fim")
         if dt:
             d_fim = date.fromisoformat(str(dt)[:10])
-            dias_rest = (d_fim - today).days
-            # Conta dias úteis APÓS hoje (hoje já está em andamento)
-            dias_uteis_rest = _working_days_between(today + timedelta(days=1), d_fim + timedelta(days=1))
-            dias_restantes_txt = f"{dias_rest} dias corridos ({dias_uteis_rest} úteis) após hoje até {d_fim.isoformat()}"
+            dias_rest = (d_fim - _ref_rdo).days
+            dias_uteis_rest = _working_days_between(_ref_rdo + timedelta(days=1), d_fim + timedelta(days=1))
+            dias_restantes_txt = f"{dias_rest} dias corridos ({dias_uteis_rest} úteis) após {_ref_rdo.isoformat()} até {d_fim.isoformat()}"
     except Exception:
         pass
     # ── Tier 2: Tendência de SPI ──────────────────────────────────────────────
     rdos_ord = sorted(rdo_recentes, key=lambda r: str(r.get("data") or ""), reverse=True)
     spi_trend_txt = _calc_spi_trend(atividades, historico, rdos_ord)
 
-    # ── #5 Caminho Crítico ─────────────────────────────────────────────────────
-    # kpis calculado ANTES de valor_em_risco_txt para que progress_pct esteja disponível
-    _last_rdo_ref = None
-    if rdo_recentes:
-        try:
-            _last_rdo_ref = date.fromisoformat(str(rdo_recentes[0].get("data", ""))[:10])
-        except Exception:
-            pass
+    # ── #5 Caminho Crítico + kpis ─────────────────────────────────────────────
     _hmap_llm = _build_hist_map(historico)
     kpis = _calc_progress_spi(atividades, today, ref_date=_last_rdo_ref, hist_map=_hmap_llm)
 
@@ -941,7 +952,6 @@ def _build_insights_llm(
             efetivo_gap_txt = f"real={ef_real}p vs planejado={ef_plan}p (delta={delta_ef:+d}p)"
     except Exception:
         pass
-    _ref_rdo = _last_rdo_ref or today
     em_andamento = [a for a in atividades if 0 < float(a.get("conclusao_pct") or 0) < 100]
     # Atrasada: prazo vencido NA data do último RDO ou antes (<=) E atividade já deveria ter iniciado.
     # Usar <= porque _ref_rdo é o último DIA TRABALHADO — se o prazo era exatamente _ref_rdo e a
@@ -953,10 +963,10 @@ def _build_insights_llm(
     # proximos_7d: só atividades que já iniciaram ou iniciam até a data do RDO
     proximos_7d  = [a for a in atividades if a.get("termino_previsto")
                     and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
-                    and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - today).days <= 7
+                    and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - _ref_rdo).days <= 7
                     and float(a.get("conclusao_pct") or 0) < 100]
     antecipadas  = [a for a in atividades if a.get("inicio_previsto")
-                    and str(a["inicio_previsto"])[:10] > today.isoformat()
+                    and str(a["inicio_previsto"])[:10] > _ref_rdo.isoformat()
                     and float(a.get("conclusao_pct") or 0) > 0]
     concluidas   = [a for a in atividades if float(a.get("conclusao_pct") or 0) >= 100]
 
@@ -1061,7 +1071,7 @@ def _build_insights_llm(
     planejamento_amanha_ctx = ""
     if rdo_recentes:
         try:
-            d_prox = date.fromisoformat(str(rdo_recentes[0].get("data",""))[:10]) + timedelta(days=1)
+            d_prox = _ref_rdo + timedelta(days=1)
             atv_amanha = [a for a in atividades
                 if str(a.get("inicio_previsto",""))[:10] <= d_prox.isoformat() <= str(a.get("termino_previsto",""))[:10]
                 and float(a.get("conclusao_pct") or 0) < 100]
