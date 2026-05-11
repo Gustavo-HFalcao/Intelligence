@@ -1170,6 +1170,575 @@ function ProdutividadeSection({ allRows, refDate }: { allRows: any[]; refDate?: 
   )
 }
 
+// ── ImportarIAModal ────────────────────────────────────────────────────────────
+
+function ImportarIAModal({ contrato, onClose, onSuccess }: { contrato: string; onClose: () => void; onSuccess: () => void }) {
+  type Step = 'upload' | 'processing' | 'preview' | 'confirming' | 'done'
+  const [step, setStep]           = useState<Step>('upload')
+  const [file, setFile]           = useState<File | null>(null)
+  const [dragging, setDragging]   = useState(false)
+  const [result, setResult]       = useState<any>(null)
+  const [error, setError]         = useState<string | null>(null)
+  const [importedCount, setImportedCount] = useState(0)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function handleFileDrop(f: File) {
+    setFile(f)
+    setError(null)
+  }
+
+  async function handleAnalyze() {
+    if (!file) return
+    setStep('processing')
+    setError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('contrato', contrato)
+      const res = await api.post('/hub/cronograma/importar-ia', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      })
+      setResult(res.data)
+      setStep('preview')
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Erro ao analisar arquivo com IA.')
+      setStep('upload')
+    }
+  }
+
+  async function handleConfirm() {
+    if (!result?.atividades?.length) return
+    setStep('confirming')
+    try {
+      const res = await api.post('/hub/cronograma/importar-ia/confirmar', {
+        contrato,
+        atividades: result.atividades,
+        parent_map: {},
+      })
+      setImportedCount(res.data?.criados ?? 0)
+      setStep('done')
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Erro ao importar atividades.')
+      setStep('preview')
+    }
+  }
+
+  function handleDownloadTemplate() {
+    window.open(`/api/hub/cronograma/template-excel?contrato=${encodeURIComponent(contrato)}`, '_blank')
+  }
+
+  const confBadge = (c: number) => {
+    if (c >= 85) return { bg: 'rgba(34,197,94,0.15)', color: '#22c55e' }
+    if (c >= 60) return { bg: 'rgba(245,158,11,0.15)', color: '#F59E0B' }
+    return { bg: 'rgba(239,68,68,0.15)', color: '#EF4444' }
+  }
+
+  const rowBg = (c: number) => {
+    if (c >= 85) return 'transparent'
+    if (c >= 60) return 'rgba(245,158,11,0.06)'
+    return 'rgba(239,68,68,0.06)'
+  }
+
+  const OVERLAY: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 9999,
+    background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+  }
+  const MODAL: React.CSSProperties = {
+    background: 'rgba(13,19,18,0.98)', border: '1px solid rgba(201,139,42,0.25)',
+    borderRadius: 18, width: '100%', maxWidth: 860, maxHeight: '90vh',
+    overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
+  }
+
+  return (
+    <div style={OVERLAY} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <motion.div style={MODAL} initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
+        {/* Header */}
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ padding: 8, borderRadius: 10, background: 'rgba(201,139,42,0.15)', border: '1px solid rgba(201,139,42,0.3)' }}>
+            <Sparkles size={16} style={{ color: COPPER }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em' }}>Importar Cronograma via IA</div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 600, marginTop: 2 }}>PDF · Excel · CSV · Imagem</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+
+          {/* UPLOAD */}
+          {step === 'upload' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {error && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#EF4444' }}>
+                  {error}
+                </div>
+              )}
+              {/* Drag & drop zone */}
+              <div
+                onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFileDrop(f) }}
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  border: `2px dashed ${dragging ? COPPER : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 14, padding: '36px 24px', textAlign: 'center', cursor: 'pointer',
+                  background: dragging ? 'rgba(201,139,42,0.05)' : 'rgba(255,255,255,0.02)',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <FileText size={32} style={{ color: dragging ? COPPER : 'rgba(255,255,255,0.25)', margin: '0 auto 12px' }} />
+                <div style={{ fontSize: 13, fontWeight: 700, color: dragging ? COPPER : 'rgba(255,255,255,0.7)' }}>
+                  {file ? file.name : 'Arraste o arquivo ou clique para selecionar'}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 6 }}>
+                  PDF, Excel (.xlsx), CSV, JPG, PNG
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png"
+                  style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileDrop(f) }}
+                />
+              </div>
+              {file && (
+                <div style={{ background: 'rgba(201,139,42,0.08)', border: '1px solid rgba(201,139,42,0.2)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <FileText size={14} style={{ color: COPPER }} />
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', flex: 1 }}>{file.name}</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{(file.size / 1024).toFixed(0)} KB</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={handleDownloadTemplate}
+                  style={{ background: 'rgba(42,157,143,0.12)', color: TEAL, border: `1px solid ${TEAL}30`, borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Download size={12} /> Baixar template Excel
+                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={onClose}
+                    style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    Cancelar
+                  </button>
+                  <button onClick={handleAnalyze} disabled={!file}
+                    style={{ background: file ? COPPER : 'rgba(201,139,42,0.3)', color: file ? '#0d1117' : 'rgba(255,255,255,0.3)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 800, cursor: file ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={12} /> Analisar com IA
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PROCESSING */}
+          {step === 'processing' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 48, height: 48, border: `3px solid rgba(201,139,42,0.2)`, borderTop: `3px solid ${COPPER}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>Analisando cronograma com IA...</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>Isso pode levar alguns segundos</div>
+            </div>
+          )}
+
+          {/* PREVIEW */}
+          {step === 'preview' && result && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {error && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#EF4444' }}>
+                  {error}
+                </div>
+              )}
+              {/* Resumo */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '14px 16px' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: COPPER, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Resumo da análise</div>
+                {result.resumo_fonte && <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>{result.resumo_fonte}</p>}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ background: 'rgba(201,139,42,0.1)', borderRadius: 8, padding: '6px 12px', fontSize: 11, color: COPPER, fontWeight: 700 }}>
+                    {result.atividades?.length ?? 0} atividades encontradas
+                  </div>
+                  {result.campos_ausentes?.length > 0 && result.campos_ausentes.map((c: string) => (
+                    <div key={c} style={{ background: 'rgba(239,68,68,0.1)', borderRadius: 8, padding: '6px 12px', fontSize: 11, color: '#EF4444', fontWeight: 600 }}>
+                      {c} ausente
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Avisos */}
+              {result.avisos?.length > 0 && (
+                <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#F59E0B', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Avisos</div>
+                  {result.avisos.map((a: string, i: number) => (
+                    <div key={i} style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginBottom: 3 }}>• {a}</div>
+                  ))}
+                </div>
+              )}
+
+              {/* Campos ausentes */}
+              {result.campos_ausentes?.length > 0 && (
+                <div style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#EF4444', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    <AlertTriangle size={10} style={{ display: 'inline', marginRight: 4 }} />
+                    Campos não encontrados no arquivo
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>{result.campos_ausentes.join(', ')}</div>
+                </div>
+              )}
+
+              {/* Tabela */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}>
+                        {['Atividade', 'Fase', 'Nível', 'Início', 'Término', 'Dur.', 'Responsável', 'Conf.'].map(h => (
+                          <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(result.atividades || []).map((a: any, i: number) => {
+                        const conf = Number(a.confianca ?? 100)
+                        const badge = confBadge(conf)
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: rowBg(conf) }}>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.85)', fontWeight: 600, maxWidth: 200 }}>
+                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }} title={a.nome || a.atividade}>{a.nome || a.atividade || '—'}</div>
+                            </td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)' }}>{a.fase || '—'}</td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)' }}>{a.nivel || '—'}</td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{a.inicio_previsto ? _iso_to_br(a.inicio_previsto) : '—'}</td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{a.termino_previsto ? _iso_to_br(a.termino_previsto) : '—'}</td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)' }}>{a.dias_planejados ?? '—'}</td>
+                            <td style={{ padding: '7px 10px', color: 'rgba(255,255,255,0.5)' }}>{a.responsavel || '—'}</td>
+                            <td style={{ padding: '7px 10px' }}>
+                              <span style={{ background: badge.bg, color: badge.color, borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 800 }}>{conf}%</span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CONFIRMING */}
+          {step === 'confirming' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 48, height: 48, border: `3px solid rgba(42,157,143,0.2)`, borderTop: `3px solid ${TEAL}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>Importando atividades...</div>
+            </div>
+          )}
+
+          {/* DONE */}
+          {step === 'done' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(42,157,143,0.15)', border: '2px solid rgba(42,157,143,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle size={28} style={{ color: TEAL }} />
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{importedCount} atividade{importedCount !== 1 ? 's' : ''} importada{importedCount !== 1 ? 's' : ''} com sucesso!</div>
+              <button onClick={() => { onSuccess(); onClose() }}
+                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>
+                Ver cronograma
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {step === 'preview' && (
+          <div style={{ padding: '14px 24px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <button onClick={handleDownloadTemplate}
+              style={{ background: 'rgba(42,157,143,0.12)', color: TEAL, border: `1px solid ${TEAL}30`, borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Download size={12} /> Baixar template Excel
+            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setStep('upload'); setResult(null); setError(null) }}
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                Cancelar
+              </button>
+              <button onClick={handleConfirm}
+                style={{ background: COPPER, color: '#0d1117', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+                Importar {result?.atividades?.length ?? 0} atividades
+              </button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  )
+}
+
+
+// ── RecalcularModal ────────────────────────────────────────────────────────────
+
+function RecalcularModal({ contrato, onClose, onSuccess }: { contrato: string; onClose: () => void; onSuccess: () => void }) {
+  type Step = 'loading' | 'preview' | 'committing' | 'done'
+  const [step, setStep]           = useState<Step>('loading')
+  const [preview, setPreview]     = useState<any>(null)
+  const [selected, setSelected]   = useState<Set<string>>(new Set())
+  const [updatedCount, setUpdatedCount] = useState(0)
+  const [error, setError]         = useState<string | null>(null)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await api.post('/hub/cronograma/recalcular-preview', { contrato })
+        const data = res.data
+        setPreview(data)
+        const allIds = new Set<string>((data.proposals || []).map((p: any) => String(p.id)))
+        setSelected(allIds)
+        setStep('preview')
+      } catch (e: any) {
+        setError(e?.response?.data?.detail || 'Erro ao calcular impacto.')
+        setStep('preview')
+      }
+    }
+    load()
+  }, [contrato])
+
+  function toggleAll() {
+    if (selected.size === (preview?.proposals?.length ?? 0)) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set((preview?.proposals || []).map((p: any) => String(p.id))))
+    }
+  }
+
+  function toggleOne(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function handleCommit() {
+    const aprovados = (preview?.proposals || []).filter((p: any) => selected.has(String(p.id)))
+    if (!aprovados.length) return
+    setStep('committing')
+    try {
+      const res = await api.post('/hub/cronograma/recalcular-commit', {
+        contrato,
+        aprovados: aprovados.map((p: any) => ({
+          id:          p.id,
+          new_inicio:  p.new_inicio,
+          new_termino: p.new_termino,
+          new_dias:    p.new_dias,
+        })),
+      })
+      setUpdatedCount(res.data?.atualizadas ?? 0)
+      setStep('done')
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Erro ao aplicar alterações.')
+      setStep('preview')
+    }
+  }
+
+  const OVERLAY: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 9999,
+    background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+  }
+  const MODAL: React.CSSProperties = {
+    background: 'rgba(13,19,18,0.98)', border: '1px solid rgba(201,139,42,0.25)',
+    borderRadius: 18, width: '100%', maxWidth: 900, maxHeight: '90vh',
+    overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
+  }
+
+  const proposals: any[] = preview?.proposals || []
+  const allSelected = selected.size === proposals.length && proposals.length > 0
+
+  return (
+    <div style={OVERLAY} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <motion.div style={MODAL} initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
+        {/* Header */}
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ padding: 8, borderRadius: 10, background: 'rgba(42,157,143,0.15)', border: '1px solid rgba(42,157,143,0.3)' }}>
+            <Calculator size={16} style={{ color: TEAL }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em' }}>Recalcular Datas em Cascata</div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 600, marginTop: 2 }}>Análise topológica de dependências · Revisão antes de aplicar</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+
+          {/* LOADING */}
+          {step === 'loading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 48, height: 48, border: `3px solid rgba(42,157,143,0.2)`, borderTop: `3px solid ${TEAL}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>Calculando impacto em cascata...</div>
+            </div>
+          )}
+
+          {/* PREVIEW */}
+          {step === 'preview' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {error && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#EF4444' }}>
+                  {error}
+                </div>
+              )}
+
+              {/* Summary cards */}
+              {preview && (
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 160, background: 'rgba(42,157,143,0.08)', border: '1px solid rgba(42,157,143,0.2)', borderRadius: 12, padding: '14px 16px' }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 6 }}>Atividades impactadas</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, color: TEAL }}>{proposals.length}</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 160, background: 'rgba(201,139,42,0.08)', border: '1px solid rgba(201,139,42,0.2)', borderRadius: 12, padding: '14px 16px' }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 6 }}>Atraso do projeto</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, color: COPPER }}>{preview.impacto_total_du ?? 0} <span style={{ fontSize: 12 }}>d.u.</span></div>
+                  </div>
+                  {preview.nova_conclusao && (
+                    <div style={{ flex: 1, minWidth: 200, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '14px 16px' }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 6 }}>Nova conclusão</div>
+                      <div style={{ fontSize: 16, fontWeight: 900, color: '#EF4444' }}>{_iso_to_br(preview.nova_conclusao)}</div>
+                      {preview.antiga_conclusao && (
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>era {_iso_to_br(preview.antiga_conclusao)}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* No proposals */}
+              {proposals.length === 0 && (
+                <div style={{ background: 'rgba(42,157,143,0.07)', border: '1px solid rgba(42,157,143,0.2)', borderRadius: 12, padding: '28px 20px', textAlign: 'center' }}>
+                  <CheckCircle size={32} style={{ color: TEAL, margin: '0 auto 12px' }} />
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>Nenhum recálculo necessário</div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 6 }}>Cronograma consistente com as dependências definidas</div>
+                  <button onClick={onClose}
+                    style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 22px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 16 }}>
+                    Fechar
+                  </button>
+                </div>
+              )}
+
+              {/* Proposals table */}
+              {proposals.length > 0 && (
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+                  {/* Table header */}
+                  <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      style={{ accentColor: COPPER, width: 14, height: 14, cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer' }}
+                      onClick={toggleAll}>
+                      {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>
+                      {selected.size} de {proposals.length} selecionados
+                    </span>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.01)' }}>
+                          <th style={{ width: 32, padding: '8px 10px' }} />
+                          {['Atividade', 'Razão', 'Datas Atuais → Novas', 'Δ dias'].map(h => (
+                            <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {proposals.map((p: any) => {
+                          const isChecked = selected.has(String(p.id))
+                          return (
+                            <tr key={p.id}
+                              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isChecked ? 'rgba(201,139,42,0.04)' : 'transparent', cursor: 'pointer' }}
+                              onClick={() => toggleOne(String(p.id))}>
+                              <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                <input type="checkbox" checked={isChecked} onChange={() => toggleOne(String(p.id))}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ accentColor: COPPER, width: 13, height: 13, cursor: 'pointer' }} />
+                              </td>
+                              <td style={{ padding: '8px 10px', color: isChecked ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.45)', fontWeight: 600, maxWidth: 180 }}>
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }} title={p.nome}>{p.nome}</div>
+                              </td>
+                              <td style={{ padding: '8px 10px', color: 'rgba(255,255,255,0.4)', fontSize: 10, maxWidth: 220 }}>
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 210 }} title={p.razao}>{p.razao}</div>
+                              </td>
+                              <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontSize: 10 }}>
+                                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>{_iso_to_br(p.old_inicio)} → {_iso_to_br(p.old_termino)}</span>
+                                  <div style={{ color: COPPER, fontWeight: 700, marginTop: 2 }}>{_iso_to_br(p.new_inicio)} → {_iso_to_br(p.new_termino)}</div>
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 10px' }}>
+                                <span style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 800 }}>
+                                  +{p.dias_deslocados}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* COMMITTING */}
+          {step === 'committing' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 48, height: 48, border: `3px solid rgba(201,139,42,0.2)`, borderTop: `3px solid ${COPPER}`, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>Aplicando alterações...</div>
+            </div>
+          )}
+
+          {/* DONE */}
+          {step === 'done' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '48px 0' }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(42,157,143,0.15)', border: '2px solid rgba(42,157,143,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle size={28} style={{ color: TEAL }} />
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{updatedCount} atividade{updatedCount !== 1 ? 's' : ''} atualizada{updatedCount !== 1 ? 's' : ''} com sucesso</div>
+              <button onClick={() => { onSuccess(); onClose() }}
+                style={{ background: TEAL, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>
+                Ver cronograma
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {step === 'preview' && proposals.length > 0 && (
+          <div style={{ padding: '14px 24px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button onClick={onClose}
+              style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              Cancelar
+            </button>
+            <button onClick={handleCommit} disabled={selected.size === 0}
+              style={{ background: selected.size > 0 ? COPPER : 'rgba(201,139,42,0.3)', color: selected.size > 0 ? '#0d1117' : 'rgba(255,255,255,0.3)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 800, cursor: selected.size > 0 ? 'pointer' : 'not-allowed' }}>
+              Aplicar {selected.size} selecionado{selected.size !== 1 ? 's' : ''}
+            </button>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  )
+}
+
+
 // ── CronogramaTab Principal ────────────────────────────────────────────────────
 
 function CronogramaTab({ contrato }: { contrato: string }) {
@@ -1184,6 +1753,8 @@ function CronogramaTab({ contrato }: { contrato: string }) {
   const [kpiDialogType, setKpiDialogType] = useState<string | null>(null)
   const [kpiDialogRows, setKpiDialogRows] = useState<any[] | null>(null)
   const [viewMode, setViewMode]           = useState<'lista' | 'gantt'>('lista')
+  const [importIAOpen, setImportIAOpen]   = useState(false)
+  const [recalcularOpen, setRecalcularOpen] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['hub-cronograma', contrato],
@@ -1241,12 +1812,6 @@ function CronogramaTab({ contrato }: { contrato: string }) {
     setIsModalOpen(true)
   }
 
-  async function handleRecalcular() {
-    // Endpoint de recalcular datas com base em dependências
-    await api.post(`/hub/cronograma/recalcular`, { contrato })
-    refetch()
-  }
-
   function renderRows(rows: any[], level: number): React.ReactNode {
     return rows.map(row => {
       const children = allRows.filter(a => a.parent_id === row.id)
@@ -1290,8 +1855,8 @@ function CronogramaTab({ contrato }: { contrato: string }) {
         allRows={allRows}
         kpisData={data?.kpis}
         onCreateMacro={openCreateMacro}
-        onImportIA={() => alert('Importar via IA — em breve')}
-        onRecalcular={handleRecalcular}
+        onImportIA={() => setImportIAOpen(true)}
+        onRecalcular={() => setRecalcularOpen(true)}
         onKpiClick={(t: string) => { setKpiDialogType(t); setKpiDialogRows(null) }}
       />
 
@@ -1434,6 +1999,24 @@ function CronogramaTab({ contrato }: { contrato: string }) {
           />
         )}
       </AnimatePresence>
+
+      {/* Importar via IA Modal */}
+      {importIAOpen && (
+        <ImportarIAModal
+          contrato={contrato}
+          onClose={() => setImportIAOpen(false)}
+          onSuccess={() => { refetch() }}
+        />
+      )}
+
+      {/* Recalcular Datas Modal */}
+      {recalcularOpen && (
+        <RecalcularModal
+          contrato={contrato}
+          onClose={() => setRecalcularOpen(false)}
+          onSuccess={() => { refetch() }}
+        />
+      )}
     </div>
   )
 }

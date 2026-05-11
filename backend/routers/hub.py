@@ -2955,3 +2955,633 @@ async def duplicate_contrato(
 
     DataLoader.invalidate_cache(client_id or "")
     return {"ok": True, "new_code": new_code}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE: IMPORTAR VIA IA — extração e importação de cronograma por arquivo
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _extract_schedule_with_ai(content: str) -> dict:
+    """Chama GPT-4o para extrair atividades do cronograma fornecido como texto/tabela."""
+    import json
+    from backend.integrations.ai import query as ai_query
+
+    system_prompt = (
+        "Você é um especialista em projetos de construção civil. "
+        "Extraia TODAS as atividades do cronograma fornecido e retorne um JSON estruturado. "
+        "Regras obrigatórias:\n"
+        "- nivel: somente 'macro', 'etapa' ou 'marco'\n"
+        "- dep_tipo: somente 'depende_termino', 'depende_inicio' ou 'sem_dependencia'\n"
+        "- critico: somente 'sim' ou 'nao'\n"
+        "- Datas no formato YYYY-MM-DD ou null se não disponível\n"
+        "- dep_ref: nome textual da atividade predecessora (string) ou null\n"
+        "- confianca: inteiro 0-100 indicando sua confiança nos dados desta linha\n"
+        "- campos_ausentes: lista de campos que não foi possível extrair\n"
+        "- avisos: lista de alertas sobre ambiguidades ou problemas de qualidade\n"
+        "- resumo_fonte: breve descrição da fonte/qualidade do documento analisado\n"
+        "- Se não houver datas, tente inferir a partir de durações e sequências\n"
+        "- Retorne TODAS as atividades encontradas, incluindo sub-atividades\n"
+        "- efetivo_alocado: número de pessoas alocadas (int) ou null\n"
+        "- total_qty e unidade: quantidade e unidade de serviço (ex: 150 m², 30 m³) ou null"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": content[:40000]},  # limita tokens
+    ]
+
+    raw = ai_query(
+        messages,
+        model="gpt-4o",
+        max_tokens=8192,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        result = {"atividades": [], "campos_ausentes": [], "avisos": ["Falha ao parsear resposta da IA"], "resumo_fonte": ""}
+
+    # Garante estrutura mínima
+    if "atividades" not in result:
+        result["atividades"] = []
+    if "campos_ausentes" not in result:
+        result["campos_ausentes"] = []
+    if "avisos" not in result:
+        result["avisos"] = []
+    if "resumo_fonte" not in result:
+        result["resumo_fonte"] = ""
+
+    return result
+
+
+@router.post("/cronograma/importar-ia")
+async def importar_cronograma_ia(
+    file: UploadFile = File(...),
+    contrato: str = Form(...),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Extrai atividades de um arquivo (PDF/Excel/CSV/Imagem) usando IA. Não persiste."""
+    import io
+    import base64
+
+    content_bytes = await file.read()
+    filename = (file.filename or "").lower()
+
+    raw_content: str = ""
+
+    if filename.endswith(".pdf"):
+        try:
+            import pdfplumber
+            text_parts: list = []
+            with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+                for page in pdf.pages:
+                    txt = page.extract_text() or ""
+                    text_parts.append(txt)
+            full_text = "\n".join(text_parts).strip()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro ao processar PDF: {e}")
+
+        if len(full_text) < 100:
+            # Provavelmente escaneado — usa visão no GPT-4o
+            from backend.integrations.ai import analyze_image
+            try:
+                raw_content = analyze_image(
+                    content_bytes,
+                    prompt=(
+                        "Este é um cronograma de obras. Extraia todas as atividades com suas datas, "
+                        "durações, responsáveis e dependências em formato de tabela markdown."
+                    ),
+                    content_type="image/jpeg",
+                    model="gpt-4o",
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Erro na análise visual do PDF: {e}")
+        else:
+            raw_content = full_text
+
+    elif filename.endswith((".xlsx", ".xls")):
+        try:
+            import pandas as pd
+            df = pd.read_excel(io.BytesIO(content_bytes), engine="openpyxl")
+            raw_content = df.to_markdown(index=False)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro ao processar Excel: {e}")
+
+    elif filename.endswith(".csv"):
+        try:
+            import pandas as pd
+            df = pd.read_csv(io.BytesIO(content_bytes))
+            raw_content = df.to_markdown(index=False)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro ao processar CSV: {e}")
+
+    elif filename.endswith((".jpg", ".jpeg", ".png")):
+        from backend.integrations.ai import analyze_image
+        ext_ct = "image/png" if filename.endswith(".png") else "image/jpeg"
+        try:
+            raw_content = analyze_image(
+                content_bytes,
+                prompt=(
+                    "Este é um cronograma de obras. Extraia todas as atividades com suas datas, "
+                    "durações, responsáveis e dependências em formato de tabela markdown."
+                ),
+                content_type=ext_ct,
+                model="gpt-4o",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro na análise da imagem: {e}")
+
+    else:
+        raise HTTPException(status_code=400, detail="Tipo de arquivo não suportado. Use PDF, Excel, CSV ou imagem.")
+
+    if not raw_content.strip():
+        raise HTTPException(status_code=422, detail="Não foi possível extrair conteúdo do arquivo.")
+
+    result = _extract_schedule_with_ai(raw_content)
+    return result
+
+
+@router.post("/cronograma/importar-ia/confirmar")
+async def confirmar_importacao_ia(
+    body: Dict[str, Any] = Body(...),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Persiste as atividades aprovadas após revisão do usuário."""
+    contrato = body.get("contrato", "")
+    atividades_raw: list = body.get("atividades", [])
+    parent_map: dict = body.get("parent_map", {})  # dep_ref_name → id
+
+    if not contrato:
+        raise HTTPException(status_code=400, detail="Contrato obrigatório")
+    if not atividades_raw:
+        return {"ok": True, "criados": 0, "erros": []}
+
+    # Carrega atividades existentes para resolver parent por nome
+    existing = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=1000) or []
+    name_to_id: Dict[str, str] = {str(a.get("atividade", "")).strip().lower(): str(a["id"]) for a in existing}
+
+    criados = 0
+    erros: list = []
+    created_ids: list = []
+
+    for idx, atv in enumerate(atividades_raw):
+        try:
+            # Resolve parent_id via parent_map (cliente resolve) ou por nome
+            parent_id = None
+            parent_ref = str(atv.get("parent_ref") or "").strip()
+            if parent_ref:
+                parent_id = parent_map.get(parent_ref) or name_to_id.get(parent_ref.lower())
+
+            # Resolve dependencia_id via dep_ref nome
+            dependencia_id = None
+            dep_ref = str(atv.get("dep_ref") or "").strip()
+            if dep_ref:
+                dependencia_id = parent_map.get(dep_ref) or name_to_id.get(dep_ref.lower())
+
+            def _clean_date(v: Any) -> Optional[str]:
+                if not v or str(v).strip().lower() in ("null", "none", "nan", ""):
+                    return None
+                s = str(v).strip()[:10]
+                if len(s) == 10 and s[4] == "-":
+                    return s
+                return None
+
+            def _clean_int(v: Any, default: int = 0) -> int:
+                try:
+                    return int(float(v or default))
+                except (ValueError, TypeError):
+                    return default
+
+            def _clean_float(v: Any) -> Optional[float]:
+                if v is None or str(v).strip() in ("", "null", "none", "nan"):
+                    return None
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return None
+
+            nivel_raw = str(atv.get("nivel") or "etapa").lower()
+            if nivel_raw not in ("macro", "etapa", "marco"):
+                nivel_raw = "etapa"
+
+            dep_tipo_raw = str(atv.get("dep_tipo") or "sem_dependencia").lower()
+            if dep_tipo_raw not in ("depende_termino", "depende_inicio", "sem_dependencia"):
+                dep_tipo_raw = "sem_dependencia"
+
+            critico_raw = str(atv.get("critico") or "nao").lower()
+            if critico_raw not in ("sim", "nao"):
+                critico_raw = "nao"
+
+            record: Dict[str, Any] = {
+                "contrato":          contrato,
+                "client_id":         client_id,
+                "atividade":         str(atv.get("nome") or atv.get("atividade") or "").strip()[:255],
+                "fase":              str(atv.get("fase") or "").strip()[:100] or None,
+                "nivel":             nivel_raw,
+                "inicio_previsto":   _clean_date(atv.get("inicio_previsto")),
+                "termino_previsto":  _clean_date(atv.get("termino_previsto")),
+                "dias_planejados":   _clean_int(atv.get("dias_planejados")),
+                "responsavel":       str(atv.get("responsavel") or "").strip()[:100] or None,
+                "critico":           critico_raw,
+                "parent_id":         parent_id,
+                "dependencia_id":    dependencia_id,
+                "dep_tipo":          dep_tipo_raw,
+                "total_qty":         _clean_float(atv.get("total_qty")),
+                "unidade":           str(atv.get("unidade") or "").strip()[:50] or None,
+                "efetivo_alocado":   _clean_int(atv.get("efetivo_alocado"), 0) or None,
+                "conclusao_pct":     0,
+            }
+
+            inserted = sb_insert("hub_atividades", record, client_id=client_id)
+            if inserted:
+                new_id = inserted.get("id")
+                created_ids.append(new_id)
+                # Atualiza name_to_id para resolver referências de atividades criadas na mesma importação
+                name_key = record["atividade"].strip().lower()
+                if name_key:
+                    name_to_id[name_key] = str(new_id)
+                criados += 1
+            else:
+                erros.append({"idx": idx, "nome": record.get("atividade"), "erro": "Insert retornou vazio"})
+
+        except Exception as e:
+            erros.append({"idx": idx, "nome": atv.get("nome") or atv.get("atividade"), "erro": str(e)[:200]})
+
+    # Recalcula % dos pais afetados
+    pais_visitados: set = set()
+    for aid in created_ids:
+        rows_crt = sb_select("hub_atividades", filters={"id": aid}, client_id=client_id, limit=1) or []
+        if rows_crt and rows_crt[0].get("parent_id"):
+            pid = str(rows_crt[0]["parent_id"])
+            if pid not in pais_visitados:
+                pais_visitados.add(pid)
+                _recalc_parent_dates(pid, contrato, client_id)
+
+    # Invalida cache do cronograma
+    try:
+        from backend.core.redis_cache import cache_invalidate
+        cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
+    except Exception:
+        pass
+
+    return {"ok": True, "criados": criados, "erros": erros}
+
+
+@router.get("/cronograma/template-excel")
+async def download_template_excel(
+    contrato: str = Query(""),
+    _user=Depends(get_current_user),
+) -> Any:
+    """Retorna um template Excel para importação de cronograma."""
+    import io
+    from fastapi.responses import StreamingResponse
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from openpyxl.worksheet.datavalidation import DataValidation
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl não instalado")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Cronograma"
+
+    COPPER_HEX = "C9872A"
+    GRAY_HEX   = "3A3A3A"
+
+    copper_fill = PatternFill(start_color=COPPER_HEX, end_color=COPPER_HEX, fill_type="solid")
+    gray_fill   = PatternFill(start_color="2A2A2A",   end_color="2A2A2A",   fill_type="solid")
+    header_font = Font(name="Calibri", bold=True, color="0D1117", size=10)
+    example_font = Font(name="Calibri", italic=True, color="888888", size=9)
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    thin_side = Side(style="thin", color="444444")
+    thin_border = Border(
+        left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
+    )
+
+    COLUMNS = [
+        ("atividade*",                        22),
+        ("fase",                              16),
+        ("nivel",                             12),
+        ("inicio_previsto",                   14),
+        ("termino_previsto",                  14),
+        ("dias_planejados",                   14),
+        ("responsavel",                       18),
+        ("critico",                           10),
+        ("dep_ref (nome da predecessora)",    26),
+        ("dep_tipo",                          22),
+        ("total_qty",                         12),
+        ("unidade",                           12),
+        ("efetivo_alocado",                   14),
+    ]
+
+    EXAMPLE_ROW = [
+        "Fundação — Bloco A",
+        "Civil",
+        "etapa",
+        "2025-06-01",
+        "2025-06-20",
+        "15",
+        "João Silva",
+        "nao",
+        "Terraplanagem",
+        "depende_termino",
+        "150",
+        "m³",
+        "4",
+    ]
+
+    INSTRUCTIONS = [
+        "Nome da atividade (obrigatório)",
+        "Disciplina (civil, elétrica…)",
+        "macro | etapa | marco",
+        "YYYY-MM-DD",
+        "YYYY-MM-DD",
+        "Dias úteis",
+        "Nome do responsável",
+        "sim | nao",
+        "Nome exato da predecessora",
+        "depende_termino | depende_inicio | sem_dependencia",
+        "Quantidade total",
+        "Unidade (m², m³, un…)",
+        "Nº de pessoas",
+    ]
+
+    # Row 1 — Headers
+    for col_idx, (col_name, col_width) in enumerate(COLUMNS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = header_font
+        cell.fill = copper_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = col_width
+
+    ws.row_dimensions[1].height = 22
+
+    # Row 2 — Instructions in gray
+    for col_idx, instr in enumerate(INSTRUCTIONS, start=1):
+        cell = ws.cell(row=2, column=col_idx, value=instr)
+        cell.font  = example_font
+        cell.fill  = gray_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    # Row 3 — Example
+    for col_idx, val in enumerate(EXAMPLE_ROW, start=1):
+        cell = ws.cell(row=3, column=col_idx, value=val)
+        cell.font = Font(name="Calibri", color="CCCCCC", size=9, italic=True)
+        cell.alignment = Alignment(vertical="center")
+        cell.border = thin_border
+
+    # Data validations (apply to rows 4–1000)
+    dv_nivel = DataValidation(
+        type="list",
+        formula1='"macro,etapa,marco"',
+        allow_blank=True,
+        showDropDown=False,
+    )
+    dv_nivel.sqref = "C4:C1000"
+    ws.add_data_validation(dv_nivel)
+
+    dv_critico = DataValidation(
+        type="list",
+        formula1='"sim,nao"',
+        allow_blank=True,
+        showDropDown=False,
+    )
+    dv_critico.sqref = "H4:H1000"
+    ws.add_data_validation(dv_critico)
+
+    dv_dep_tipo = DataValidation(
+        type="list",
+        formula1='"depende_termino,depende_inicio,sem_dependencia"',
+        allow_blank=True,
+        showDropDown=False,
+    )
+    dv_dep_tipo.sqref = "J4:J1000"
+    ws.add_data_validation(dv_dep_tipo)
+
+    # Freeze top row
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"template_cronograma{'_' + contrato if contrato else ''}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE: RECALCULAR DATAS — preview + commit (human in the loop)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/cronograma/recalcular-preview")
+async def recalcular_preview(
+    body: Dict[str, Any] = Body(...),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Calcula o impacto em cascata das dependências e retorna proposta de recálculo sem persistir."""
+    contrato = body.get("contrato", "")
+    if not contrato:
+        raise HTTPException(status_code=400, detail="Contrato obrigatório")
+
+    rows = sb_select("hub_atividades", filters={"contrato": contrato}, client_id=client_id, limit=1000) or []
+    if not rows:
+        return {"proposals": [], "impacto_total_du": 0, "nova_conclusao": None, "antiga_conclusao": None}
+
+    _wd = _get_working_days(contrato, client_id)
+
+    # Data de referência para atividades "atrasadas"
+    ref_rdo = _get_last_rdo_date(contrato, client_id) or date.today()
+
+    # Mapa id → row (usamos cópia para simular sem alterar DB)
+    import copy
+    id_map: Dict[str, Dict[str, Any]] = {str(r["id"]): copy.deepcopy(r) for r in rows}
+
+    # Topological sort — Kahn's algorithm
+    # Grafo: dependencia_id → [sucessores]
+    in_degree: Dict[str, int] = {rid: 0 for rid in id_map}
+    successors: Dict[str, list] = {rid: [] for rid in id_map}
+
+    for rid, row in id_map.items():
+        dep_id = str(row.get("dependencia_id") or "")
+        dep_tipo = str(row.get("dep_tipo") or "sem_dependencia")
+        if dep_id and dep_id in id_map and dep_tipo != "sem_dependencia":
+            in_degree[rid] = in_degree.get(rid, 0) + 1
+            successors[dep_id].append(rid)
+
+    queue: list = [rid for rid, deg in in_degree.items() if deg == 0]
+    topo_order: list = []
+    while queue:
+        node = queue.pop(0)
+        topo_order.append(node)
+        for suc in successors.get(node, []):
+            in_degree[suc] -= 1
+            if in_degree[suc] == 0:
+                queue.append(suc)
+
+    # Fallback: nós não alcançados (ciclos)
+    for rid in id_map:
+        if rid not in topo_order:
+            topo_order.append(rid)
+
+    proposals: list = []
+
+    def _get_dias_row(r: dict) -> int:
+        d = int(r.get("dias_planejados") or 0)
+        if d == 0 and r.get("inicio_previsto") and r.get("termino_previsto"):
+            try:
+                d_i = date.fromisoformat(str(r["inicio_previsto"])[:10])
+                d_t = date.fromisoformat(str(r["termino_previsto"])[:10])
+                d = max(1, _working_days_between(d_i, d_t + timedelta(days=1), _wd))
+            except (ValueError, TypeError):
+                d = 1
+        return d or 1
+
+    for rid in topo_order:
+        row = id_map[rid]
+        dep_id = str(row.get("dependencia_id") or "")
+        dep_tipo = str(row.get("dep_tipo") or "sem_dependencia")
+
+        if not dep_id or dep_tipo == "sem_dependencia" or dep_id not in id_map:
+            continue
+
+        pred = id_map[dep_id]
+
+        if not row.get("inicio_previsto") or not pred.get("termino_previsto"):
+            continue
+
+        try:
+            row_ini  = date.fromisoformat(str(row["inicio_previsto"])[:10])
+            pred_ter = date.fromisoformat(str(pred["termino_previsto"])[:10])
+            pred_ini = date.fromisoformat(str(pred.get("inicio_previsto") or pred["termino_previsto"])[:10])
+        except (ValueError, TypeError):
+            continue
+
+        conflict = False
+        if dep_tipo == "depende_termino" and row_ini < pred_ter:
+            conflict = True
+            ref_date_dep = pred_ter
+        elif dep_tipo == "depende_inicio" and row_ini < pred_ini:
+            conflict = True
+            ref_date_dep = pred_ini
+        else:
+            continue
+
+        if not conflict:
+            continue
+
+        # Calcula shift e novas datas
+        dias = _get_dias_row(row)
+        new_ini_str = ref_date_dep.isoformat()
+        new_ter = _add_working_days(new_ini_str, dias, _wd)
+
+        shift_du = _working_days_between(row_ini, ref_date_dep, _wd)
+
+        proposals.append({
+            "id":            rid,
+            "nome":          str(row.get("atividade", "")).strip(),
+            "razao":         (
+                f"Predecessora '{str(pred.get('atividade','?'))[:50]}' termina em {_iso_to_br(str(pred['termino_previsto'])[:10])}, "
+                f"mas esta atividade inicia em {_iso_to_br(str(row['inicio_previsto'])[:10])} ({dep_tipo.replace('_',' ')})"
+            ),
+            "predecessora":  str(pred.get("atividade", "")).strip(),
+            "tipo_dep":      dep_tipo,
+            "dias_deslocados": shift_du,
+            "old_inicio":    str(row["inicio_previsto"])[:10],
+            "old_termino":   str(row.get("termino_previsto") or "")[:10],
+            "new_inicio":    new_ini_str,
+            "new_termino":   new_ter,
+            "new_dias":      dias,
+        })
+
+        # Atualiza id_map para cascata
+        id_map[rid]["inicio_previsto"]  = new_ini_str
+        id_map[rid]["termino_previsto"] = new_ter
+
+    # Computa impacto total — diferença na data de conclusão do projeto
+    old_conclusao = None
+    new_conclusao = None
+    for r_orig in rows:
+        ter_s = str(r_orig.get("termino_previsto") or "")[:10]
+        if len(ter_s) == 10:
+            try:
+                d = date.fromisoformat(ter_s)
+                old_conclusao = d if old_conclusao is None else max(old_conclusao, d)
+            except ValueError:
+                pass
+
+    for r_new in id_map.values():
+        ter_s = str(r_new.get("termino_previsto") or "")[:10]
+        if len(ter_s) == 10:
+            try:
+                d = date.fromisoformat(ter_s)
+                new_conclusao = d if new_conclusao is None else max(new_conclusao, d)
+            except ValueError:
+                pass
+
+    impacto_du = 0
+    if old_conclusao and new_conclusao and new_conclusao > old_conclusao:
+        impacto_du = _working_days_between(old_conclusao, new_conclusao, _wd)
+
+    return {
+        "proposals":        proposals,
+        "impacto_total_du": impacto_du,
+        "nova_conclusao":   new_conclusao.isoformat() if new_conclusao else None,
+        "antiga_conclusao": old_conclusao.isoformat() if old_conclusao else None,
+    }
+
+
+@router.post("/cronograma/recalcular-commit")
+async def recalcular_commit(
+    body: Dict[str, Any] = Body(...),
+    user=Depends(get_current_user),
+    client_id: Optional[str] = Depends(get_current_tenant),
+) -> Dict[str, Any]:
+    """Persiste o subconjunto aprovado das propostas de recálculo."""
+    contrato = body.get("contrato", "")
+    aprovados: list = body.get("aprovados", [])
+
+    if not contrato:
+        raise HTTPException(status_code=400, detail="Contrato obrigatório")
+    if not aprovados:
+        return {"ok": True, "atualizadas": 0}
+
+    atualizadas = 0
+    for item in aprovados:
+        aid = str(item.get("id") or "")
+        if not aid:
+            continue
+        data_update: Dict[str, Any] = {}
+        if item.get("new_inicio"):
+            data_update["inicio_previsto"] = str(item["new_inicio"])[:10]
+        if item.get("new_termino"):
+            data_update["termino_previsto"] = str(item["new_termino"])[:10]
+        if item.get("new_dias"):
+            data_update["dias_planejados"] = int(item["new_dias"])
+        if not data_update:
+            continue
+        sb_update("hub_atividades", filters={"id": aid}, data=data_update, client_id=client_id)
+        atualizadas += 1
+
+    if atualizadas > 0:
+        try:
+            from backend.core.redis_cache import cache_invalidate
+            cache_invalidate(client_id or "global", _cronograma_cache_key(contrato))
+        except Exception:
+            pass
+
+    return {"ok": True, "atualizadas": atualizadas}
