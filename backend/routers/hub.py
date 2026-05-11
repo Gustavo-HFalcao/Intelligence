@@ -1163,15 +1163,26 @@ REGRAS:
         raw_list = parsed_obj.get("insights") or []
         if not isinstance(raw_list, list):
             raise ValueError("insights not a list")
-        valid = [
-            {
+        valid = []
+        for i in raw_list:
+            if not isinstance(i, dict):
+                continue
+            tipo = i.get("tipo", "risco")
+            # Prioridade determinada por tipo, não pelo modelo — evita "CRÍTICO" em oportunidades
+            if tipo == "oportunidade":
+                priority = "Low"
+            elif tipo in ("anomalia", "risco") and i.get("priority") == "High":
+                priority = "High"
+            elif tipo == "planejamento":
+                priority = "Medium"
+            else:
+                priority = i.get("priority", "Medium")
+            valid.append({
                 "title":    i.get("title", "Insight"),
                 "body":     i.get("body", ""),
-                "priority": i.get("priority", "Medium"),
-                "tipo":     i.get("tipo", "risco"),
-            }
-            for i in raw_list if isinstance(i, dict)
-        ]
+                "priority": priority,
+                "tipo":     tipo,
+            })
         if valid:
             return valid
 
@@ -2256,14 +2267,15 @@ async def upload_timeline_file(
 ) -> Dict[str, Any]:
     """Faz upload de anexo da timeline para Supabase Storage e retorna URL pública."""
     import uuid as _uuid
-    from backend.integrations.supabase import sb_storage_upload
+    from backend.integrations.supabase import sb_storage_upload, sb_storage_ensure_bucket
+    sb_storage_ensure_bucket("hub-docs", public=True)
     ext     = os.path.splitext(file.filename or "")[1] or ".bin"
     fname   = f"{_uuid.uuid4().hex}{ext}"
     content = await file.read()
     content_type = file.content_type or "application/octet-stream"
     url = sb_storage_upload("hub-docs", f"timeline/{fname}", content, content_type) or ""
     if not url:
-        raise HTTPException(status_code=500, detail="Falha ao salvar arquivo")
+        raise HTTPException(status_code=500, detail="Falha ao salvar arquivo no storage")
     return {"ok": True, "url": url, "nome": file.filename or fname}
 
 
