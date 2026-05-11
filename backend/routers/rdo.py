@@ -1053,10 +1053,14 @@ async def list_rdo_contratos(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Lista todos os contratos do tenant — busca direta, sem cache, para dropdowns."""
+    """Lista contratos do tenant filtrados pelo contrato vinculado ao usuário (se houver)."""
     filters: Dict[str, Any] = {}
     if client_id:
         filters["client_id"] = client_id
+    # Usuário vinculado a contrato específico (mestre de obra, etc.) — restringe à sua obra
+    user_project = str(_user.get("project") or "").strip()
+    if user_project:
+        filters["contrato"] = user_project
     rows = sb_select("contratos", filters=filters, limit=500) or []
     contratos = sorted({
         str(r.get("contrato") or "").strip()

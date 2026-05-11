@@ -40,14 +40,19 @@ export default function RDOHistorico() {
   const navigate    = useNavigate()
   const qc          = useQueryClient()
   const { user }    = useAuth()
-  const userContrato = (user as any)?.project || (user as any)?.contrato || (user as any)?.contract || ''
+  const userContrato = user?.project || ''
 
   const [statusFilter, setStatus] = useState('Todos')
   const [dateFrom, setDateFrom]   = useState('')
   const [dateTo, setDateTo]       = useState('')
   const [page, setPage]           = useState(1)
   const [emailPanel, setEmailPanel] = useState(false)
-  const [emailContrato, setEmailContrato] = useState(userContrato)
+  const [emailContrato, setEmailContrato] = useState('')
+
+  // Sincroniza emailContrato com userContrato após user carregar (async)
+  useEffect(() => {
+    if (userContrato) setEmailContrato(userContrato)
+  }, [userContrato])
   const [newEmail, setNewEmail]   = useState('')
   const [subError, setSubError]   = useState('')
   const [pdfLoading, setPdfLoading] = useState<Record<string, boolean>>({})

@@ -143,6 +143,7 @@ async def me(user: dict = Depends(get_current_user)):
         "allowed_modules": user.get("allowed_modules", []),
         "avatar_icon": user.get("avatar_icon", ""),
         "whatsapp": user.get("whatsapp", ""),
+        "project": user.get("project", ""),
     }
 
 

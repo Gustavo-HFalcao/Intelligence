@@ -19,6 +19,7 @@ export interface User {
   landing_page?: string
   avatar_icon?: string
   whatsapp?: string
+  project?: string  // contrato vinculado ao usuário (mestre de obra, etc.)
 }
 
 interface AuthContextValue {

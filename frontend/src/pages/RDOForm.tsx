@@ -121,9 +121,10 @@ export default function RDOForm() {
   const urlContrato    = searchParams.get('contrato') || ''
   const urlDraftId     = searchParams.get('draft_id') || ''
 
-  // Pre-fill contract from user's linked contract or URL param
-  const userContrato = (user as any)?.contrato || ''
-  const initialContrato = urlContrato || userContrato || ''
+  // Contrato vinculado ao usuário (campo project na tabela login — RBAC por contrato)
+  const userContrato = user?.project || ''
+  // Se vinculado, o contrato vem travado; URL param só tem efeito para admins
+  const initialContrato = userContrato || urlContrato || ''
 
   const [draftId, setDraftId]           = useState(urlDraftId)
   const [isSaving, setIsSaving]         = useState(false)

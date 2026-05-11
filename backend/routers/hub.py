@@ -2656,7 +2656,9 @@ async def list_contratos(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
-    """Lista pulse cards de contratos para a Visão Geral do Hub."""
+    """Lista pulse cards de contratos para a Visão Geral do Hub.
+    Usuário vinculado a contrato específico (campo project na tabela login)
+    só enxerga o seu contrato."""
     loader = DataLoader(client_id=client_id or "")
     data = loader.load_all()
 
@@ -2667,6 +2669,11 @@ async def list_contratos(
 
     if contratos_df.empty:
         return {"contratos": []}
+
+    # Restringe ao contrato do usuário quando vinculado (RBAC por contrato)
+    user_project = str(_user.get("project") or "").strip()
+    if user_project and "contrato" in contratos_df.columns:
+        contratos_df = contratos_df[contratos_df["contrato"].astype(str) == user_project]
 
     if search:
         mask = (
