@@ -256,17 +256,25 @@ async def create_rule(
     _user=Depends(get_current_user),
     client_id: Optional[str] = Depends(get_current_tenant),
 ) -> Dict[str, Any]:
+    contrato = str(body.get("contrato") or "").strip()
+    raw_recipients = str(body.get("recipients") or "")
+    emails = [e.strip() for e in raw_recipients.split(",") if e.strip() and "@" in e.strip()]
+
     payload = {
-        "name":        body.get("name",""),
-        "category":    body.get("category","threshold"),
-        "metric":      body.get("metric",""),
-        "operator":    body.get("operator","gte"),
-        "threshold":   body.get("threshold"),
-        "contrato":    body.get("contrato",""),
-        "channel":     body.get("channel","email"),
-        "recipients":  body.get("recipients",""),
-        "is_active":   bool(body.get("is_active", True)),
-        "client_id":   client_id,
+        "name":           str(body.get("name") or "").strip(),
+        "category":       body.get("category", "reativo"),
+        "trigger_type":   "threshold",
+        "trigger_config": {
+            "metric":    body.get("metric", ""),
+            "operator":  body.get("operator", "lte"),
+            "threshold": body.get("threshold", 0),
+            "channel":   body.get("channel", "email"),
+        },
+        "contracts":  [contrato] if contrato else [],
+        "recipients": emails,
+        "is_active":  bool(body.get("is_active", True)),
+        "client_id":  client_id,
+        "created_by": str(_user.get("email") or _user.get("login") or ""),
     }
     row = sb_insert("alert_rules", payload)
     return {"ok": True, "row": row}
@@ -278,8 +286,26 @@ async def update_rule(
     body: Dict[str, Any] = Body(...),
     _user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    allowed = {"name","category","metric","operator","threshold","contrato","channel","recipients","is_active"}
-    data = {k: v for k,v in body.items() if k in allowed}
+    data: Dict[str, Any] = {}
+    if "name" in body:
+        data["name"] = body["name"]
+    if "is_active" in body:
+        data["is_active"] = bool(body["is_active"])
+    if "category" in body:
+        data["category"] = body["category"]
+    # Partial trigger_config patch: read current row, merge, write back
+    trigger_keys = {"metric", "operator", "threshold", "channel"}
+    trigger_patch = {k: body[k] for k in trigger_keys if k in body}
+    if trigger_patch:
+        existing = sb_select("alert_rules", filters={"id": rule_id}, limit=1) or []
+        current_cfg = (existing[0].get("trigger_config") or {}) if existing else {}
+        data["trigger_config"] = {**current_cfg, **trigger_patch}
+    if "contrato" in body:
+        c = str(body["contrato"] or "").strip()
+        data["contracts"] = [c] if c else []
+    if "recipients" in body:
+        raw = str(body["recipients"] or "")
+        data["recipients"] = [e.strip() for e in raw.split(",") if e.strip() and "@" in e.strip()]
     row = sb_update("alert_rules", filters={"id": rule_id}, data=data)
     return {"ok": True, "row": row}
 

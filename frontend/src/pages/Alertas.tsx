@@ -146,7 +146,9 @@ function RegrasTab() {
                 <div className="flex-1">
                   <div className="text-sm font-bold text-white">{r.name}</div>
                   <div className="text-[10px] text-text-muted mt-1">
-                    {r.metric} {r.operator} {r.threshold} · {r.contrato || 'Global'} · {r.channel}
+                    {r.trigger_config?.metric} {r.trigger_config?.operator} {r.trigger_config?.threshold}
+                    {' · '}{(r.contracts?.length ? r.contracts[0] : null) || 'Global'}
+                    {' · '}{r.trigger_config?.channel || 'email'}
                   </div>
                 </div>
                 <div style={{ fontSize: 10, color: r.is_active ? TEAL : '#555', background: r.is_active ? `${TEAL}15` : 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '2px 8px', fontWeight: 700 }}>
