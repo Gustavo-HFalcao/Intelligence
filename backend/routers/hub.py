@@ -336,8 +336,10 @@ def _recalc_parent_dates(parent_id: str, contrato: str, client_id: str, _visited
         _recalc_parent_dates(parent_rows[0]["parent_id"], contrato, client_id, _visited)
 
 
-def _compute_forecast(r: Dict[str, Any], today: date = date.today(), working_days: set = None) -> Dict[str, Any]:
+def _compute_forecast(r: Dict[str, Any], today: date = None, working_days: set = None) -> Dict[str, Any]:
     """Cálculo de EAC e Tendência."""
+    if today is None:
+        today = date.today()
     if working_days is None:
         working_days = {0, 1, 2, 3, 4, 5}  # seg–sab
     total_qty = float(r.get("total_qty", 0) or 0)
@@ -960,14 +962,10 @@ def _build_insights_llm(
                     and str(a["termino_previsto"])[:10] <= _ref_rdo.isoformat()
                     and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
                     and float(a.get("conclusao_pct") or 0) < 100]
-    # proximos_7d: só atividades que já iniciaram ou iniciam até a data do RDO
     proximos_7d  = [a for a in atividades if a.get("termino_previsto")
                     and str(a.get("inicio_previsto",""))[:10] <= _ref_rdo.isoformat()
                     and 0 <= (date.fromisoformat(str(a["termino_previsto"])[:10]) - _ref_rdo).days <= 7
                     and float(a.get("conclusao_pct") or 0) < 100]
-    antecipadas  = [a for a in atividades if a.get("inicio_previsto")
-                    and str(a["inicio_previsto"])[:10] > _ref_rdo.isoformat()
-                    and float(a.get("conclusao_pct") or 0) > 0]
     concluidas   = [a for a in atividades if float(a.get("conclusao_pct") or 0) >= 100]
 
     # Atividades por risk score (mais críticas primeiro) — EXCLUI macros/grupos
@@ -1120,7 +1118,7 @@ TENDÊNCIA SPI: {spi_trend_txt}
 PRAZO: {dias_restantes_txt or 'não informado'}
 EQUIPE: {efetivo_gap_txt or 'não informado'}
 VALOR: {valor_em_risco_txt or 'não informado'}
-ATIVIDADES: {len(concluidas)} concluídas | {len(em_andamento)} em andamento | {len(atrasadas)} prazo vencido | {len(atividades)} total
+ATIVIDADES: {len(concluidas)} concluídas | {len(em_andamento)} em andamento | {len(atrasadas)} prazo vencido | {len(proximos_7d)} vencem em 7d | {len(atividades)} total
 
 ATIVIDADES EM ANDAMENTO (dia X/Y | esp% | real% | delta [ritmo] | vel/dia [trend] | EAC | cascade):
 {chr(10).join(ativ_iniciadas_ctx) if ativ_iniciadas_ctx else '  Nenhuma em andamento'}
@@ -1450,24 +1448,25 @@ async def agente_chat(
     _hmap_chat     = _build_hist_map(historico)
     kpis           = _calc_progress_spi(atividades, today, _get_working_days(contrato, client_id), ref_date=_last_rdo_chat, hist_map=_hmap_chat)
 
-    # Velocity para todas as atividades com qty
+    # Velocity para todas as atividades com qty — ancorado no último RDO submetido
     velocities = {}
     for a in atividades:
         if float(a.get("total_qty") or 0) > 0:
-            velocities[str(a["id"])] = _calc_velocity(a, historico)
+            velocities[str(a["id"])] = _calc_velocity(a, historico, ref_date=_last_rdo_chat)
 
     # Anomalias
     anomalias = _detect_anomalies(atividades, rdos, historico)
 
-    # Prazo restante e SPI trend para o chat
+    # Prazo restante ancorado no último RDO (não hoje) para consistência com insights
     _dias_rest_chat = ""
     try:
         dt_fim = contrato_info_c.get("data_termino") or contrato_info_c.get("data_fim")
         if dt_fim:
             d_fim_c = date.fromisoformat(str(dt_fim)[:10])
-            dias_c = (d_fim_c - today).days
-            uteis_c = _working_days_between(today, d_fim_c)
-            _dias_rest_chat = f"{dias_c}d corridos ({uteis_c} úteis) até {d_fim_c.isoformat()}"
+            _anchor = _last_rdo_chat or today
+            dias_c = (d_fim_c - _anchor).days
+            uteis_c = _working_days_between(_anchor + timedelta(days=1), d_fim_c + timedelta(days=1))
+            _dias_rest_chat = f"{dias_c}d corridos ({uteis_c} úteis) após {_anchor.isoformat()} até {d_fim_c.isoformat()}"
     except Exception:
         pass
     _spi_trend_chat = _calc_spi_trend(atividades, historico, sorted(rdos, key=lambda r: str(r.get("data") or ""), reverse=True))
@@ -1842,7 +1841,7 @@ async def get_cronograma(
         # Risk score e velocity por atividade
         vel = {}
         if float(r.get("total_qty") or 0) > 0:
-            vel = _calc_velocity(r, hist_rows, working_days=_wd)
+            vel = _calc_velocity(r, hist_rows, working_days=_wd, ref_date=ref_d)
         f["_risk_score"]    = _calc_risk_score(r, vel, ref_d, working_days=_wd)
         f["_velocity"]      = vel.get("velocity_real", 0)
         f["_eac_date"]      = vel.get("eac_date")
